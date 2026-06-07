@@ -1,0 +1,261 @@
+﻿THE BBQ ATLAS
+Business Plan & Operations Bible
+Version 2.0 â€” 4 May 2026
+Prepared for James Doyle (Founder)
+The Definitive Global Platform for BBQ Discovery, Community & Commerce
+Table of Contents
+Table of Contents3
+Real BBQ. Real Time. Shared Worldwide4
+1. Executive Summary4
+2. Business Overview & Vision5
+3. Market Opportunity5
+4. Website Architecture, Features & Mockups6
+Core Features (MVP & Beyond)6
+Website Mockups (Updated with Official Logo)7
+5. Minimum Viable Product (MVP)8
+6. Monetization Strategy9
+8. Development Phases & Timeline10
+9. Risks & Mitigations11
+10. Ambitious Long-Term Growth & Expansion Vision12
+Year 1â€“2: Digital Domination12
+Year 2â€“3: Brand & Revenue Empire12
+Year 3â€“5+: Global Expansion12
+11. Financial Projections13
+Year 1 Outlook13
+Years 2 and 3 Outlook14
+12. Branding & Logo Guidelines14
+Primary Logo â€” Crest Emblem14
+Secondary Logo â€” Globe / Modern15
+Usage Guidelines (Summary)16
+13. Roadmap to Launch16
+Real BBQ. Real Time. Shared Worldwide
+1. Executive Summary
+The BBQ Atlas is the worldâ€™s first interactive global atlas and premium authority for barbecue restaurants, styles, and experiences. Built as a fully custom-coded, 100% owned digital platform (TheBBQAtlas.com), it combines a stunning interactive world map, user-generated reviews and submissions, high-converting affiliate commerce, and premium brand experiences.
+The platform addresses a clear market gap: no existing service delivers a curated, visual, crowd-sourced global directory of BBQ spots with style-coded mapping, travel integration, and community features. Existing players are either recipe-focused (e.g. AmazingRibs, SmokedBBQSource) or generic review platforms (e.g. Yelp, TripAdvisor).
+Core Business Model: Free discovery platform supported by premium restaurant listings, affiliate commissions on gear, ingredients and travel, display advertising, sponsored content, and a future ecosystem of memberships and branded merchandise.
+Launch Goal:MVP live within 3â€“4 weeks and first revenue within 30â€“45 days. Year-1 conservative revenue target: Â£35,000â€“Â£60,000 (approximately $45,000â€“$77,000 USD at May 2026 exchange rates). The ambitious three-year vision is a multi-million-pound (multi-million USD) global BBQ lifestyle brand encompassing apps, a merch empire, pitmaster education, experiential holidays, and potential retail or physical presence.
+The branding â€” anchored by the powerful crest logo featuring crossed BBQ tools over a world map with flames â€” positions The BBQ Atlas as the premium, authoritative â€œMichelin Guide for BBQâ€ worldwide.
+30-Day Revenue Commitment: On 3 May 2026 at 11:34 UK time, as British Airways flight BA191 pushed back from London Heathrow en route to Austin, the founder established a precise 30-day timer for revenue generation. By 11:34 UK time on 2 June 2026, TheBBQAtlas.com is targeted to be fully live and producing its first revenue. While in Austin for professional work commitments, focused effort is being dedicated to advancing the platform, ensuring this aggressive yet achievable milestone is met and early commercial momentum is secured.
+2. Business Overview & Vision
+Vision: To become the definitive global authority and lifestyle brand for barbecue â€” the place every enthusiast, traveler, pitmaster, and restaurant owner turns to for discovery, inspiration, community, and commerce.
+Mission: Map, celebrate, and connect the worldâ€™s best BBQ experiences through beautiful technology, authentic community, and premium brand extensions.
+Brand Positioning: Premium, authentic, global, visual, and community-first. The logo system (crest for authority, globe for global reach, book for knowledge) supports a full ecosystem from digital platform to physical products and experiences.
+3. Market Opportunity
+The global outdoor cooking and BBQ equipment market is valued at approximately $5.3â€“6 billion (2024â€“2025) and is projected to reach $7â€“9 billion by 2030 (CAGR 5â€“7%). The US BBQ restaurant sector alone exceeds $4.9 billion annually, with broader global BBQ restaurant and street-food markets estimated in the $23â€“46 billion range and growing rapidly as international styles (Korean, Argentine, Brazilian, etc.) gain mainstream traction.
+Digital food discovery and travel planning markets provide strong tailwinds: online food delivery/discovery exceeds $150 billion globally, while travel apps and guides form part of a $1 trillion industry growing 12â€“15% yearly. BBQ content on Instagram, TikTok, and X generates hundreds of millions of impressions monthly.
+Competitive Gap: No player owns the "interactive global atlas" position. Recipe sites dominate content; review sites are generic. The BBQ Atlas combines curation, visual mapping, user contributions, and commerce in one beautiful, ownable experience.
+Target Personas: 
+Home Pitmaster (core 55â€“60%): 35â€“55, UK/US/EU/AU, higher income, owns multiple grills/smokers, spends significantly on gear and ingredients, active on social and forums.
+Travel Foodie (25%): 25â€“45, plans trips around food experiences, searches for "best BBQ [city/country]".
+Young Urban Enthusiast (15â€“20%): 18â€“35, Instagram/TikTok-driven, loves fusion styles and viral spots, values community and discovery.
+Market
+Estimated Size
+Total Addressable Enthusiast Base Core English-speaking markets (US, UK, Australia, Canada, etc.) + key international BBQ markets
+40 â€“ 70 million people
+Serviceable Market (first 3â€“5 years) Active users of a premium digital atlas + commerce platform
+5 â€“ 12 million active users
+4. Website Architecture, Features & Mockups
+The platform is built as a modern, fast, AI and SEO-optimized custom web application (Next.js + Supabase + Leaflet maps) with full user accounts, submissions, reviews, and commerce hooks from day one.
+Core Features (MVP & Beyond)
+Interactive world map with style-coded pins (Texas red, Carolina yellow, Korean blue, etc.), clustering, filters, and deep linking to restaurant pages.
+Searchable directory with advanced filters (style, rating, price, country, city, specialties).
+Rich restaurant pages: hero imagery, ratings, signature dishes with affiliate buy buttons, user reviews + photo uploads, embedded mini-maps, "Nearby Spots", "Add to My Atlas" saving.
+User accounts, profiles, submissions (moderated), and personal collections.
+Guides/blog section with embedded map snippets and affiliate opportunities.
+Built-in AdSense/Ezoic slots and affiliate link tracking.
+Professional custom @thebbqatlas.com email addresses.
+Future phases: Progressive Web App (feels like native app), full native iOS/Android apps, memberships, full e-commerce merch store, pitmaster courses, and experiential offerings.
+Website Mockups (Updated with Official Logo)
+Below are high-fidelity mockups of the live platform using the official crest logo in navigation and branding. These represent the exact visual direction and user experience.
+HomepageMockup (with integrated crest logo innav)
+Additional mockups for the interactive Map page, Restaurant Detail page, and Submit form have been generated with the same branding and logo integration. They demonstrate clean UI, mobile responsiveness, and seamless logo placement throughout the user journey.
+5. Minimum Viable Product (MVP)
+The MVP is not a stripped-back prototype. It is a deliberately lean but fully functional foundation designed to launch quickly, deliver real value to users, activate early revenue, and prove the core concept with live data and feedback. This first version exists to monetise the idea fast, generate meaningful learnings, and create the momentum and resources needed to build everything that follows.
+We will build the MVP using a modern, fully custom-owned tech stack (Next.js 14, Supabase, Leaflet interactive maps, Tailwind + shadcn/ui, and Vercel). Development will be focused and time-boxed to 3â€“4 weeks of concentrated work. The priority is speed to market without compromising quality or brand experience. We will carefully seed the platform with 50â€“100 high-quality restaurants across key styles and regions, and all user submissions will pass through a simple, efficient moderation process before going live.
+Core features included in the MVP:
+User authentication (email + social login)
+Interactive world map with style-coded pins, clustering, and filters
+Rich restaurant detail pages featuring reviews, photos, signature dishes, and affiliate links
+Public â€œSubmit a Spotâ€ form with moderation workflow
+Basic guides and editorial content section
+Live advertising (AdSense/Ezoic) and affiliate tracking infrastructure
+Professional @thebbqatlas.com email addresses
+Fully responsive, mobile-first design
+What success looks like
+Success in the MVP phase will be measured by both hard metrics and qualitative signals. Within the first 30â€“45 days we target:
+1,000+ visitors in the first month
+50+ user-submitted spots
+First affiliate commissions and advertising revenue
+Strong positive feedback on the map experience, branding, and overall feel of the platform
+More importantly, success means we have validated demand, understood what users love (and what they donâ€™t), and generated real revenue and insights that allow us to invest confidently in the next phase of development.
+The MVP is the critical foundation on which the entire future business will be built. Once live and monetising, it becomes the base layer for the Progressive Web App, native iOS and Android apps, membership programme, full merch store, pitmaster education, experiential holidays, and all future brand extensions. By launching fast, learning quickly, and generating revenue early, we de-risk the bigger vision while building real traction and proof points from day one.
+6. Monetization Strategy
+The monetization model is designed to generate revenue quickly while building a sustainable, diversified foundation for long-term growth. Multiple income streams will go live from Day 1, structured so The BBQ Atlas can produce its first revenue within the critical 30-day window following launch. This early income will validate the concept, create cash flow, and provide the resources and data needed to confidently invest in the next phase of development.
+We will launch with four core revenue channels that can be activated immediately with the MVP feature set. These streams are intentionally balanced between passive and active monetization, with a focus on high-intent food and travel audiences that perform well for both advertising and commerce.
+Day 1 Revenue Streams
+Display Advertising (AdSense / Ezoic) â€” Expected to represent 25â€“30% of early revenue. Advertising units will be placed in the sidebar, between reviews, and in-content across restaurant pages and guides. Food and travel content traditionally delivers strong CPMs (Â£1â€“5+ / $1.30â€“$6.40+ per 1,000 views). Because the platform launches with quality editorial and restaurant content, we expect to be able to turn advertising on from day one with minimal additional setup.
+Affiliate Commissions â€” Expected to represent 35â€“40% of early revenue. Every restaurant page will include a â€œSignature Dishâ€ and â€œGear We Useâ€ section with carefully selected, high-converting affiliate links (Amazon, ThermoWorks, Weber, Yeti, travel booking partners, etc.). This model is already proven on similar food and outdoor lifestyle sites. Because the MVP includes rich restaurant detail pages from launch, affiliate links can be live and earning from the first visitors.
+Premium Restaurant Listings â€” Expected to represent 20% of early revenue. We will offer tiered paid placements (Basic Â£49/mo / $63/mo, Featured Â£99/mo / $127/mo, Spotlight Â£199/mo / $255/mo) that include highlighted map pins, â€œFeaturedâ€ badges, homepage rotation, and social media amplification. These listings deliver clear, measurable value to restaurants through increased visibility and direct bookings/enquiries. We will begin direct outreach to target restaurants immediately after launch, with the goal of converting the first paid listings within the first 30â€“45 days.
+Sponsored Content & Takeovers â€” Expected to represent 10%+ of early revenue. Branded guides, â€œBBQ Festival Takeovers,â€ and sponsored editorial pieces will be offered at Â£300â€“Â£1,000+ / $385â€“$1,280+ per campaign. These opportunities will become available once we have established initial traffic and content credibility. Early sponsored content will be secured through direct relationships with BBQ brands, rub/sauce companies, and travel partners.
+Path to Scale
+Once the platform is live and generating revenue, we will layer in higher-margin and more scalable revenue streams. Phase 2+ monetization will include our own merch store (initially dropshipping grillsand equipment before moving to branded products), a paid membership programme (Â£4.99/mo / $6.40/mo for ad-free access plus exclusives), digital products (e-guides and online courses), and experiential offerings such as curated BBQ holidays and live events.
+This diversified approach â€” combining quick-to-activate revenue from Day 1 with higher-value brand extensions later â€” ensures we can hit the 30-day revenue target while building a robust, multi-million-pound (multi-million USD) business over the medium term.
+8. Development Phases & Timeline
+The development roadmap is structured as a clear, phased journey that balances the urgent need to generate revenue quickly with the much larger ambition of building a global BBQ lifestyle brand. The early phases are deliberately focused on delivering a lean but high-quality MVP that can launch fast, activate multiple revenue streams from day one, and produce meaningful income within the critical 30-day window. 
+This approach allows us to validate the core concept with real users, gather feedback, and generate early cash flow â€” all of which de-risks the project and provides the resources and insights needed to invest confidently in growth. Later phases will build directly on this foundation, expanding the platform, scaling monetization, and developing The BBQ Atlas into a multi-million-pound global authority with native apps, memberships, merch, education programmes, and experiential offerings.
+Phase
+Timeline
+Key Milestones
+1. Planning & Setup
+Week 1 (Current)
+Finalize plan, register company, set up Xero + custom emails, branding kit
+2. MVP Build
+Weeks 2â€“4
+Full platform live, 50â€“100 seeded spots, auth + map + affiliates working
+3. Soft Launch & Revenue
+Weeks 5â€“8
+Domain live, social launch, first AdSense + affiliate payouts, user feedback loop
+4. Growth & Scale
+Months 3â€“6
+500+ user submissions, memberships & merch store, Â£3k+/mo run-rate
+5. Empire Building
+Month 7+
+Native apps, awards, courses, holidays, retail exploration
+Time to first revenue: Approximately 30â€“45 days from the start of the build. This timeline is designed to meet the commitment of generating initial revenue within 30 days of the platform going live, with the first AdSense and affiliate income targeted during Phase 3.
+9. Risks & Mitigations
+The BBQ Atlas will take a disciplined, compliance-first approach to risk. All decisions will be based on data and real-world feedback rather than speculation. 
+We are committed to full legal and tax compliance in every market we operate in, and we will clearly define the scope of our platform to minimise liability. Where risks cannot be fully eliminated, we will use insurance, clear terms, and operational controls to protect the business. This includes proper travel insurance, policies, and procedures whenever team members visit restaurants or venues.
+Risk
+Likelihood
+Impact
+Mitigation
+Slow initial user adoption / low traffic
+Medium
+High
+Strong pre-launch social content engine, launch contest, targeted SEO city guides, and early restaurant outreach. Data-driven iteration on messaging and features in first 60 days.
+Technical issues or platform downtime
+Low
+High
+Use of reliable, scalable stack (Next.js + Supabase + Vercel). Regular backups, monitoring, and clear incident response plan. Free tier provides headroom; paid scaling activated at first revenue.
+Competition copying the concept
+Medium
+Medium
+First-mover advantage + strong branding + community-owned content (user reviews and submissions) create defensibility. Continuous improvement based on user feedback.
+Monetization slower than projected
+Medium
+High
+Multiple revenue streams live from Day 1. Conservative forecasting. Direct outreach plan for premium listings. Ability to adjust spend and focus quickly based on real data.
+VAT, tax, or regulatory non-compliance (UK & international)
+Low
+High
+Engage accountant early. Use Xero for real-time tracking. Register for VAT at threshold or voluntarily. Clear terms of service and legal review of international operations before expansion.
+Legal liability from user reviews or restaurant complaints
+Medium
+Medium
+Clear â€œarms-lengthâ€ positioning in Terms of Service and on-site disclaimers. Reviews are user-generated and moderated for abuse only, not edited for opinion. Legal review of review policy before launch.
+Product liability / recalls from affiliate or dropshipped merch
+Low
+High
+Clear disclaimers that The BBQ Atlas is not the seller. Use reputable affiliate partners and dropshipping platforms with their own liability cover. Avoid direct inventory where possible in early stages.
+Data protection / GDPR or privacy breaches
+Low
+High
+Supabase infrastructure with built-in compliance tools. Clear privacy policy. Minimal data collection. Regular security reviews and staff training.
+Travel & on-site risks when visiting restaurants/venues
+Medium
+Medium
+Full travel insurance for all team members. Written travel & venue visit policy. Use of known/reputable drivers and transport. Risk assessments before trips. Never travel alone to unfamiliar venues where possible.
+Reputation damage from negative press or social backlash
+Low
+High
+Proactive, transparent communication. Clear moderation policy. Strong focus on quality and authenticity from day one. Rapid response plan for any issues.
+10. Ambitious Long-Term Growth & Expansion Vision
+The BBQ Atlas is positioned to become the global â€œMichelin Guide + lifestyle brandâ€ for barbecue â€” respected, loved, and highly profitable across digital, physical, education, and experiential verticals. This vision is deliberately built in stages on the solid foundation of a successful MVP. 
+Once the platform is live, monetising, and validated with real users and revenue, we will systematically expand into higher-margin and higher-touch offerings that deepen brand loyalty and create multiple revenue engines. The long-term goal is not simply to run a successful website, but to build a globally recognised BBQ lifestyle brand that spans digital experiences, physical products, education, and premium travel.
+Year 1â€“2: Digital Domination
+Progressive Web App (installable, offline maps, push notifications)
+Full native iOS & Android apps
+Official BBQ Atlas Awards + annual printed/digital guide book
+Year 2â€“3: Brand & Revenue Empire
+Full online merch store (grills, apparel, sauces, rubs, tools)
+Pitmaster online courses & certifications (Â£99â€“Â£499 / $127â€“$640)
+BBQ experience holidays & curated tours
+Year 3â€“5+: Global Expansion
+Pop-up events â†’ permanent retail stores in key cities (Austin, London, Seoul, etc.)
+TV/media deals, cookbooks, supermarket sauces
+Franchise or licensed restaurant concepts
+International editions and localized platforms
+The crest logo and full branding system are designed to scale elegantly across every touchpoint of the ecosystem. From the digital platform and mobile apps to physical merchandise, retail environments, educational materials, and high-end experiential offerings, the same premium visual identity will be used consistently. This creates a cohesive, recognisable brand that feels authentic and authoritative whether someone is using the app, buying a branded grill, attending a pitmaster course, or joining a curated BBQ holiday. 
+The crest is not just a logo â€” it becomes the symbol of quality, community, and expertise that ties the entire BBQ Atlas ecosystem together.
+11. Financial Projections
+The financial projections are intentionally conservative and grounded in comparable BBQ and food discovery platforms. They assume steady but realistic growth driven by social media, SEO, and successful premium restaurant listing sales. All figures are shown in both GBP and USD (using an approximate May 2026 exchange rate of 1.28 USD per GBP). The model is designed to reach breakeven quickly and generate meaningful profit by the end of Year 1, while remaining lean in the early stages.
+The projections are split into three clear periods:
+Initial Setup â€” One-time costs before launch (branding, company registration, basic tools, and initial content seeding).
+Months 1â€“3 â€” Early post-launch phase with lower traffic and revenue as the platform builds momentum.
+Months 7â€“12 â€” Stronger performance once the platform has gained traction, user submissions increase, and premium listings begin converting.
+Year 1 Outlook
+Category
+Initial Setup
+Months 1â€“3 (avg/mo)
+Months 7â€“12 (avg/mo)
+Year 1 Total (Conservative)
+Revenue
+Â£0 / $0
+Â£400 / $512
+Â£6,000 / $7,680
+Â£42,000 / $53,760
+Costs
+Â£1,200 / $1,536
+Â£150 / $192
+Â£350 / $448
+Â£5,000 / $6,400
+Net Profit
+â€”
+Â£250 / $320
+Â£5,650 / $7,232
+Â£37,000 / $47,360
+Key assumptions behind the numbers:
+Revenue in the first three months comes primarily from display advertising and affiliate commissions, with the first premium restaurant listings converting from Month 2â€“3 onwards.
+Costs remain very low in the early months due to the lean tech stack and minimal overhead.
+By Months 7â€“12, revenue grows significantly as organic traffic increases, more restaurants take paid listings, and sponsored content deals begin.
+Year 1 total revenue of Â£42,000 / $53,760 is considered conservative and achievable with steady execution of the marketing and outreach plan.
+Years 2 and 3 Outlook
+Year 2: Revenue is projected to reach Â£120,000â€“Â£180,000 / $154,000â€“$230,000. This growth is driven by the launch of the Progressive Web App and native apps, introduction of paid memberships, and the opening of the full merch store.
+Year 3: Revenue is expected to reach Â£300,000â€“Â£500,000+ / $384,000â€“$640,000+ as brand extensions scale (courses, holidays, retail stores, and media deals).
+These projections assume continued growth in traffic from social media and SEO, successful conversion of premium restaurant listings, and the successful launch of higher-margin products and experiences in Years 2 and 3.
+12. Branding & Logo Guidelines
+The BBQ Atlas branding is premium, fiery, global, and authoritative. The logo system supports every touchpoint from digital platform to physical products and experiences.
+Primary Logo â€” Crest Emblem
+The powerful circular crest featuring crossed fork and spatula over a detailed world map, surrounded by flames, with a rich red and gold banner reading "THE BBQ ATLAS". This is the hero mark for authority, packaging, signage, and high-visibility placements.
+Official Crest Logo (Primary Mark)
+Secondary Logo â€” Globe / Modern
+Clean globe with location pins and smoke elements paired with bold typography. Ideal for website hero sections, social profiles, and clean digital applications.
+Premium Logo â€” Simple and refined
+Usage Guidelines (Summary)
+Primary crest: Use on cover, packaging, high-authority placements, dark or rich backgrounds.
+Maintain clear space around the logo (minimum 0.5Ã— height of the emblem).
+Do not stretch, rotate, or alter colors without approval.
+Monochrome/gold variant available for printing, dark mode, and versatile applications.
+Favicon and app icon versions derived from the crest (square crop of central emblem).
+13. Roadmap to Launch
+FinalizeThis business plan is now complete and ready for execution. The roadmap below translates the strategy into clear, prioritised actions so momentum can be maintained from day one. The focus in the early stages is on building a high-quality MVP, launching quickly, and hitting the 30-day revenue target, while laying the foundations for long-term brand and business growth.
+Immediate Priorities (This Week)
+Finalise and approve this Business Plan & Operations Bible (v2.0), including the strapline, financial projections, and risk framework.
+Register The BBQ Atlas Ltd with Companies House and engage the accountant to set up Xero and establish proper financial processes.
+Set up professional email addresses on the @thebbqatlas.com domain.
+Organise and finalise all logo files and branding assets into a clear brand kit for immediate use across the website, social channels, and documents.
+Next 30 Days (Build & Soft Launch Phase)
+Begin focused MVP development using the agreed tech stack (Next.js, Supabase, Leaflet maps, and Vercel), with a target of completing the core platform within 3â€“4 weeks.
+Seed the platform with 50â€“100 high-quality restaurants across key BBQ styles and regions.
+Launch the social media content engine (Instagram, X, and Facebook) with daily posts, Reels, and a launch contest to build early awareness and engagement.
+Prepare and begin direct outreach to target restaurants for premium listings.
+Finalise and go live with the website, followed by the official soft launch and social announcement.
+Achieve first revenue (via AdSense, affiliates, or premium listings) within 30 days of going live, in line with the commitment made on 3 May 2026.
+Next 90 Days (Growth & Momentum Phase)
+Analyse early user behaviour, submissions, and revenue data to refine the platform and marketing approach.
+Reach 500+ user submissions and establish a consistent flow of new restaurant content.
+Launch the membership programme and begin building the merch store.
+Achieve a run-rate of Â£3,000+ / $3,800+ per month.
+Begin planning the Progressive Web App and native app development based on learnings from the MVP.
+The BBQ Atlas was born from a genuine passion for authentic barbecue and the unique community spirit found in great BBQ restaurants around the world. With a clear plan, a powerful brand anchored by the crest logo, and a commitment to moving fast while staying true to our values, we are now ready to turn this vision into reality. The next 30 days will be critical â€” but they represent only the beginning of what The BBQ Atlas can become.
+The BBQ Atlas is going to be exceptional. Letâ€™s build it.
