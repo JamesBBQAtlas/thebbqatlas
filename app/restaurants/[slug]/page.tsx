@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { MiniMap } from "@/components/restaurants/MiniMap";
@@ -32,6 +32,7 @@ export async function generateMetadata({ params }: Props) {
 export default async function RestaurantPage({ params }: Props) {
   const restaurant = await getRestaurantBySlug(params.slug);
   if (!restaurant) notFound();
+  if (restaurant.slug !== params.slug) redirect(`/restaurants/${restaurant.slug}`);
 
   const [dishes, gear, reviews, allRestaurants] = await Promise.all([
     getSignatureDishes(restaurant.id),
