@@ -3,7 +3,7 @@ import { getRestaurants } from "@/lib/queries/restaurants";
 import { DirectoryFilters } from "@/components/restaurants/DirectoryFilters";
 
 interface DirectoryPageProps {
-  searchParams: { style?: string; rating?: string; price?: string; q?: string };
+  searchParams: { style?: string; price?: string; q?: string };
 }
 
 export const metadata = { title: "Directory" };
@@ -13,9 +13,6 @@ export default async function DirectoryPage({ searchParams }: DirectoryPageProps
 
   if (searchParams.style && searchParams.style !== "all") {
     restaurants = restaurants.filter((r) => r.style === searchParams.style);
-  }
-  if (searchParams.rating && searchParams.rating !== "all") {
-    restaurants = restaurants.filter((r) => r.avg_rating >= parseFloat(searchParams.rating!));
   }
   if (searchParams.price && searchParams.price !== "all") {
     restaurants = restaurants.filter((r) => r.price_level === parseInt(searchParams.price!));

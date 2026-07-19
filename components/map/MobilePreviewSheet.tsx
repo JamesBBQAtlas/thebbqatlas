@@ -2,7 +2,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { StarRating } from "@/components/restaurants/StarRating";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import type { Restaurant } from "@/lib/types/database";
 
@@ -28,7 +27,6 @@ export function MobilePreviewSheet({ restaurant, onClose }: MobilePreviewSheetPr
         </div>
         <div className="flex-1 min-w-0">
           <h3 className="font-bold truncate">{restaurant.name}</h3>
-          <StarRating rating={restaurant.avg_rating} size="sm" />
           <p className="text-white/60 text-xs mt-1">{STYLE_LABELS[restaurant.style]}</p>
         </div>
       </div>

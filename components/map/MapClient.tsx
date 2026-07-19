@@ -49,7 +49,6 @@ export function MapClient({
 }: MapClientProps) {
   const [filters, setFilters] = useState<MapFilterState>({
     style: initialStyle ?? "all",
-    rating: "all",
     price: "all",
     search: "",
   });
@@ -58,8 +57,6 @@ export function MapClient({
   const filtered = useMemo(() => {
     return restaurants.filter((r) => {
       if (filters.style !== "all" && r.style !== filters.style) return false;
-      if (filters.rating !== "all" && r.avg_rating < parseFloat(filters.rating))
-        return false;
       if (filters.price !== "all" && r.price_level !== parseInt(filters.price))
         return false;
       if (filters.search) {

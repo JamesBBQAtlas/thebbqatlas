@@ -12,7 +12,6 @@ import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
 
 export interface MapFilterState {
   style: string;
-  rating: string;
   price: string;
   search: string;
 }
@@ -39,18 +38,6 @@ export function MapFilters({ filters, onChange }: MapFiltersProps) {
               {STYLE_LABELS[s]}
             </SelectItem>
           ))}
-        </SelectContent>
-      </Select>
-
-      <Select value={filters.rating} onValueChange={(v) => update("rating", v)}>
-        <SelectTrigger>
-          <SelectValue placeholder="Rating" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Ratings</SelectItem>
-          <SelectItem value="4.5">4.5+</SelectItem>
-          <SelectItem value="4.0">4.0+</SelectItem>
-          <SelectItem value="3.5">3.5+</SelectItem>
         </SelectContent>
       </Select>
 

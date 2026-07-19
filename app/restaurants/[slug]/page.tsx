@@ -2,7 +2,6 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { StarRating } from "@/components/restaurants/StarRating";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { MiniMap } from "@/components/restaurants/MiniMap";
 import { AddToAtlas } from "@/components/restaurants/AddToAtlas";
@@ -55,7 +54,7 @@ export default async function RestaurantPage({ params }: Props) {
         .select("id")
         .eq("user_id", user.id)
         .eq("restaurant_id", restaurant.id)
-        .single();
+        .maybeSingle();
       isSaved = !!data;
     }
   } catch {
@@ -96,9 +95,7 @@ export default async function RestaurantPage({ params }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-2 space-y-8">
           <section>
-            <StarRating rating={restaurant.avg_rating} size="md" />
-            <p className="text-white/50 text-sm mt-1">{restaurant.review_count} reviews</p>
-            <p className="mt-4 text-white/80 leading-relaxed">{restaurant.description}</p>
+            <p className="text-white/80 leading-relaxed">{restaurant.description}</p>
             <p className="mt-2 text-brand-gold">
               {"$".repeat(restaurant.price_level)}
               <span className="text-white/30">{"$".repeat(4 - restaurant.price_level)}</span>
@@ -138,12 +135,9 @@ export default async function RestaurantPage({ params }: Props) {
               )}
               {reviews.map((review) => (
                 <div key={review.id} className="rounded-lg border border-white/10 bg-black/40 p-4">
-                  <div className="flex items-center gap-2">
-                    <StarRating rating={review.rating} size="sm" />
-                    <span className="text-sm text-white/50">
-                      {review.profiles?.display_name ?? "Anonymous"}
-                    </span>
-                  </div>
+                  <p className="text-sm text-white/50">
+                    {review.profiles?.display_name ?? "Anonymous"}
+                  </p>
                   <p className="mt-2 text-white/80">{review.body}</p>
                 </div>
               ))}

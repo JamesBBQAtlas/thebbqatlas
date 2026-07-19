@@ -26,11 +26,20 @@
       },
       "owner": {
         "type": "string",
-        "description": "Repository owner"
+        "description": "Repository owner",
+        "x-mcp-header": "owner"
       },
       "repo": {
         "type": "string",
-        "description": "Repository name"
+        "description": "Repository name",
+        "x-mcp-header": "repo"
+      },
+      "reviewers": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "GitHub usernames or ORG/team-slug team reviewers to request reviews from"
       },
       "title": {
         "type": "string",

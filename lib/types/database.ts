@@ -66,6 +66,7 @@ export interface Submission {
   name: string;
   description: string;
   style: BbqStyle;
+  styles?: string[] | null;
   lat: number;
   lng: number;
   address: string;
@@ -73,6 +74,8 @@ export interface Submission {
   country: string;
   website: string | null;
   hero_image_url: string | null;
+  contact_email?: string | null;
+  instagram_handle?: string | null;
   submitted_by: string | null;
   moderation_status: ModerationStatus;
   admin_notes: string | null;

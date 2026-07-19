@@ -37,7 +37,18 @@ export function ModerationQueue({ submissions: initial }: { submissions: Submiss
               <h3 className="text-lg font-bold">{s.name}</h3>
               <p className="text-white/60 text-sm">{s.address}</p>
               <p className="text-white/60 text-sm">{s.city}, {s.country}</p>
-              <Badge variant="style" className="mt-2">{STYLE_LABELS[s.style]}</Badge>
+              <div className="flex flex-wrap gap-1 mt-2">
+                {(s.styles?.length ? s.styles : [s.style]).map((st) => (
+                  <Badge key={st} variant="style">
+                    {STYLE_LABELS[st as keyof typeof STYLE_LABELS] ?? st}
+                  </Badge>
+                ))}
+              </div>
+              {(s.contact_email || s.instagram_handle) && (
+                <p className="text-xs text-white/40 mt-2">
+                  {[s.contact_email, s.instagram_handle].filter(Boolean).join(" · ")}
+                </p>
+              )}
               <p className="mt-3 text-white/80 text-sm">{s.description}</p>
               <p className="text-xs text-white/40 mt-2">
                 Slug preview: {restaurantSlug(s.name, s.city)}

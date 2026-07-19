@@ -39,14 +39,6 @@ export function DirectoryFilters() {
           ))}
         </SelectContent>
       </Select>
-      <Select defaultValue={params.get("rating") ?? "all"} onValueChange={(v) => update("rating", v)}>
-        <SelectTrigger className="w-36"><SelectValue placeholder="Rating" /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Ratings</SelectItem>
-          <SelectItem value="4.5">4.5+</SelectItem>
-          <SelectItem value="4.0">4.0+</SelectItem>
-        </SelectContent>
-      </Select>
       <Select defaultValue={params.get("price") ?? "all"} onValueChange={(v) => update("price", v)}>
         <SelectTrigger className="w-32"><SelectValue placeholder="Price" /></SelectTrigger>
         <SelectContent>

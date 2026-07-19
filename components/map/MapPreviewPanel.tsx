@@ -3,7 +3,6 @@ import Link from "next/link";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { StarRating } from "@/components/restaurants/StarRating";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import type { Restaurant } from "@/lib/types/database";
 
@@ -33,7 +32,6 @@ export function MapPreviewPanel({ restaurant, onClose }: MapPreviewPanelProps) {
       </div>
       <div className="p-4 flex-1 overflow-y-auto">
         <h3 className="text-xl font-bold">{restaurant.name}</h3>
-        <StarRating rating={restaurant.avg_rating} className="mt-1" />
         <p className="text-white/60 text-sm mt-1">
           {"$".repeat(restaurant.price_level)}
           <span className="text-white/30">{"$".repeat(4 - restaurant.price_level)}</span>

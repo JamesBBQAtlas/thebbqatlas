@@ -5,52 +5,88 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
+import { BBQ_STYLES, STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
 import { createClient } from "@/lib/supabase/client";
+import { LocationPicker, type LocationData } from "@/components/submit/LocationPicker";
+import { cn } from "@/lib/utils/cn";
 
 export function SubmitForm() {
-  const [form, setForm] = useState({
-    name: "", description: "", style: "texas", address: "", city: "", country: "",
-    lat: "", lng: "", website: "", hero_image_url: "", consent: false,
-  });
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [styles, setStyles] = useState<BbqStyle[]>([]);
+  const [location, setLocation] = useState<LocationData | null>(null);
+  const [website, setWebsite] = useState("");
+  const [heroImageUrl, setHeroImageUrl] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [instagram, setInstagram] = useState("");
+  const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const supabase = createClient();
 
-  const update = (key: string, value: string | boolean) =>
-    setForm((f) => ({ ...f, [key]: value }));
+  const toggleStyle = (style: BbqStyle) => {
+    setStyles((prev) =>
+      prev.includes(style) ? prev.filter((s) => s !== style) : [...prev, style]
+    );
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.consent) {
+    if (!consent) {
       setMessage("Please agree to the submission terms.");
+      setStatus("error");
       return;
     }
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
+    if (styles.length === 0) {
+      setMessage("Please select at least one BBQ style.");
+      setStatus("error");
+      return;
+    }
+    if (!location) {
+      setMessage("Please search for an address or drop a pin on the map.");
+      setStatus("error");
+      return;
+    }
 
-    const { error } = await supabase.from("submissions").insert({
-      name: form.name,
-      description: form.description,
-      style: form.style,
-      address: form.address,
-      city: form.city,
-      country: form.country,
-      lat: parseFloat(form.lat),
-      lng: parseFloat(form.lng),
-      website: form.website || null,
-      hero_image_url: form.hero_image_url || null,
+    setLoading(true);
+    setStatus("idle");
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const payload: Record<string, unknown> = {
+      name,
+      description,
+      style: styles[0],
+      styles,
+      address: location.address || `${location.city}, ${location.country}`,
+      city: location.city,
+      country: location.country,
+      lat: location.lat,
+      lng: location.lng,
+      website: website || null,
+      hero_image_url: heroImageUrl || null,
+      contact_email: contactEmail || null,
+      instagram_handle: instagram || null,
       submitted_by: user?.id ?? null,
       moderation_status: "pending",
-    });
+    };
+
+    let { error } = await supabase.from("submissions").insert(payload);
+
+    if (error?.message?.includes("styles") || error?.message?.includes("contact_email")) {
+      const { styles: _s, contact_email, instagram_handle, ...fallback } = payload;
+      const styleNote = `Styles: ${styles.map((s) => STYLE_LABELS[s]).join(", ")}`;
+      const contactNote = [
+        contact_email ? `Email: ${contact_email}` : null,
+        instagram_handle ? `Instagram: ${instagram_handle}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      fallback.description = [description, styleNote, contactNote].filter(Boolean).join("\n\n");
+      ({ error } = await supabase.from("submissions").insert(fallback));
+    }
 
     if (error) {
       setStatus("error");
@@ -72,71 +108,124 @@ export function SubmitForm() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-6 rounded-xl border border-white/10 bg-black/60 p-8">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <form onSubmit={submit} className="space-y-8 rounded-xl border border-white/10 bg-black/60 p-8">
+      <div className="space-y-4">
         <div>
           <Label htmlFor="name">Restaurant Name *</Label>
-          <Input id="name" value={form.name} onChange={(e) => update("name", e.target.value)} required />
+          <Input
+            id="name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+            className="mt-1"
+          />
         </div>
+
         <div>
-          <Label>BBQ Style *</Label>
-          <Select value={form.style} onValueChange={(v) => update("style", v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {BBQ_STYLES.map((s) => (
-                <SelectItem key={s} value={s}>{STYLE_LABELS[s]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="md:col-span-2">
           <Label htmlFor="description">Description *</Label>
-          <Textarea id="description" value={form.description} onChange={(e) => update("description", e.target.value)} required rows={4} />
+          <Textarea
+            id="description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            required
+            rows={4}
+            className="mt-1"
+            placeholder="What makes this spot special? Signature dishes, vibe, pitmaster story..."
+          />
         </div>
-        <div className="md:col-span-2">
-          <Label htmlFor="address">Address *</Label>
-          <Input id="address" value={form.address} onChange={(e) => update("address", e.target.value)} required />
+      </div>
+
+      <div>
+        <Label>BBQ Styles *</Label>
+        <p className="text-xs text-white/50 mb-3">Select all styles that apply.</p>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {BBQ_STYLES.map((style) => (
+            <label
+              key={style}
+              className={cn(
+                "flex items-center gap-2 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors text-sm",
+                styles.includes(style)
+                  ? "border-brand-gold bg-brand-gold/10 text-brand-gold"
+                  : "border-white/20 hover:border-white/40"
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={styles.includes(style)}
+                onChange={() => toggleStyle(style)}
+                className="accent-brand-gold"
+              />
+              {STYLE_LABELS[style]}
+            </label>
+          ))}
         </div>
-        <div>
-          <Label htmlFor="city">City *</Label>
-          <Input id="city" value={form.city} onChange={(e) => update("city", e.target.value)} required />
-        </div>
-        <div>
-          <Label htmlFor="country">Country *</Label>
-          <Input id="country" value={form.country} onChange={(e) => update("country", e.target.value)} required />
-        </div>
-        <div>
-          <Label htmlFor="lat">Latitude *</Label>
-          <Input id="lat" type="number" step="any" value={form.lat} onChange={(e) => update("lat", e.target.value)} required placeholder="30.2672" />
-        </div>
-        <div>
-          <Label htmlFor="lng">Longitude *</Label>
-          <Input id="lng" type="number" step="any" value={form.lng} onChange={(e) => update("lng", e.target.value)} required placeholder="-97.7431" />
-        </div>
+      </div>
+
+      <LocationPicker value={location} onChange={setLocation} />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <Label htmlFor="website">Website</Label>
-          <Input id="website" type="url" value={form.website} onChange={(e) => update("website", e.target.value)} />
+          <Input
+            id="website"
+            type="url"
+            value={website}
+            onChange={(e) => setWebsite(e.target.value)}
+            placeholder="https://"
+            className="mt-1"
+          />
         </div>
         <div>
           <Label htmlFor="hero">Photo URL</Label>
-          <Input id="hero" type="url" value={form.hero_image_url} onChange={(e) => update("hero_image_url", e.target.value)} />
+          <Input
+            id="hero"
+            type="url"
+            value={heroImageUrl}
+            onChange={(e) => setHeroImageUrl(e.target.value)}
+            placeholder="Link to a photo of the spot"
+            className="mt-1"
+          />
+        </div>
+        <div>
+          <Label htmlFor="email">Your Email</Label>
+          <Input
+            id="email"
+            type="email"
+            value={contactEmail}
+            onChange={(e) => setContactEmail(e.target.value)}
+            placeholder="Optional — for follow-up"
+            className="mt-1"
+          />
+        </div>
+        <div>
+          <Label htmlFor="instagram">Instagram Handle</Label>
+          <Input
+            id="instagram"
+            value={instagram}
+            onChange={(e) => setInstagram(e.target.value)}
+            placeholder="@restaurant or @yours"
+            className="mt-1"
+          />
         </div>
       </div>
 
       <label className="flex items-start gap-2 text-sm text-white/70">
         <input
           type="checkbox"
-          checked={form.consent}
-          onChange={(e) => update("consent", e.target.checked)}
-          className="mt-1"
+          checked={consent}
+          onChange={(e) => setConsent(e.target.checked)}
+          className="mt-1 accent-brand-gold"
         />
-        I agree that my submission may be published after moderation. The BBQ Atlas maintains arms-length positioning and does not endorse submitted establishments.
+        I agree that my submission may be published after moderation. The BBQ Atlas maintains
+        arms-length positioning and does not endorse submitted establishments.
       </label>
 
       <Button type="submit" disabled={loading} className="w-full md:w-auto">
         {loading ? "Submitting..." : "Submit a Spot"}
       </Button>
-      {message && status === "error" && <p className="text-sm text-red-400">{message}</p>}
+      {message && status === "error" && (
+        <p className="text-sm text-red-400">{message}</p>
+      )}
     </form>
   );
 }
