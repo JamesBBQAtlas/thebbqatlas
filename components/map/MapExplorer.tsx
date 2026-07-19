@@ -1,0 +1,327 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import maplibregl from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import { Search, SlidersHorizontal, X, MapPin } from "lucide-react";
+import { useRouter } from "@/i18n/navigation";
+import type { Restaurant } from "@/lib/types/database";
+import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
+import { resolveCountryCode, countryName } from "@/lib/constants/countries";
+import { FlagIcon } from "@/components/ui/FlagIcon";
+import { cn } from "@/lib/utils/cn";
+
+const GOLD = "#D4AF37";
+const SIENNA = "#C4622D";
+const INK = "#0C0907";
+
+// No-key fallback: a flat dark canvas so pins still render during development.
+const FALLBACK_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {},
+  glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  layers: [
+    { id: "bg", type: "background", paint: { "background-color": "#0E0C0A" } },
+  ],
+};
+
+export function MapExplorer({
+  restaurants,
+  mapKey,
+}: {
+  restaurants: Restaurant[];
+  mapKey?: string;
+}) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<maplibregl.Map | null>(null);
+  const popupRef = useRef<maplibregl.Popup | null>(null);
+  const router = useRouter();
+
+  const [ready, setReady] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [style, setStyle] = useState<string>("all");
+  const [country, setCountry] = useState<string>("all");
+  const [query, setQuery] = useState("");
+
+  const countries = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const r of restaurants) {
+      const code = resolveCountryCode(r.country_code, r.country) ?? r.country;
+      if (code) map.set(code, countryName(code, r.country));
+    }
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [restaurants]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return restaurants.filter((r) => {
+      if (style !== "all" && r.style !== style) return false;
+      if (country !== "all" && (resolveCountryCode(r.country_code, r.country) ?? r.country) !== country)
+        return false;
+      if (q && !`${r.name} ${r.city} ${r.country}`.toLowerCase().includes(q))
+        return false;
+      return Number.isFinite(r.lat) && Number.isFinite(r.lng);
+    });
+  }, [restaurants, style, country, query]);
+
+  const geojson = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: filtered.map((r) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [r.lng, r.lat] },
+        properties: {
+          slug: r.slug,
+          name: r.name,
+          location: [r.city, r.country].filter(Boolean).join(", "),
+          styleLabel: STYLE_LABELS[r.style],
+          featured: r.is_featured ? 1 : 0,
+        },
+      })),
+    }),
+    [filtered]
+  );
+
+  // Init map once
+  useEffect(() => {
+    if (mapRef.current || !containerRef.current) return;
+    const styleSpec = mapKey
+      ? `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${mapKey}`
+      : FALLBACK_STYLE;
+
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: styleSpec,
+      center: [8, 25],
+      zoom: 1.3,
+      attributionControl: false,
+    });
+    mapRef.current = map;
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+    map.addControl(new maplibregl.AttributionControl({ compact: true }));
+
+    map.on("load", () => {
+      map.addSource("spots", {
+        type: "geojson",
+        data: geojson as GeoJSON.FeatureCollection,
+        cluster: true,
+        clusterRadius: 46,
+        clusterMaxZoom: 8,
+      });
+
+      map.addLayer({
+        id: "clusters",
+        type: "circle",
+        source: "spots",
+        filter: ["has", "point_count"],
+        paint: {
+          "circle-color": GOLD,
+          "circle-opacity": 0.9,
+          "circle-radius": ["step", ["get", "point_count"], 16, 10, 22, 50, 30],
+          "circle-stroke-width": 2,
+          "circle-stroke-color": INK,
+        },
+      });
+      map.addLayer({
+        id: "cluster-count",
+        type: "symbol",
+        source: "spots",
+        filter: ["has", "point_count"],
+        layout: {
+          "text-field": ["get", "point_count_abbreviated"],
+          "text-font": ["Noto Sans Bold"],
+          "text-size": 13,
+        },
+        paint: { "text-color": INK },
+      });
+      map.addLayer({
+        id: "points",
+        type: "circle",
+        source: "spots",
+        filter: ["!", ["has", "point_count"]],
+        paint: {
+          "circle-color": ["case", ["==", ["get", "featured"], 1], GOLD, SIENNA],
+          "circle-radius": 7,
+          "circle-stroke-width": 2,
+          "circle-stroke-color": INK,
+        },
+      });
+
+      map.on("click", "clusters", (e) => {
+        const feature = map.queryRenderedFeatures(e.point, { layers: ["clusters"] })[0];
+        const clusterId = feature.properties?.cluster_id;
+        const src = map.getSource("spots") as maplibregl.GeoJSONSource;
+        src.getClusterExpansionZoom(clusterId).then((zoom) => {
+          map.easeTo({
+            center: (feature.geometry as GeoJSON.Point).coordinates as [number, number],
+            zoom,
+          });
+        });
+      });
+
+      map.on("click", "points", (e) => {
+        const slug = e.features?.[0]?.properties?.slug;
+        if (slug) router.push(`/restaurants/${slug}`);
+      });
+
+      map.on("mouseenter", "points", (e) => {
+        map.getCanvas().style.cursor = "pointer";
+        const f = e.features?.[0];
+        if (!f) return;
+        const p = f.properties as Record<string, string>;
+        popupRef.current?.remove();
+        popupRef.current = new maplibregl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          offset: 12,
+          className: "atlas-popup",
+        })
+          .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+          .setHTML(
+            `<div style="font-family:'Source Sans 3 Variable',sans-serif"><div style="font-weight:700;color:#F5F0EB">${p.name}</div><div style="font-size:12px;color:#C4B8AB">${p.location}</div><div style="font-size:11px;color:#D87A45;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">${p.styleLabel}</div></div>`
+          )
+          .addTo(map);
+      });
+      map.on("mouseleave", "points", () => {
+        map.getCanvas().style.cursor = "";
+        popupRef.current?.remove();
+        popupRef.current = null;
+      });
+      map.on("mouseenter", "clusters", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "clusters", () => (map.getCanvas().style.cursor = ""));
+
+      setReady(true);
+    });
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapKey]);
+
+  // Push filtered data to the source when filters change
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const src = map.getSource("spots") as maplibregl.GeoJSONSource | undefined;
+    src?.setData(geojson as GeoJSON.FeatureCollection);
+  }, [geojson, ready]);
+
+  function flyTo(r: Restaurant) {
+    mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 12, speed: 1.4 });
+  }
+
+  return (
+    <div className="relative flex h-full w-full overflow-hidden">
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          "z-10 flex h-full flex-col border-r border-border-subtle bg-surface-0 transition-all duration-300",
+          sidebarOpen ? "w-full sm:w-[340px]" : "w-0 overflow-hidden sm:w-0"
+        )}
+      >
+        <div className="border-b border-border-subtle p-4">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search name or place"
+              className="w-full rounded-md border border-border-default bg-surface-1 py-2.5 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-brand-gold/20"
+            />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <select
+              value={style}
+              onChange={(e) => setStyle(e.target.value)}
+              className="rounded-md border border-border-default bg-surface-1 px-2 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none"
+            >
+              <option value="all">All styles</option>
+              {BBQ_STYLES.map((s) => (
+                <option key={s} value={s}>
+                  {STYLE_LABELS[s]}
+                </option>
+              ))}
+            </select>
+            <select
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              className="rounded-md border border-border-default bg-surface-1 px-2 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none"
+            >
+              <option value="all">All countries</option>
+              {countries.map(([code, name]) => (
+                <option key={code} value={code}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="mt-3 text-xs uppercase tracking-[0.08em] text-text-muted">
+            {filtered.length} {filtered.length === 1 ? "spot" : "spots"}
+          </p>
+        </div>
+
+        <ul className="flex-1 overflow-y-auto">
+          {filtered.map((r) => (
+            <li key={r.id} className="border-b border-border-subtle/60">
+              <button
+                type="button"
+                onClick={() => flyTo(r)}
+                onDoubleClick={() => router.push(`/restaurants/${r.slug}`)}
+                className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-1"
+              >
+                <span
+                  className={cn(
+                    "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
+                    r.is_featured ? "bg-brand-gold" : "bg-brand-sienna"
+                  )}
+                />
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold text-text-primary">
+                    {r.name}
+                  </span>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-xs text-text-muted">
+                    <MapPin className="h-3 w-3" />
+                    {[r.city, r.country].filter(Boolean).join(", ")}
+                    <FlagIcon code={resolveCountryCode(r.country_code, r.country)} className="text-xs" />
+                  </span>
+                  <span className="mt-1 inline-block text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-brand-sienna">
+                    {STYLE_LABELS[r.style]}
+                  </span>
+                </span>
+              </button>
+            </li>
+          ))}
+          {filtered.length === 0 && (
+            <li className="px-4 py-8 text-center text-sm text-text-muted">
+              No spots match those filters.
+            </li>
+          )}
+        </ul>
+      </aside>
+
+      {/* Map */}
+      <div className="relative h-full flex-1">
+        <div ref={containerRef} className="h-full w-full" />
+        <button
+          type="button"
+          onClick={() => setSidebarOpen((o) => !o)}
+          className="absolute left-3 top-3 z-10 flex items-center gap-2 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-text-primary backdrop-blur transition-colors hover:border-border-strong"
+        >
+          {sidebarOpen ? <X className="h-4 w-4" /> : <SlidersHorizontal className="h-4 w-4" />}
+          {sidebarOpen ? "Hide" : "Filters"}
+        </button>
+        {/* Legend */}
+        <div className="absolute bottom-3 left-3 z-10 flex items-center gap-4 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-brand-gold" /> Featured
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full bg-brand-sienna" /> Listed
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}

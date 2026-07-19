@@ -28,7 +28,13 @@ yarn-debug.log*
 yarn-error.log*
 
 # local env files
+.env
 .env*.local
+
+# secrets — never commit deploy tokens or credentials
+deploy-token.txt
+*.token
+.git-credentials
 
 # vercel
 .vercel

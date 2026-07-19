@@ -1,0 +1,62 @@
+{
+  "Nav": {
+    "map": "Map",
+    "directory": "Directory",
+    "guides": "Guides",
+    "gear": "Gear",
+    "submit": "Submit",
+    "myAtlas": "My Atlas",
+    "menu": "Menu",
+    "close": "Close"
+  },
+  "Footer": {
+    "strapline": "We don't rank barbecue. We celebrate it.",
+    "explore": "Explore",
+    "account": "Account",
+    "company": "Company",
+    "map": "The Map",
+    "directory": "Directory",
+    "guides": "Guides",
+    "gear": "Gear Guide",
+    "submit": "Submit a Spot",
+    "myAtlas": "My Atlas",
+    "signIn": "Sign In",
+    "list": "List on The BBQ Atlas",
+    "about": "About",
+    "contact": "Contact",
+    "privacy": "Privacy",
+    "terms": "Terms",
+    "disclaimer": "Disclaimer",
+    "amazonDisclosure": "As an Amazon Associate, The BBQ Atlas earns from qualifying purchases.",
+    "rights": "The BBQ Atlas Ltd. All rights reserved.",
+    "followUs": "Follow"
+  },
+  "Common": {
+    "readMore": "Read more",
+    "viewOnAmazon": "View on Amazon",
+    "loading": "Loading",
+    "backToMap": "Back to the map"
+  },
+  "Restaurant": {
+    "breadcrumbHome": "Atlas",
+    "breadcrumbDirectory": "Directory",
+    "atlasReview": "The Atlas Review",
+    "signatureDishes": "Signature Dishes",
+    "recommendedGear": "Recommended Gear",
+    "gallery": "Gallery",
+    "location": "Location",
+    "visit": "Visit",
+    "website": "Website",
+    "address": "Address",
+    "hours": "Hours",
+    "phone": "Phone",
+    "reviews": "Visitor Reviews",
+    "noReviews": "No reviews yet — be the first to share a tip.",
+    "nearby": "Nearby on the Atlas",
+    "relatedStyle": "More {style} Barbecue",
+    "save": "Save to My Atlas",
+    "saved": "Saved",
+    "share": "Share",
+    "addPhoto": "Add a photo"
+  }
+}

@@ -1,38 +1,64 @@
 import Image from "next/image";
-import Link from "next/link";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { STYLE_LABELS } from "@/lib/constants/styles";
+import { MapPin } from "lucide-react";
+import { Link } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
+import { STYLE_LABELS } from "@/lib/constants/styles";
+import { OFFERINGS_BY_SLUG } from "@/lib/constants/offerings";
+import { resolveCountryCode } from "@/lib/constants/countries";
+import { FlagIcon } from "@/components/ui/FlagIcon";
 
-export function RestaurantCard({ restaurant }: { restaurant: Restaurant }) {
+export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
+  const code = resolveCountryCode(r.country_code, r.country);
+  const firstMeat = (r.offerings ?? [])
+    .map((slug) => OFFERINGS_BY_SLUG[slug])
+    .find((o) => o?.category === "meats");
+
   return (
-    <Link href={`/restaurants/${restaurant.slug}`}>
-      <Card className="overflow-hidden hover:border-brand-gold/40 transition-colors h-full">
-        <div className="relative aspect-[4/3] w-full">
+    <Link
+      href={`/restaurants/${r.slug}`}
+      className="group relative block overflow-hidden rounded-xl border border-border-subtle bg-surface-0 transition-all duration-300 hover:-translate-y-1 hover:border-border-default hover:shadow-lg"
+    >
+      <div className="relative aspect-[16/10] w-full overflow-hidden">
+        {r.hero_image_url ? (
           <Image
-            src={restaurant.hero_image_url}
-            alt={restaurant.name}
+            src={r.hero_image_url}
+            alt={`${r.name} — ${STYLE_LABELS[r.style]} barbecue`}
             fill
-            className="object-cover"
-            sizes="(max-width: 768px) 100vw, 25vw"
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+            className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
           />
-          {restaurant.is_featured && (
-            <Badge variant="featured" className="absolute top-2 right-2">
-              Featured
-            </Badge>
+        ) : (
+          <div className="absolute inset-0 bg-gradient-to-br from-surface-2 to-background" />
+        )}
+        {r.is_featured && (
+          <span className="absolute left-4 top-4 rounded-sm bg-brand-gold px-2.5 py-1 text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-text-inverse shadow-md">
+            Featured
+          </span>
+        )}
+      </div>
+      <div className="p-5">
+        <h3 className="font-heading text-xl font-bold text-text-primary transition-colors group-hover:text-brand-gold">
+          {r.name}
+        </h3>
+        <p className="mt-1.5 flex items-center gap-1.5 text-[0.8125rem] text-text-muted">
+          <MapPin className="h-3.5 w-3.5 shrink-0" />
+          {[r.city, r.country].filter(Boolean).join(", ")}
+          <FlagIcon code={code} className="text-sm" />
+        </p>
+        <p className="mt-2 line-clamp-2 text-[0.9375rem] leading-relaxed text-text-secondary">
+          {r.description}
+        </p>
+        <div className="mt-4 flex flex-wrap gap-1.5">
+          <span className="rounded-full border border-brand-sienna bg-brand-sienna/10 px-2.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-brand-sienna">
+            {STYLE_LABELS[r.style]}
+          </span>
+          {firstMeat && (
+            <span className="rounded-full border border-border-default px-2.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-text-muted">
+              {firstMeat.label}
+            </span>
           )}
         </div>
-        <CardContent className="p-4">
-          <h3 className="font-bold text-lg">{restaurant.name}</h3>
-          <p className="text-white/60 text-sm mt-1">
-            {restaurant.city}, {restaurant.country}
-          </p>
-          <Badge variant="style" className="mt-2">
-            Styles: {STYLE_LABELS[restaurant.style]}
-          </Badge>
-        </CardContent>
-      </Card>
+      </div>
     </Link>
   );
 }

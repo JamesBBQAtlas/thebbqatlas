@@ -22,7 +22,10 @@ export interface Restaurant {
   address: string;
   city: string;
   country: string;
+  country_code?: string | null;
   website: string | null;
+  alcohol?: "none" | "serves" | "byob" | "both" | null;
+  offerings?: string[] | null;
   price_level: number;
   avg_rating: number;
   review_count: number;

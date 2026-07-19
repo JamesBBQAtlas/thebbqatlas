@@ -1,80 +1,115 @@
 "use client";
 
-import Image from "next/image";
-import Link from "next/link";
 import { useState } from "react";
 import { Menu, X } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Link, usePathname } from "@/i18n/navigation";
 import { cn } from "@/lib/utils/cn";
-import { BRAND } from "@/lib/constants/styles";
 
-const NAV_LINKS = [
-  { href: "/map", label: "Map" },
-  { href: "/directory", label: "Directory" },
-  { href: "/guides", label: "Guides" },
-  { href: "/submit", label: "Submit" },
-  { href: "/profile", label: "Profile" },
-];
+const NAV = [
+  { href: "/map", key: "map" },
+  { href: "/directory", key: "directory" },
+  { href: "/guides", key: "guides" },
+  { href: "/gear", key: "gear" },
+  { href: "/submit", key: "submit" },
+] as const;
 
 export function Header() {
+  const t = useTranslations("Nav");
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
+  const isActive = (href: string) =>
+    pathname === href || pathname.startsWith(`${href}/`);
+
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-brand-black/90 backdrop-blur-md">
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
-        <button
-          type="button"
-          className="lg:hidden text-white p-2"
-          onClick={() => setOpen(!open)}
-          aria-label="Toggle menu"
+    <header className="fixed inset-x-0 top-0 z-50 h-18 border-b border-border-default/40 bg-background/70 backdrop-blur-xl">
+      <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+        {/* Logo lockup */}
+        <Link
+          href="/"
+          aria-label="The BBQ Atlas — home"
+          className="flex shrink-0 items-center"
         >
-          {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-        </button>
-
-        <div className="hidden lg:block w-24" />
-
-        <Link href="/" className="flex flex-col items-center gap-1">
-          <Image
-            src="/logos/crest.jpg"
-            alt={BRAND.name}
-            width={80}
-            height={80}
-            className="rounded-full"
-            priority
-          />
+          <span className="font-heading text-xl font-bold uppercase tracking-[0.06em] text-text-primary transition-colors duration-200 hover:text-brand-gold sm:text-[1.4rem]">
+            The BBQ Atlas
+          </span>
         </Link>
 
-        <nav className="hidden lg:flex items-center gap-8">
-          {NAV_LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="text-sm font-medium text-white/80 hover:text-brand-gold transition-colors"
-            >
-              {link.label}
-            </Link>
-          ))}
+        {/* Desktop nav */}
+        <nav className="hidden items-center gap-8 lg:flex">
+          {NAV.map((item) => {
+            const active = isActive(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "relative py-1 text-sm font-semibold uppercase tracking-[0.08em] transition-colors duration-200",
+                  active
+                    ? "text-brand-gold"
+                    : "text-text-secondary hover:text-text-primary"
+                )}
+              >
+                {t(item.key)}
+                {active && (
+                  <span className="absolute -bottom-[6px] left-0 right-0 h-[2px] rounded-full bg-brand-gold" />
+                )}
+              </Link>
+            );
+          })}
         </nav>
 
-        <div className="lg:hidden w-10" />
+        {/* CTA + mobile toggle */}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/profile"
+            className="hidden rounded-md border-[1.5px] border-brand-gold px-5 py-2 text-sm font-semibold uppercase tracking-[0.06em] text-brand-gold transition-colors duration-200 hover:bg-brand-gold hover:text-text-inverse lg:inline-block"
+          >
+            {t("myAtlas")}
+          </Link>
+          <button
+            type="button"
+            className="p-2 text-text-primary lg:hidden"
+            onClick={() => setOpen(!open)}
+            aria-label={open ? t("close") : t("menu")}
+            aria-expanded={open}
+          >
+            {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+          </button>
+        </div>
       </div>
 
+      {/* Mobile drawer */}
       <nav
         className={cn(
-          "lg:hidden border-t border-white/10 bg-brand-black/95 overflow-hidden transition-all",
+          "overflow-hidden border-t border-border-subtle bg-surface-0/95 backdrop-blur-xl transition-[max-height] duration-300 lg:hidden",
           open ? "max-h-96" : "max-h-0"
         )}
       >
-        <div className="flex flex-col px-4 py-4 gap-3">
-          {NAV_LINKS.map((link) => (
+        <div className="flex flex-col gap-1 px-4 py-4">
+          {NAV.map((item) => (
             <Link
-              key={link.href}
-              href={link.href}
-              className="text-white/90 hover:text-brand-gold py-2"
+              key={item.href}
+              href={item.href}
               onClick={() => setOpen(false)}
+              className={cn(
+                "rounded-md px-3 py-3 text-sm font-semibold uppercase tracking-[0.08em] transition-colors",
+                isActive(item.href)
+                  ? "bg-surface-2 text-brand-gold"
+                  : "text-text-secondary hover:bg-surface-1 hover:text-text-primary"
+              )}
             >
-              {link.label}
+              {t(item.key)}
             </Link>
           ))}
+          <Link
+            href="/profile"
+            onClick={() => setOpen(false)}
+            className="mt-2 rounded-md border-[1.5px] border-brand-gold px-3 py-3 text-center text-sm font-semibold uppercase tracking-[0.06em] text-brand-gold"
+          >
+            {t("myAtlas")}
+          </Link>
         </div>
       </nav>
     </header>

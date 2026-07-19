@@ -2,55 +2,183 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * The BBQ Atlas — global styles.
+ * Dark-only, warm-black base with burnt-sienna undertones.
+ * shadcn/ui variables mapped from design/bbq-atlas-design-spec.md §7.
+ */
+
 @layer base {
   :root {
-    --background: 0 0% 10%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 8%;
-    --card-foreground: 0 0% 98%;
-    --primary: 24 95% 47%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 20%;
-    --muted-foreground: 0 0% 65%;
-    --accent: 46 65% 52%;
-    --accent-foreground: 0 0% 10%;
-    --border: 0 0% 20%;
-    --input: 0 0% 20%;
-    --ring: 46 65% 52%;
+    /* shadcn/ui — HSL equivalents of the brand hex tokens */
+    --background: 20 27% 4%; /* #0C0907 */
+    --foreground: 25 17% 94%; /* #F5F0EB */
+    --card: 0 17% 7%; /* #141010 */
+    --card-foreground: 25 17% 94%;
+    --popover: 18 15% 10%; /* #1E1814 */
+    --popover-foreground: 25 17% 94%;
+    --primary: 43 66% 52%; /* #D4AF37 gold */
+    --primary-foreground: 20 27% 4%;
+    --secondary: 18 63% 47%; /* #C4622D sienna */
+    --secondary-foreground: 25 17% 94%;
+    --muted: 22 12% 15%; /* #2A221C */
+    --muted-foreground: 24 14% 46%; /* #8C7B6C */
+    --accent: 18 63% 47%; /* #C4622D */
+    --accent-foreground: 25 17% 94%;
+    --destructive: 0 84% 60%; /* #DC2626 */
+    --destructive-foreground: 25 17% 94%;
+    --border: 20 26% 19%; /* #3D2E24 */
+    --input: 20 26% 19%;
+    --ring: 43 66% 52%; /* #D4AF37 */
     --radius: 0.5rem;
+
+    /* Self-hosted brand fonts — Zilla Slab display + Source Sans body */
+    --font-heading: "Zilla Slab", Rockwell, "Roboto Slab", Georgia, serif;
+    --font-body: "Source Sans 3 Variable", "Source Sans Pro", system-ui,
+      -apple-system, sans-serif;
+
+    /* Transitions (spec §8) */
+    --transition-fast: 150ms ease;
+    --transition-default: 250ms ease;
+    --transition-slow: 350ms ease;
+
+    /* Effects */
+    --glow-sienna: rgba(196, 98, 45, 0.12);
+    --glow-gold: rgba(212, 175, 55, 0.08);
   }
 
   * {
-    @apply border-border;
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
   }
 
   body {
-    @apply bg-brand-black text-foreground font-sans antialiased;
+    background-color: #0c0907;
+    color: #f5f0eb;
+    font-family: var(--font-body), "Source Sans Pro", system-ui, sans-serif;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading), Georgia, "Times New Roman", serif;
+    letter-spacing: -0.01em;
+  }
+
+  /* Warm-tinted selection */
+  ::selection {
+    background: rgba(212, 175, 55, 0.25);
+    color: #f5f0eb;
+  }
+
+  /* Warm, unobtrusive scrollbar */
+  ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #141010;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #3d2e24;
+    border-radius: 9999px;
+    border: 3px solid #141010;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #5a4838;
+  }
+
+  /* Accessible focus ring in brand gold */
+  :focus-visible {
+    outline: 2px solid #d4af37;
+    outline-offset: 2px;
   }
 }
 
-.leaflet-container {
-  background: #1a1a1a !important;
-  font-family: Arial, sans-serif;
+@layer components {
+  /* Uppercase UI/eyebrow label (nav, section labels, buttons) */
+  .u-eyebrow {
+    font-family: var(--font-body), system-ui, sans-serif;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    font-weight: 600;
+    font-size: 0.75rem;
+  }
+
+  /* Cinematic hero overlay — ember glow over warm dark (spec §4) */
+  .hero-overlay {
+    background:
+      radial-gradient(
+        ellipse 80% 60% at 30% 20%,
+        rgba(196, 98, 45, 0.18),
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 60% 50% at 80% 30%,
+        rgba(232, 93, 4, 0.1),
+        transparent 55%
+      ),
+      linear-gradient(
+        180deg,
+        rgba(12, 9, 7, 0.3) 0%,
+        rgba(12, 9, 7, 0.72) 55%,
+        #0c0907 100%
+      );
+  }
+
+  /* Subtle film-grain texture for cinematic depth (spec §8) */
+  .film-grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 256px 256px;
+  }
+
+  /* Reveal-on-hover gradient top-bar for guide cards (spec §6) */
+  .card-topbar::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #c4622d, #d4af37);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform var(--transition-default);
+  }
+  .card-topbar:hover::before {
+    transform: scaleX(1);
+  }
 }
 
-.bbq-marker {
-  background: transparent !important;
-  border: none !important;
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
 }
 
-.marker-cluster-small,
-.marker-cluster-medium,
-.marker-cluster-large {
-  background-color: rgba(232, 93, 4, 0.3) !important;
-}
-
-.marker-cluster-small div,
-.marker-cluster-medium div,
-.marker-cluster-large div {
-  background-color: rgba(212, 175, 55, 0.8) !important;
-  color: #1a1a1a !important;
-  font-weight: bold;
+/* Respect reduced-motion: no hero video, no long transitions */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
