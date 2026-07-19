@@ -41,7 +41,28 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
   } catch {
     // fallback
   }
-  return FALLBACK_RESTAURANTS.find((r) => r.slug === slug) ?? null;
+
+  // Prefix match: "franklin-barbecue" → "franklin-barbecue-austin"
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase
+      .from("restaurants")
+      .select("*")
+      .like("slug", `${slug}-%`)
+      .eq("status", "approved")
+      .limit(1)
+      .single();
+    if (data) return data as Restaurant;
+  } catch {
+    // fallback
+  }
+
+  // Fallback data: exact then prefix
+  return (
+    FALLBACK_RESTAURANTS.find((r) => r.slug === slug) ??
+    FALLBACK_RESTAURANTS.find((r) => r.slug.startsWith(`${slug}-`)) ??
+    null
+  );
 }
 
 export async function getSignatureDishes(restaurantId: string): Promise<SignatureDish[]> {
