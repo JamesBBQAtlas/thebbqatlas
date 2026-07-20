@@ -70,6 +70,7 @@ export default async function AdminDashboard() {
     reviewsPending,
     reviewsApproved,
     photos,
+    photosPending,
     users,
     clicksTotal,
     clicksAffiliate,
@@ -82,10 +83,13 @@ export default async function AdminDashboard() {
     count(db, "reviews", { col: "status", val: "pending" }),
     count(db, "reviews", { col: "status", val: "approved" }),
     count(db, "review_photos"),
+    count(db, "review_photos", { col: "status", val: "pending" }),
     count(db, "profiles"),
     count(db, "click_events"),
     count(db, "click_events", { col: "event_type", val: "affiliate" }),
   ]);
+
+  const pendingTotal = subsPending + reviewsPending + photosPending;
 
   // Basic per-restaurant clicks (aggregated in-app; fine at launch volume).
   let topClicks: { name: string; slug: string; clicks: number }[] = [];
@@ -126,9 +130,9 @@ export default async function AdminDashboard() {
           className="rounded-md border-[1.5px] border-brand-gold px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-brand-gold transition-colors hover:bg-brand-gold hover:text-text-inverse"
         >
           Moderation Queue
-          {subsPending + reviewsPending > 0 && (
+          {pendingTotal > 0 && (
             <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
-              {subsPending + reviewsPending}
+              {pendingTotal}
             </span>
           )}
         </Link>
@@ -138,7 +142,7 @@ export default async function AdminDashboard() {
         <Stat label="Restaurants" value={restaurantsTotal} hint={`${restaurantsApproved} approved`} />
         <Stat label="Submissions pending" value={subsPending} hint={`${subsApproved} approved · ${subsRejected} rejected`} />
         <Stat label="Reviews pending" value={reviewsPending} hint={`${reviewsApproved} approved`} />
-        <Stat label="Photos" value={photos} />
+        <Stat label="Photos pending" value={photosPending} hint={`${photos} total`} />
         <Stat label="Videos" value="—" hint="uploads phase" />
         <Stat label="Users" value={users} />
         <Stat label="Clicks (all)" value={clicksTotal} />

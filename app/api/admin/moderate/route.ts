@@ -1,11 +1,39 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { restaurantSlug } from "@/lib/utils/slug";
+import { resolveCountryCode } from "@/lib/constants/countries";
+
+type ModType = "submission" | "review" | "photo";
+type Action = "approve" | "reject";
+
+const FALLBACK_HERO =
+  "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&q=80";
+
+/** Recompute a restaurant's review aggregates from its approved reviews. */
+async function recomputeReviewStats(admin: SupabaseClient, restaurantId: string) {
+  const { data } = await admin
+    .from("reviews")
+    .select("rating")
+    .eq("restaurant_id", restaurantId)
+    .eq("status", "approved");
+  const ratings = (data ?? [])
+    .map((r) => r.rating)
+    .filter((n): n is number => typeof n === "number");
+  const count = ratings.length;
+  const avg = count ? ratings.reduce((a, b) => a + b, 0) / count : 0;
+  await admin
+    .from("restaurants")
+    .update({ review_count: count, avg_rating: Number(avg.toFixed(2)) })
+    .eq("id", restaurantId);
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { data: profile } = await supabase
@@ -13,56 +41,101 @@ export async function POST(request: Request) {
     .select("role")
     .eq("id", user.id)
     .single();
-
   if (profile?.role !== "admin") {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { submissionId, action } = await request.json();
-  const admin = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const body = await request.json();
+  // Back-compat: older client sent { submissionId, action }.
+  const type: ModType = body.type ?? (body.submissionId ? "submission" : "submission");
+  const id: string = body.id ?? body.submissionId;
+  const action: Action = body.action;
+  const notes: string | undefined = body.notes;
+
+  if (!id || (action !== "approve" && action !== "reject")) {
+    return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  }
+
+  const admin: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createAdminClient()
     : supabase;
 
-  const { data: submission } = await admin
-    .from("submissions")
-    .select("*")
-    .eq("id", submissionId)
-    .single();
+  try {
+    if (type === "submission") {
+      const { data: submission } = await admin
+        .from("submissions")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (!submission) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
 
-  if (!submission) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+      if (action === "approve") {
+        await admin.from("restaurants").insert({
+          slug: restaurantSlug(submission.name, submission.city),
+          name: submission.name,
+          description: submission.description,
+          style: submission.style,
+          lat: submission.lat,
+          lng: submission.lng,
+          address: submission.address,
+          city: submission.city,
+          country: submission.country,
+          country_code: resolveCountryCode(null, submission.country),
+          website: submission.website,
+          hero_image_url: submission.hero_image_url ?? FALLBACK_HERO,
+          price_level: 2,
+          avg_rating: 0,
+          review_count: 0,
+          is_featured: false,
+          status: "approved",
+        });
+        await admin
+          .from("submissions")
+          .update({ moderation_status: "approved" })
+          .eq("id", id);
+      } else {
+        await admin
+          .from("submissions")
+          .update({ moderation_status: "rejected", admin_notes: notes ?? null })
+          .eq("id", id);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (type === "review") {
+      const { data: review } = await admin
+        .from("reviews")
+        .select("id, restaurant_id")
+        .eq("id", id)
+        .single();
+      if (!review) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      await admin
+        .from("reviews")
+        .update({ status: action === "approve" ? "approved" : "rejected" })
+        .eq("id", id);
+      if (review.restaurant_id) {
+        await recomputeReviewStats(admin, review.restaurant_id);
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    if (type === "photo") {
+      await admin
+        .from("review_photos")
+        .update({ status: action === "approve" ? "approved" : "rejected" })
+        .eq("id", id);
+      return NextResponse.json({ ok: true });
+    }
+
+    return NextResponse.json({ error: "Unknown type" }, { status: 400 });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Moderation failed" },
+      { status: 500 }
+    );
   }
-
-  if (action === "approve") {
-    const slug = restaurantSlug(submission.name, submission.city);
-    await admin.from("restaurants").insert({
-      slug,
-      name: submission.name,
-      description: submission.description,
-      style: submission.style,
-      lat: submission.lat,
-      lng: submission.lng,
-      address: submission.address,
-      city: submission.city,
-      country: submission.country,
-      website: submission.website,
-      hero_image_url: submission.hero_image_url ?? "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&q=80",
-      price_level: 2,
-      avg_rating: 0,
-      review_count: 0,
-      is_featured: false,
-      status: "approved",
-    });
-    await admin
-      .from("submissions")
-      .update({ moderation_status: "approved" })
-      .eq("id", submissionId);
-  } else {
-    await admin
-      .from("submissions")
-      .update({ moderation_status: "rejected" })
-      .eq("id", submissionId);
-  }
-
-  return NextResponse.json({ ok: true });
 }

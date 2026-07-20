@@ -35,6 +35,15 @@ export interface Restaurant {
   created_at: string;
 }
 
+export interface ReviewPhoto {
+  id: string;
+  review_id: string;
+  storage_path: string;
+  url: string;
+  status: ModerationStatus;
+  created_at: string;
+}
+
 export interface SignatureDish {
   id: string;
   restaurant_id: string;
