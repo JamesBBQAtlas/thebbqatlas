@@ -20,6 +20,20 @@ export async function PATCH(request: Request) {
   if (["consumer", "owner", "seller"].includes(body.accountType)) {
     updates.account_type = body.accountType;
   }
+  if (typeof body.avatarUrl === "string") {
+    updates.avatar_url = body.avatarUrl.trim().slice(0, 500) || null;
+  }
+  if (typeof body.username === "string") {
+    const username = body.username.trim().toLowerCase();
+    if (username && !/^[a-z0-9_]{3,20}$/.test(username)) {
+      return NextResponse.json(
+        { error: "Username must be 3–20 letters, numbers or underscores." },
+        { status: 400 }
+      );
+    }
+    updates.username = username || null;
+  }
+
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
@@ -33,6 +47,13 @@ export async function PATCH(request: Request) {
     .upsert({ id: user.id, ...updates }, { onConflict: "id" });
 
   if (error) {
+    // 23505 = unique_violation (username already taken)
+    if ((error as { code?: string }).code === "23505") {
+      return NextResponse.json(
+        { error: "That username is already taken." },
+        { status: 409 }
+      );
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   return NextResponse.json({ ok: true });

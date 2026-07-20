@@ -8,6 +8,7 @@ import { AdSlot } from "@/components/monetization/AdSlot";
 import { AffiliateLink } from "@/components/monetization/AffiliateLink";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { articleJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
+import { TrackView } from "@/components/account/TrackView";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -56,6 +57,12 @@ export default async function GuidePage({ params }: Props) {
             { name: guide.title, path: `/guides/${guide.slug}` },
           ]),
         ]}
+      />
+      <TrackView
+        entityType="guide"
+        entityId={guide.id}
+        title={guide.title}
+        slug={guide.slug}
       />
       <div className="relative aspect-[21/9] rounded-xl overflow-hidden mb-8">
         <Image src={guide.hero_image_url} alt={guide.title} fill className="object-cover" priority />

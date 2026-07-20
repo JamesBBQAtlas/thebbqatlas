@@ -87,9 +87,11 @@ const FALLBACK_STYLE: maplibregl.StyleSpecification = {
 export function MapExplorer({
   restaurants,
   mapKey,
+  personal = false,
 }: {
   restaurants: Restaurant[];
   mapKey?: string;
+  personal?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -226,10 +228,12 @@ export function MapExplorer({
         source: "spots",
         filter: ["!", ["has", "point_count"]],
         paint: {
-          "circle-color": ["case", ["==", ["get", "featured"], 1], GOLD, SIENNA],
-          "circle-radius": 7,
+          "circle-color": personal
+            ? "#F59E0B"
+            : ["case", ["==", ["get", "featured"], 1], GOLD, SIENNA],
+          "circle-radius": personal ? 8 : 7,
           "circle-stroke-width": 2,
-          "circle-stroke-color": INK,
+          "circle-stroke-color": personal ? "#E85D04" : INK,
         },
       });
 
@@ -568,14 +572,21 @@ export function MapExplorer({
           {sidebarOpen ? "Hide" : "Filters"}
         </button>
         {/* Legend */}
-        <div className="absolute bottom-3 left-3 z-10 flex items-center gap-4 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-brand-gold" /> Featured
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full bg-brand-sienna" /> Listed
-          </span>
-        </div>
+        {personal ? (
+          <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">
+            <span className="h-2.5 w-2.5 rounded-full bg-[#F59E0B] ring-2 ring-[#E85D04]" />
+            Your saved spots
+          </div>
+        ) : (
+          <div className="absolute bottom-3 left-3 z-10 flex items-center gap-4 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-brand-gold" /> Featured
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2.5 w-2.5 rounded-full bg-brand-sienna" /> Listed
+            </span>
+          </div>
+        )}
 
         {selected && (
           <MapPreviewCard

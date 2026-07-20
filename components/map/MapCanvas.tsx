@@ -16,6 +16,10 @@ const MapExplorer = dynamic(
   }
 );
 
-export function MapCanvas(props: { restaurants: Restaurant[]; mapKey?: string }) {
+export function MapCanvas(props: {
+  restaurants: Restaurant[];
+  mapKey?: string;
+  personal?: boolean;
+}) {
   return <MapExplorer {...props} />;
 }

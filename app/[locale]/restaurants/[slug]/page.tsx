@@ -23,6 +23,7 @@ import { TrackedLink } from "@/components/monetization/TrackedLink";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
+import { TrackView } from "@/components/account/TrackView";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { routing } from "@/i18n/routing";
@@ -120,6 +121,12 @@ export default async function RestaurantPage({ params }: Props) {
             { name: restaurant.name, path: `/restaurants/${restaurant.slug}` },
           ]),
         ]}
+      />
+      <TrackView
+        entityType="venue"
+        entityId={restaurant.id}
+        title={restaurant.name}
+        slug={restaurant.slug}
       />
 
       {/* Hero */}

@@ -17,10 +17,21 @@ export type MapItemCategory =
 export interface Profile {
   id: string;
   display_name: string | null;
+  username: string | null;
   avatar_url: string | null;
   role: UserRole;
   account_type: AccountType;
   created_at: string;
+}
+
+export interface ViewHistoryItem {
+  id: string;
+  user_id: string;
+  entity_type: "venue" | "guide" | "news";
+  entity_id: string;
+  title: string | null;
+  slug: string | null;
+  viewed_at: string;
 }
 
 export interface RestaurantClaim {

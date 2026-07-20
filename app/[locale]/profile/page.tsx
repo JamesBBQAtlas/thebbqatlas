@@ -1,9 +1,10 @@
 import { redirect } from "next/navigation";
 import { Link } from "@/i18n/navigation";
-import { Store } from "lucide-react";
+import { Store, Map as MapIcon, Settings, Clock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
-import { DisplayNameForm } from "@/components/account/DisplayNameForm";
+import { AvatarUpload } from "@/components/account/AvatarUpload";
+import { avatarFor } from "@/lib/account/avatar";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import type { Restaurant, Submission, AccountType } from "@/lib/types/database";
 
@@ -32,6 +33,12 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+const HISTORY_HREF: Record<string, (slug: string) => string> = {
+  venue: (s) => `/restaurants/${s}`,
+  guide: (s) => `/guides/${s}`,
+  news: (s) => `/news/${s}`,
+};
+
 export default async function ProfilePage() {
   const supabase = await createClient();
   const {
@@ -47,6 +54,7 @@ export default async function ProfilePage() {
 
   const accountType = (profile?.account_type ?? "consumer") as AccountType;
   const displayName = profile?.display_name ?? user.email?.split("@")[0] ?? "Member";
+  const avatar = avatarFor(profile?.avatar_url, accountType);
 
   const { data: savedRows } = await supabase
     .from("saved_spots")
@@ -70,50 +78,67 @@ export default async function ProfilePage() {
     }
   }
 
-  const [{ data: submissions }, { data: claims }] = await Promise.all([
-    supabase
-      .from("submissions")
-      .select("*")
-      .eq("submitted_by", user.id)
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("restaurant_claims")
-      .select("*, restaurants(name, slug)")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false }),
-  ]);
+  const [{ data: submissions }, { data: claims }, { data: history }] =
+    await Promise.all([
+      supabase
+        .from("submissions")
+        .select("*")
+        .eq("submitted_by", user.id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("restaurant_claims")
+        .select("*, restaurants(name, slug)")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("view_history")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("viewed_at", { ascending: false })
+        .limit(8),
+    ]);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10">
       {/* Header */}
       <div className="mb-10 flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
-          <div className="grid h-14 w-14 place-items-center rounded-full bg-brand-gold/15 font-heading text-2xl font-bold text-brand-gold">
-            {displayName.charAt(0).toUpperCase()}
-          </div>
+          <AvatarUpload current={avatar} />
           <div>
             <h1 className="font-heading text-3xl font-bold text-text-primary">
               My Atlas
             </h1>
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
-              <DisplayNameForm initial={displayName} />
+              <span className="text-text-secondary">{displayName}</span>
+              {profile?.username && (
+                <span className="text-text-muted">@{profile.username}</span>
+              )}
               <span className="rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-brand-sienna">
                 {ACCOUNT_LABELS[accountType]}
               </span>
             </div>
           </div>
         </div>
-        <form action="/api/auth/signout" method="post">
-          <button
-            type="submit"
-            className="rounded-md border border-border-default px-4 py-2 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
+        <div className="flex items-center gap-2">
+          <Link
+            href="/profile/settings"
+            className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-4 py-2 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
           >
-            Sign out
-          </button>
-        </form>
+            <Settings className="h-4 w-4" />
+            Settings
+          </Link>
+          <form action="/api/auth/signout" method="post">
+            <button
+              type="submit"
+              className="rounded-md border border-border-default px-4 py-2 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
       </div>
 
-      {/* Owner/seller call-to-action for consumers */}
+      {/* Owner/seller CTA for consumers */}
       {accountType === "consumer" && (
         <Link
           href="/list"
@@ -133,9 +158,20 @@ export default async function ProfilePage() {
 
       {/* Saved spots */}
       <section className="mb-14">
-        <h2 className="mb-4 font-heading text-xl font-bold text-text-primary">
-          Saved Spots
-        </h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-heading text-xl font-bold text-text-primary">
+            Saved Spots
+          </h2>
+          {savedRestaurants.length > 0 && (
+            <Link
+              href="/profile/map"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-gold hover:underline"
+            >
+              <MapIcon className="h-4 w-4" />
+              View on map
+            </Link>
+          )}
+        </div>
         {savedRestaurants.length === 0 ? (
           <p className="rounded-xl border border-border-subtle bg-surface-0 p-6 text-text-muted">
             No saved spots yet.{" "}
@@ -153,6 +189,32 @@ export default async function ProfilePage() {
         )}
       </section>
 
+      {/* Recently viewed */}
+      {(history ?? []).length > 0 && (
+        <section className="mb-14">
+          <h2 className="mb-4 flex items-center gap-2 font-heading text-xl font-bold text-text-primary">
+            <Clock className="h-5 w-5 text-text-muted" />
+            Recently viewed
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {(history ?? []).map((h) => {
+              const href = h.slug
+                ? (HISTORY_HREF[h.entity_type]?.(h.slug) ?? "#")
+                : "#";
+              return (
+                <Link
+                  key={h.id}
+                  href={href}
+                  className="rounded-full border border-border-subtle bg-surface-0 px-4 py-1.5 text-sm text-text-secondary transition-colors hover:border-border-default hover:text-brand-gold"
+                >
+                  {h.title ?? h.slug ?? "Item"}
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Claims */}
       {(claims ?? []).length > 0 && (
         <section className="mb-14">
@@ -169,7 +231,7 @@ export default async function ProfilePage() {
                   <p className="font-semibold text-text-primary">
                     {c.restaurants?.name ?? "Venue"}
                   </p>
-                  <p className="text-sm text-text-muted capitalize">
+                  <p className="text-sm capitalize text-text-muted">
                     {c.role_requested} claim
                   </p>
                 </div>
