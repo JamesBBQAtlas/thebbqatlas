@@ -9,11 +9,69 @@ import type { Restaurant } from "@/lib/types/database";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
 import { resolveCountryCode, countryName } from "@/lib/constants/countries";
 import { FlagIcon } from "@/components/ui/FlagIcon";
+import { MapPreviewCard } from "./MapPreviewCard";
 import { cn } from "@/lib/utils/cn";
 
 const GOLD = "#D4AF37";
 const SIENNA = "#C4622D";
 const INK = "#0C0907";
+
+// Subtle deep-navy so open water reads blue rather than black, while land and
+// streets from the dataviz-dark basemap stay exactly as-is.
+const OCEAN = "#0E1B27";
+const OCEAN_WATER = "#12242F";
+
+// --- Session-scoped view persistence -----------------------------------------
+// Remembers where the user was on the map (and their filters) so hitting Back
+// from a restaurant page returns them to the same view instead of resetting.
+const SESSION_KEY = "bbqatlas:map:v1";
+
+type MapViewState = {
+  center?: [number, number];
+  zoom?: number;
+  style?: string;
+  country?: string;
+  query?: string;
+  sidebarOpen?: boolean;
+};
+
+function readMapState(): MapViewState | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(sessionStorage.getItem(SESSION_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function saveMapState(patch: MapViewState) {
+  if (typeof window === "undefined") return;
+  try {
+    const prev = readMapState() ?? {};
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify({ ...prev, ...patch }));
+  } catch {
+    /* private mode / quota — non-fatal */
+  }
+}
+
+// Repaint ocean + water bodies once the basemap style has loaded.
+function tintWater(map: maplibregl.Map) {
+  try {
+    for (const layer of map.getStyle().layers ?? []) {
+      const id = layer.id.toLowerCase();
+      if (layer.type === "background") {
+        map.setPaintProperty(layer.id, "background-color", OCEAN);
+      } else if (
+        layer.type === "fill" &&
+        (id.includes("water") || id.includes("ocean") || id.includes("sea"))
+      ) {
+        map.setPaintProperty(layer.id, "fill-color", OCEAN_WATER);
+      }
+    }
+  } catch {
+    /* fallback style has no such layers — safe to ignore */
+  }
+}
 
 // No-key fallback: a flat dark canvas so pins still render during development.
 const FALLBACK_STYLE: maplibregl.StyleSpecification = {
@@ -37,11 +95,21 @@ export function MapExplorer({
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const router = useRouter();
 
+  // Restore the last view once (client-only; the map is imported ssr:false).
+  const [initialState] = useState<MapViewState>(() => readMapState() ?? {});
+
   const [ready, setReady] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [style, setStyle] = useState<string>("all");
-  const [country, setCountry] = useState<string>("all");
-  const [query, setQuery] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(initialState.sidebarOpen ?? true);
+  const [style, setStyle] = useState<string>(initialState.style ?? "all");
+  const [country, setCountry] = useState<string>(initialState.country ?? "all");
+  const [query, setQuery] = useState(initialState.query ?? "");
+  const [selected, setSelected] = useState<Restaurant | null>(null);
+
+  const bySlug = useMemo(() => {
+    const m = new Map<string, Restaurant>();
+    for (const r of restaurants) m.set(r.slug, r);
+    return m;
+  }, [restaurants]);
 
   const countries = useMemo(() => {
     const map = new Map<string, string>();
@@ -92,15 +160,25 @@ export function MapExplorer({
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: styleSpec,
-      center: [8, 25],
-      zoom: 1.3,
+      center: initialState.center ?? [8, 25],
+      zoom: initialState.zoom ?? 1.3,
       attributionControl: false,
     });
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     map.addControl(new maplibregl.AttributionControl({ compact: true }));
 
+    // Remember position/zoom as the user pans & zooms.
+    map.on("moveend", () => {
+      saveMapState({
+        center: map.getCenter().toArray() as [number, number],
+        zoom: map.getZoom(),
+      });
+    });
+
     map.on("load", () => {
+      tintWater(map);
+
       map.addSource("spots", {
         type: "geojson",
         data: geojson as GeoJSON.FeatureCollection,
@@ -159,9 +237,22 @@ export function MapExplorer({
         });
       });
 
+      // Click a pin → open the in-map preview card (no full navigation yet).
       map.on("click", "points", (e) => {
-        const slug = e.features?.[0]?.properties?.slug;
-        if (slug) router.push(`/restaurants/${slug}`);
+        const slug = e.features?.[0]?.properties?.slug as string | undefined;
+        const r = slug ? bySlug.get(slug) : undefined;
+        if (!r) return;
+        popupRef.current?.remove();
+        setSelected(r);
+        map.easeTo({ center: [r.lng, r.lat], duration: 450 });
+      });
+
+      // Click empty water/land → dismiss the card.
+      map.on("click", (e) => {
+        const hits = map.queryRenderedFeatures(e.point, {
+          layers: ["points", "clusters"],
+        });
+        if (!hits.length) setSelected(null);
       });
 
       map.on("mouseenter", "points", (e) => {
@@ -178,7 +269,7 @@ export function MapExplorer({
         })
           .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
           .setHTML(
-            `<div style="font-family:'Source Sans 3 Variable',sans-serif"><div style="font-weight:700;color:#F5F0EB">${p.name}</div><div style="font-size:12px;color:#C4B8AB">${p.location}</div><div style="font-size:11px;color:#D87A45;text-transform:uppercase;letter-spacing:.06em;margin-top:2px">${p.styleLabel}</div></div>`
+            `<div class="apop"><div class="apop-name">${p.name}</div><div class="apop-loc">${p.location}</div><div class="apop-style">${p.styleLabel}</div><div class="apop-hint">Click for details</div></div>`
           )
           .addTo(map);
       });
@@ -208,8 +299,28 @@ export function MapExplorer({
     src?.setData(geojson as GeoJSON.FeatureCollection);
   }, [geojson, ready]);
 
+  // Persist filters + sidebar state alongside the remembered map position.
+  useEffect(() => {
+    saveMapState({ style, country, query, sidebarOpen });
+  }, [style, country, query, sidebarOpen]);
+
   function flyTo(r: Restaurant) {
     mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 12, speed: 1.4 });
+  }
+
+  function openPreview(r: Restaurant) {
+    setSelected(r);
+    flyTo(r);
+  }
+
+  // Snapshot the exact current view right before leaving for a full page.
+  function persistView() {
+    const m = mapRef.current;
+    if (m)
+      saveMapState({
+        center: m.getCenter().toArray() as [number, number],
+        zoom: m.getZoom(),
+      });
   }
 
   return (
@@ -267,9 +378,15 @@ export function MapExplorer({
             <li key={r.id} className="border-b border-border-subtle/60">
               <button
                 type="button"
-                onClick={() => flyTo(r)}
-                onDoubleClick={() => router.push(`/restaurants/${r.slug}`)}
-                className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-1"
+                onClick={() => openPreview(r)}
+                onDoubleClick={() => {
+                  persistView();
+                  router.push(`/restaurants/${r.slug}`);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-1",
+                  selected?.id === r.id && "bg-surface-1"
+                )}
               >
                 <span
                   className={cn(
@@ -321,6 +438,14 @@ export function MapExplorer({
             <span className="h-2.5 w-2.5 rounded-full bg-brand-sienna" /> Listed
           </span>
         </div>
+
+        {selected && (
+          <MapPreviewCard
+            restaurant={selected}
+            onClose={() => setSelected(null)}
+            onNavigate={persistView}
+          />
+        )}
       </div>
     </div>
   );
