@@ -1,19 +1,20 @@
 import Script from "next/script";
+import { GA_ID, GA_ENABLED } from "@/lib/analytics/ga";
 
 /**
  * Google Analytics 4 with Consent Mode v2.
  *
- * Consent defaults to *denied* for every storage type, so nothing that needs
- * consent fires until the visitor accepts in the cookie banner (which calls
- * gtag('consent','update', …)). If a prior choice is stored in the
- * `bbqatlas_consent` cookie we honour it immediately, so returning visitors
- * don't have consent reset on each load.
+ * Every storage type defaults to *denied*, so nothing that needs consent fires
+ * until the visitor accepts in the cookie banner (which calls
+ * gtag('consent','update', …)). Consent Mode still sends cookieless, modelled
+ * pings while denied, so aggregate trends survive a "decline".
  *
- * Renders nothing unless NEXT_PUBLIC_GA_ID is set, so preview/dev stay clean.
+ * We request analytics AND advertising consent because the roadmap includes
+ * AdSense; `ads_data_redaction` keeps ad identifiers stripped until the visitor
+ * opts in. A prior choice stored in `bbqatlas_consent` is honoured on load.
  */
 export function Analytics() {
-  const gaId = process.env.NEXT_PUBLIC_GA_ID;
-  if (!gaId) return null;
+  if (!GA_ENABLED) return null;
 
   return (
     <>
@@ -24,23 +25,26 @@ export function Analytics() {
           window.gtag = gtag;
           var stored = document.cookie.match(/(?:^|; )bbqatlas_consent=([^;]+)/);
           var granted = stored && stored[1] === 'granted';
+          var state = granted ? 'granted' : 'denied';
           gtag('consent', 'default', {
-            ad_storage: 'denied',
-            ad_user_data: 'denied',
-            ad_personalization: 'denied',
-            analytics_storage: granted ? 'granted' : 'denied',
+            ad_storage: state,
+            ad_user_data: state,
+            ad_personalization: state,
+            analytics_storage: state,
             wait_for_update: 500
           });
+          gtag('set', 'ads_data_redaction', true);
+          gtag('set', 'url_passthrough', true);
         `}
       </Script>
       <Script
-        src={`https://www.googletagmanager.com/gtag/js?id=${gaId}`}
+        src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
         strategy="afterInteractive"
       />
       <Script id="ga-init" strategy="afterInteractive">
         {`
           gtag('js', new Date());
-          gtag('config', '${gaId}', { anonymize_ip: true });
+          gtag('config', '${GA_ID}', { anonymize_ip: true });
         `}
       </Script>
     </>

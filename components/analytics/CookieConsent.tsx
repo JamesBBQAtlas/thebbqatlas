@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Cookie } from "lucide-react";
 import { Link } from "@/i18n/navigation";
+import { GA_ENABLED } from "@/lib/analytics/ga";
 
 const COOKIE = "bbqatlas_consent";
 const ONE_YEAR = 60 * 60 * 24 * 365;
@@ -34,13 +35,18 @@ export function CookieConsent() {
   const [show, setShow] = useState(false);
 
   useEffect(() => {
-    if (process.env.NEXT_PUBLIC_GA_ID && !readConsent()) setShow(true);
+    if (GA_ENABLED && !readConsent()) setShow(true);
   }, []);
 
   function decide(granted: boolean) {
     writeConsent(granted ? "granted" : "denied");
+    const state = granted ? "granted" : "denied";
+    // Analytics + advertising (AdSense-ready). Declining keeps everything denied.
     window.gtag?.("consent", "update", {
-      analytics_storage: granted ? "granted" : "denied",
+      analytics_storage: state,
+      ad_storage: state,
+      ad_user_data: state,
+      ad_personalization: state,
     });
     setShow(false);
   }
