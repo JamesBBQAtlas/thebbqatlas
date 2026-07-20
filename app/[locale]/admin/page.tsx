@@ -91,6 +91,20 @@ export default async function AdminDashboard() {
 
   const pendingTotal = subsPending + reviewsPending + photosPending;
 
+  // Corrections/closures are submissions with a non-'new_venue' type.
+  let correctionsPending = 0;
+  try {
+    const { count: c } = await db
+      .from("submissions")
+      .select("*", { count: "exact", head: true })
+      .eq("moderation_status", "pending")
+      .neq("submission_type", "new_venue");
+    correctionsPending = c ?? 0;
+  } catch {
+    /* column may not exist in older envs */
+  }
+  const newVenuePending = Math.max(0, subsPending - correctionsPending);
+
   // Basic per-restaurant clicks (aggregated in-app; fine at launch volume).
   let topClicks: { name: string; slug: string; clicks: number }[] = [];
   try {
@@ -140,7 +154,8 @@ export default async function AdminDashboard() {
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         <Stat label="Restaurants" value={restaurantsTotal} hint={`${restaurantsApproved} approved`} />
-        <Stat label="Submissions pending" value={subsPending} hint={`${subsApproved} approved · ${subsRejected} rejected`} />
+        <Stat label="Submissions pending" value={newVenuePending} hint={`${subsApproved} approved · ${subsRejected} rejected`} />
+        <Stat label="Corrections pending" value={correctionsPending} hint="edits & closures" />
         <Stat label="Reviews pending" value={reviewsPending} hint={`${reviewsApproved} approved`} />
         <Stat label="Photos pending" value={photosPending} hint={`${photos} total`} />
         <Stat label="Videos" value="—" hint="uploads phase" />

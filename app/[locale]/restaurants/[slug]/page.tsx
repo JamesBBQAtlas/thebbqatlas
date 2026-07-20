@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
@@ -22,6 +22,7 @@ import { FlagIcon } from "@/components/ui/FlagIcon";
 import { TrackedLink } from "@/components/monetization/TrackedLink";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
+import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { routing } from "@/i18n/routing";
@@ -164,6 +165,11 @@ export default async function RestaurantPage({ params }: Props) {
             </h1>
 
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+              {restaurant.permanently_closed && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-destructive bg-destructive/15 px-3.5 py-1 text-xs font-bold uppercase tracking-[0.06em] text-destructive">
+                  Permanently closed
+                </span>
+              )}
               <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-sienna bg-brand-sienna/10 px-3.5 py-1 text-xs font-semibold uppercase tracking-[0.06em] text-brand-sienna-light">
                 {STYLE_LABELS[restaurant.style]}
               </span>
@@ -296,6 +302,19 @@ export default async function RestaurantPage({ params }: Props) {
                   </div>
                 </div>
               )}
+              {restaurant.phone && (
+                <div className="flex items-start gap-3">
+                  <Phone className="mt-0.5 h-4 w-4 shrink-0 text-brand-sienna" />
+                  <div>
+                    <dt className="u-eyebrow text-[0.6875rem] text-text-muted">
+                      {t("phone")}
+                    </dt>
+                    <dd className="text-[0.9375rem] text-text-primary">
+                      {restaurant.phone}
+                    </dd>
+                  </div>
+                </div>
+              )}
               {alcohol && (
                 <div className="flex items-start gap-3">
                   <Beer className="mt-0.5 h-4 w-4 shrink-0 text-brand-sienna" />
@@ -341,6 +360,11 @@ export default async function RestaurantPage({ params }: Props) {
             nearby={nearby.map((n) => ({ lat: n.r.lat, lng: n.r.lng }))}
             caption={cityCountry}
           />
+
+          {/* Keep listings honest */}
+          <div className="text-center">
+            <ReportCorrection restaurantId={restaurant.id} name={restaurant.name} />
+          </div>
         </aside>
       </div>
 

@@ -71,7 +71,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
 
-      if (action === "approve") {
+      const kind = submission.submission_type ?? "new_venue";
+
+      if (action === "reject") {
+        await admin
+          .from("submissions")
+          .update({ moderation_status: "rejected", admin_notes: notes ?? null })
+          .eq("id", id);
+        return NextResponse.json({ ok: true });
+      }
+
+      // Approve — behaviour depends on the kind of submission.
+      if (kind === "new_venue") {
         await admin.from("restaurants").insert({
           slug: restaurantSlug(submission.name, submission.city),
           name: submission.name,
@@ -91,16 +102,20 @@ export async function POST(request: Request) {
           is_featured: false,
           status: "approved",
         });
+      } else if (kind === "closure" && submission.target_restaurant_id) {
+        // Approving a closure report marks the target venue permanently closed.
         await admin
-          .from("submissions")
-          .update({ moderation_status: "approved" })
-          .eq("id", id);
-      } else {
-        await admin
-          .from("submissions")
-          .update({ moderation_status: "rejected", admin_notes: notes ?? null })
-          .eq("id", id);
+          .from("restaurants")
+          .update({ permanently_closed: true })
+          .eq("id", submission.target_restaurant_id);
       }
+      // For a generic "correction" we simply mark it resolved; an admin applies
+      // the specific edit to the venue directly.
+
+      await admin
+        .from("submissions")
+        .update({ moderation_status: "approved" })
+        .eq("id", id);
       return NextResponse.json({ ok: true });
     }
 

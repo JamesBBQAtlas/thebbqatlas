@@ -6,6 +6,7 @@ import {
   ModerationConsole,
   type ReviewItem,
   type PhotoItem,
+  type CorrectionItem,
 } from "@/components/admin/ModerationConsole";
 import type { Submission } from "@/lib/types/database";
 
@@ -61,7 +62,39 @@ export default async function ModerationPage() {
       .order("created_at", { ascending: true }),
   ]);
 
-  const submissions = (subsRes.data ?? []) as Submission[];
+  const allSubs = (subsRes.data ?? []) as Submission[];
+  const submissions = allSubs.filter(
+    (s) => (s.submission_type ?? "new_venue") === "new_venue"
+  );
+  const correctionSubs = allSubs.filter(
+    (s) => (s.submission_type ?? "new_venue") !== "new_venue"
+  );
+
+  // Resolve target venue names for corrections/closures.
+  const targetIds = [
+    ...new Set(correctionSubs.map((s) => s.target_restaurant_id).filter(Boolean)),
+  ] as string[];
+  const targetById = new Map<string, { name: string; slug: string }>();
+  if (targetIds.length) {
+    const { data: targets } = await db
+      .from("restaurants")
+      .select("id, name, slug")
+      .in("id", targetIds);
+    for (const t of targets ?? []) targetById.set(t.id, { name: t.name, slug: t.slug });
+  }
+  const corrections: CorrectionItem[] = correctionSubs.map((s) => ({
+    id: s.id,
+    kind: (s.submission_type ?? "correction") as "correction" | "closure",
+    message: s.description,
+    created_at: s.created_at,
+    contactEmail: s.contact_email ?? undefined,
+    targetName: s.target_restaurant_id
+      ? targetById.get(s.target_restaurant_id)?.name
+      : undefined,
+    targetSlug: s.target_restaurant_id
+      ? targetById.get(s.target_restaurant_id)?.slug
+      : undefined,
+  }));
 
   // Attach reviewer display names in one extra query.
   const rawReviews = reviewsRes.data ?? [];
@@ -105,6 +138,7 @@ export default async function ModerationPage() {
       </p>
       <ModerationConsole
         submissions={submissions}
+        corrections={corrections}
         reviews={reviews}
         photos={photos}
       />

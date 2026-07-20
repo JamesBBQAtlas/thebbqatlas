@@ -2,6 +2,16 @@ import type { BbqStyle } from "@/lib/constants/styles";
 
 export type ModerationStatus = "pending" | "approved" | "rejected";
 export type UserRole = "user" | "admin";
+export type SubmissionKind = "new_venue" | "correction" | "closure";
+export type MapItemCategory =
+  | "restaurant"
+  | "food_truck"
+  | "retailer"
+  | "market"
+  | "event"
+  | "festival"
+  | "school"
+  | "caterer";
 
 export interface Profile {
   id: string;
@@ -33,6 +43,13 @@ export interface Restaurant {
   is_featured: boolean;
   status: ModerationStatus;
   created_at: string;
+  // Category-aware / time-based map item fields (foundation).
+  category?: MapItemCategory;
+  permanently_closed?: boolean;
+  phone?: string | null;
+  hours?: Record<string, string> | null;
+  event_starts_at?: string | null;
+  event_ends_at?: string | null;
 }
 
 export interface ReviewPhoto {
@@ -92,6 +109,8 @@ export interface Submission {
   moderation_status: ModerationStatus;
   admin_notes: string | null;
   created_at: string;
+  submission_type?: SubmissionKind;
+  target_restaurant_id?: string | null;
 }
 
 export interface SavedSpot {
