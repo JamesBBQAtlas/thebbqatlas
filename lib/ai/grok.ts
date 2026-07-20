@@ -81,7 +81,26 @@ export async function grokJSON<T>({
     temperature,
   };
   if (search) {
-    body.tools = [{ type: "web_search" }, { type: "x_search" }];
+    // Atlas policy: hunt aggressively across the open web + socials, but NEVER
+    // source from Google (esp. Google Maps) — we don't want any question of
+    // having copied their listing data. Enforced here at the API level, not
+    // just requested in the prompt. Image understanding lets Grok read details
+    // (hours, menus) straight off social post images.
+    body.tools = [
+      {
+        type: "web_search",
+        filters: {
+          excluded_domains: [
+            "google.com",
+            "maps.google.com",
+            "goo.gl",
+            "maps.app.goo.gl",
+          ],
+        },
+        enable_image_understanding: true,
+      },
+      { type: "x_search" },
+    ];
   }
 
   let res: Response;

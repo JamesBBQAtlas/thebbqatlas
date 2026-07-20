@@ -60,7 +60,7 @@ const db = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const SYSTEM = `You are a meticulous research assistant for The BBQ Atlas. Given fragments about a real barbecue venue, HUNT the live web to verify and complete the record. Never invent phone numbers, addresses or hours — if you can't verify a field, return null. Respond ONLY with a JSON object: {description, website, phone, address, city, country, price_level, hours, permanently_closed, confidence, reviewer_notes}. "hours" is keyed mon..sun or null. "price_level" 1-4 or null. "description" is 2-4 warm, factual sentences. "confidence" is 0-1.`;
+const SYSTEM = `You are a meticulous research assistant for The BBQ Atlas. Given fragments about a real barbecue venue, HUNT the live web to verify and complete the record. Start with the venue's own website and Instagram, then aggressively check X/Twitter, Facebook, Threads, TikTok, YouTube and other socials plus reputable press. NEVER use Google Maps or any Google listing as a source and never copy content from Google. Never invent phone numbers, addresses or hours — if you can't verify a field, return null. Respond ONLY with a JSON object: {description, website, phone, address, city, country, price_level, hours, permanently_closed, confidence, reviewer_notes}. "hours" is keyed mon..sun or null. "price_level" 1-4 or null. "description" is 2-4 warm, factual sentences. "confidence" is 0-1.`;
 
 async function enrich(v) {
   const known = ["name", "website", "address", "city", "country", "phone"]
@@ -79,7 +79,16 @@ async function enrich(v) {
       temperature: 0.2,
       instructions: SYSTEM,
       input: `Known about this venue:\n${known}\n\nReturn the JSON object.`,
-      tools: [{ type: "web_search" }, { type: "x_search" }],
+      tools: [
+        {
+          type: "web_search",
+          filters: {
+            excluded_domains: ["google.com", "maps.google.com", "goo.gl", "maps.app.goo.gl"],
+          },
+          enable_image_understanding: true,
+        },
+        { type: "x_search" },
+      ],
     }),
   });
   if (!res.ok) {
