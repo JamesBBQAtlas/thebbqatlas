@@ -73,6 +73,16 @@ export async function POST(request: Request) {
 
   try {
     const enriched = await enrichVenue(lead);
+    // Provenance: log the hunt (and its sources) whether or not it's applied.
+    await ctx.db.from("enrichment_runs").insert({
+      restaurant_id: body.restaurantId ?? null,
+      entity_type: "venue",
+      lead: lead as unknown as Record<string, unknown>,
+      result: enriched as unknown as Record<string, unknown>,
+      citations: enriched.citations?.length ? enriched.citations : null,
+      model: process.env.XAI_MODEL ?? "grok-4.5",
+      created_by: ctx.userId,
+    });
     return NextResponse.json({ enriched });
   } catch (err) {
     const msg = err instanceof GrokError ? err.message : "Enrichment failed.";

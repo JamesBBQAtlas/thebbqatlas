@@ -22,6 +22,7 @@ import { FlagIcon } from "@/components/ui/FlagIcon";
 import { TrackedLink } from "@/components/monetization/TrackedLink";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { CheckInButton } from "@/components/restaurants/CheckInButton";
+import { InstagramEmbed } from "@/components/restaurants/InstagramEmbed";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
@@ -283,6 +284,16 @@ export default async function RestaurantPage({ params }: Props) {
               </div>
             </section>
           )}
+
+          {Array.isArray(restaurant.instagram_posts) &&
+            restaurant.instagram_posts.length > 0 && (
+              <section className="mb-12">
+                <h2 className="mb-5 border-b border-border-subtle pb-3 font-heading text-xl font-bold text-text-primary">
+                  From their Instagram
+                </h2>
+                <InstagramEmbed posts={restaurant.instagram_posts} />
+              </section>
+            )}
 
           {dishes.length > 0 && (
             <section className="mb-12">

@@ -11,7 +11,7 @@ import {
   Store,
 } from "lucide-react";
 
-type Tab = "venue" | "news";
+type Tab = "venue" | "chain" | "news";
 
 interface EnrichedVenue {
   name: string | null;
@@ -34,6 +34,7 @@ interface EnrichedVenue {
   brand_name: string | null;
   location_label: string | null;
   is_multi_location: boolean;
+  instagram_posts: string[];
   confidence: number;
   reviewer_notes: string | null;
   citations: string[];
@@ -102,8 +103,13 @@ function VenueTool() {
   const [isChain, setIsChain] = useState(false);
   const [brandBusy, setBrandBusy] = useState(false);
   const [brandStatus, setBrandStatus] = useState("");
+  // New-venue creation.
+  const [isNewVenue, setIsNewVenue] = useState(false);
+  const [createBusy, setCreateBusy] = useState<null | "publish" | "queue">(null);
+  const [createStatus, setCreateStatus] = useState("");
 
   const SCALARS = [
+    "name",
     "description",
     "website",
     "phone",
@@ -166,6 +172,7 @@ function VenueTool() {
     const e: EnrichedVenue = data.enriched;
     setResult(e);
     const f: Record<string, string> = {
+      name: e.name ?? lead.name ?? "",
       description: e.description ?? "",
       website: e.website ?? "",
       phone: e.phone ?? "",
@@ -235,6 +242,67 @@ function VenueTool() {
     }
     setBrandStatus(
       `Grouped under “${brandName.trim()}”${locationLabel.trim() ? ` as “${locationLabel.trim()}”` : ""}. ✓`
+    );
+  }
+
+  function buildVenuePayload() {
+    let hours: unknown = null;
+    if (fields.hours) {
+      try {
+        hours = JSON.parse(fields.hours);
+      } catch {
+        hours = null;
+      }
+    }
+    const price = parseInt(fields.price_level ?? "", 10);
+    return {
+      name: fields.name?.trim() || result?.name || lead.name || "",
+      description: fields.description ?? "",
+      website: fields.website || null,
+      phone: fields.phone || null,
+      address: fields.address || null,
+      city: fields.city || null,
+      country: fields.country || null,
+      style: fields.style || null,
+      price_level: Number.isNaN(price) ? null : price,
+      offerings: (fields.offerings ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+      hours,
+      permanently_closed: result?.permanently_closed ?? false,
+      instagram_url: fields.instagram_url || null,
+      x_url: fields.x_url || null,
+      facebook_url: fields.facebook_url || null,
+      tiktok_url: fields.tiktok_url || null,
+      youtube_url: fields.youtube_url || null,
+      instagram_posts: result?.instagram_posts ?? [],
+      location_label: locationLabel.trim() || null,
+    };
+  }
+
+  async function createVenue(publish: boolean) {
+    setCreateBusy(publish ? "publish" : "queue");
+    setError("");
+    setCreateStatus("");
+    const res = await fetch("/api/admin/venues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        venue: buildVenuePayload(),
+        publish,
+        brand: brandName.trim() ? { name: brandName.trim() } : undefined,
+        lead,
+        citations: result?.citations ?? [],
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setCreateBusy(null);
+    if (!res.ok) {
+      setError(data.error || "Could not create venue.");
+      return;
+    }
+    setCreateStatus(
+      publish
+        ? `Published “${buildVenuePayload().name}” — it's live at /restaurants/${data.slug}. ✓`
+        : `Added “${buildVenuePayload().name}” to the review queue for polishing. ✓`
     );
   }
 
@@ -314,6 +382,21 @@ function VenueTool() {
             </p>
           )}
         </div>
+
+        <label className="mb-4 flex items-center gap-2 rounded-lg border border-border-subtle bg-surface-1 px-4 py-3">
+          <input
+            type="checkbox"
+            checked={isNewVenue}
+            onChange={(e) => setIsNewVenue(e.target.checked)}
+            className="h-4 w-4 accent-brand-gold"
+          />
+          <span className="text-sm font-semibold text-text-primary">
+            This is a new venue
+          </span>
+          <span className="text-xs text-text-muted">
+            — create it from what Grok finds
+          </span>
+        </label>
 
         <p className={labelClass}>What we know</p>
         <div className="space-y-2">
@@ -445,41 +528,328 @@ function VenueTool() {
                   className={inputClass}
                 />
               </div>
-              <button
-                type="button"
-                onClick={groupUnderBrand}
-                disabled={brandBusy || !venueId}
-                className="mt-3 inline-flex items-center gap-2 rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
-              >
-                {brandBusy ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Store className="h-4 w-4" />
-                )}
-                Group this venue under the brand
-              </button>
+              {!isNewVenue && (
+                <button
+                  type="button"
+                  onClick={groupUnderBrand}
+                  disabled={brandBusy || !venueId}
+                  className="mt-3 inline-flex items-center gap-2 rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
+                >
+                  {brandBusy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Store className="h-4 w-4" />
+                  )}
+                  Group this venue under the brand
+                </button>
+              )}
               {brandStatus && (
                 <p className="mt-2 text-xs text-brand-gold">{brandStatus}</p>
               )}
               <p className="mt-2 text-[0.6875rem] text-text-muted">
-                Creates the brand if new, then links this location to it. Add each
-                other location as its own venue and group it the same way.
+                {isNewVenue
+                  ? "Fill the brand name to create this new venue under a brand (e.g. one location of a chain)."
+                  : "Creates the brand if new, then links this location to it. Add each other location as its own venue and group it the same way."}
               </p>
             </div>
 
+            {isNewVenue ? (
+              <div className="mt-5 space-y-2">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => createVenue(true)}
+                    disabled={createBusy !== null}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-md bg-brand-gold px-4 py-2.5 text-sm font-bold uppercase tracking-[0.04em] text-text-inverse transition-colors hover:bg-brand-gold/90 disabled:opacity-40"
+                  >
+                    {createBusy === "publish" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Check className="h-4 w-4" />
+                    )}
+                    Create &amp; publish
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => createVenue(false)}
+                    disabled={createBusy !== null}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border-[1.5px] border-brand-gold px-4 py-2.5 text-sm font-bold uppercase tracking-[0.04em] text-brand-gold transition-colors hover:bg-brand-gold hover:text-text-inverse disabled:opacity-40"
+                  >
+                    {createBusy === "queue" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Store className="h-4 w-4" />
+                    )}
+                    Add to queue
+                  </button>
+                </div>
+                <p className="text-[0.6875rem] text-text-muted">
+                  We geocode the address to place it on the map. Missing address?
+                  Add one above or the create will ask for it.
+                </p>
+                {createStatus && (
+                  <p className="text-sm text-brand-gold">{createStatus}</p>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={apply}
+                disabled={busy !== null || !venueId}
+                className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border-[1.5px] border-brand-gold px-5 py-2.5 text-sm font-bold uppercase tracking-[0.06em] text-brand-gold transition-colors hover:bg-brand-gold hover:text-text-inverse disabled:opacity-40"
+              >
+                {busy === "apply" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+                {venueId ? "Apply ticked fields to venue" : "Load a venue to apply"}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface ChainLoc {
+  name: string | null;
+  location_label: string | null;
+  address: string | null;
+  city: string | null;
+  country: string | null;
+  phone: string | null;
+  hours: Record<string, string> | null;
+}
+interface ChainResult {
+  is_chain: boolean;
+  brand_name: string | null;
+  description: string | null;
+  website: string | null;
+  style: string | null;
+  instagram_url: string | null;
+  x_url: string | null;
+  facebook_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
+  locations: ChainLoc[];
+  confidence: number;
+  reviewer_notes: string | null;
+  citations: string[];
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function ChainTool() {
+  const [lead, setLead] = useState({
+    name: "",
+    instagram: "",
+    website: "",
+    city: "",
+    country: "",
+  });
+  const [busy, setBusy] = useState<null | "hunt" | "create">(null);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<ChainResult | null>(null);
+  const [include, setInclude] = useState<boolean[]>([]);
+  const [publish, setPublish] = useState(false);
+  const [progress, setProgress] = useState("");
+
+  async function hunt() {
+    setBusy("hunt");
+    setError("");
+    setProgress("");
+    setResult(null);
+    const res = await fetch("/api/admin/enrich/chain", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lead }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) {
+      setError(data.error || "Discovery failed.");
+      return;
+    }
+    const c: ChainResult = data.chain;
+    setResult(c);
+    setInclude(c.locations.map(() => true));
+  }
+
+  async function createAll() {
+    if (!result) return;
+    setBusy("create");
+    setError("");
+    let ok = 0;
+    let failed = 0;
+    for (let i = 0; i < result.locations.length; i++) {
+      if (!include[i]) continue;
+      const loc = result.locations[i];
+      setProgress(`Creating ${loc.location_label || loc.city || loc.name || "location"}…`);
+      const res = await fetch("/api/admin/venues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          venue: {
+            name: loc.name || result.brand_name,
+            description: result.description ?? "",
+            website: result.website,
+            phone: loc.phone,
+            address: loc.address,
+            city: loc.city,
+            country: loc.country,
+            style: result.style,
+            hours: loc.hours,
+            instagram_url: result.instagram_url,
+            x_url: result.x_url,
+            facebook_url: result.facebook_url,
+            tiktok_url: result.tiktok_url,
+            youtube_url: result.youtube_url,
+            location_label: loc.location_label,
+          },
+          publish,
+          brand: result.brand_name ? { name: result.brand_name } : undefined,
+          lead,
+          citations: result.citations,
+        }),
+      });
+      if (res.ok) ok++;
+      else failed++;
+      // Respect Nominatim's ~1 req/sec geocoding limit.
+      await sleep(1200);
+    }
+    setBusy(null);
+    setProgress(
+      `Done — ${ok} location${ok === 1 ? "" : "s"} ${publish ? "published" : "queued"}${failed ? `, ${failed} failed (check addresses)` : ""}. ✓`
+    );
+  }
+
+  const selectedCount = include.filter(Boolean).length;
+
+  return (
+    <div className="grid gap-8 lg:grid-cols-2">
+      <div>
+        <p className="mb-4 text-sm text-text-muted">
+          Give Grok a business and it finds <em>every</em> location, then creates
+          one map pin per venue, all grouped under a shared brand.
+        </p>
+        <div className="space-y-2">
+          {(
+            [
+              ["name", "Business / brand name"],
+              ["instagram", "Instagram handle or URL"],
+              ["website", "Website"],
+              ["city", "A city you know they're in"],
+              ["country", "Country"],
+            ] as const
+          ).map(([k, ph]) => (
+            <input
+              key={k}
+              value={lead[k]}
+              onChange={(e) => setLead((l) => ({ ...l, [k]: e.target.value }))}
+              placeholder={ph}
+              className={inputClass}
+            />
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={hunt}
+          disabled={busy !== null}
+          className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand-gold px-5 py-2.5 text-sm font-bold uppercase tracking-[0.06em] text-text-inverse transition-colors hover:bg-brand-gold/90 disabled:opacity-40"
+        >
+          {busy === "hunt" ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Sparkles className="h-4 w-4" />
+          )}
+          {busy === "hunt" ? "Finding all locations…" : "Discover all locations"}
+        </button>
+        {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+      </div>
+
+      <div>
+        {!result ? (
+          <div className="flex h-full min-h-48 items-center justify-center rounded-lg border border-dashed border-border-default p-8 text-center text-sm text-text-muted">
+            Every location Grok finds will appear here to review and create.
+          </div>
+        ) : (
+          <div className="rounded-lg border border-border-subtle bg-surface-1 p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="font-heading text-lg font-bold text-text-primary">
+                {result.brand_name || "Business"}
+              </span>
+              <span className="rounded-full bg-brand-gold/15 px-2.5 py-0.5 text-xs font-bold text-brand-gold">
+                {result.locations.length} location
+                {result.locations.length === 1 ? "" : "s"}
+              </span>
+            </div>
+            {!result.is_chain && (
+              <p className="mb-3 rounded-md border border-border-default bg-surface-0 px-3 py-2 text-xs text-text-muted">
+                Grok thinks this is a single-location business — use the Venue
+                enrichment tab instead.
+              </p>
+            )}
+            {result.reviewer_notes && (
+              <p className="mb-3 rounded-md border border-brand-sienna/30 bg-brand-sienna/5 px-3 py-2 text-xs text-brand-sienna-light">
+                ⚠ {result.reviewer_notes}
+              </p>
+            )}
+
+            <ul className="space-y-2">
+              {result.locations.map((loc, i) => (
+                <li
+                  key={i}
+                  className="flex items-start gap-2 rounded-md border border-border-subtle bg-surface-0 p-3"
+                >
+                  <input
+                    type="checkbox"
+                    checked={include[i] ?? false}
+                    onChange={(e) =>
+                      setInclude((arr) => arr.map((v, j) => (j === i ? e.target.checked : v)))
+                    }
+                    className="mt-1 h-3.5 w-3.5 accent-brand-gold"
+                  />
+                  <div className="min-w-0 text-sm">
+                    <p className="font-semibold text-text-primary">
+                      {loc.location_label || loc.name || "Location"}
+                    </p>
+                    <p className="text-text-muted">
+                      {[loc.address, loc.city, loc.country].filter(Boolean).join(", ") ||
+                        "no address — will fail geocoding"}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+
+            <label className="mt-4 flex items-center gap-2 text-sm text-text-secondary">
+              <input
+                type="checkbox"
+                checked={publish}
+                onChange={(e) => setPublish(e.target.checked)}
+                className="h-3.5 w-3.5 accent-brand-gold"
+              />
+              Publish immediately (otherwise added to the review queue)
+            </label>
+
+            <Citations urls={result.citations} />
+
             <button
               type="button"
-              onClick={apply}
-              disabled={busy !== null || !venueId}
-              className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-md border-[1.5px] border-brand-gold px-5 py-2.5 text-sm font-bold uppercase tracking-[0.06em] text-brand-gold transition-colors hover:bg-brand-gold hover:text-text-inverse disabled:opacity-40"
+              onClick={createAll}
+              disabled={busy !== null || selectedCount === 0}
+              className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md border-[1.5px] border-brand-gold px-5 py-2.5 text-sm font-bold uppercase tracking-[0.04em] text-brand-gold transition-colors hover:bg-brand-gold hover:text-text-inverse disabled:opacity-40"
             >
-              {busy === "apply" ? (
+              {busy === "create" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <Check className="h-4 w-4" />
               )}
-              {venueId ? "Apply ticked fields to venue" : "Load a venue to apply"}
+              Create {selectedCount} selected location{selectedCount === 1 ? "" : "s"}
             </button>
+            {progress && <p className="mt-2 text-sm text-brand-gold">{progress}</p>}
           </div>
         )}
       </div>
@@ -681,6 +1051,17 @@ export function EnrichConsole({ enabled }: { enabled: boolean }) {
         </button>
         <button
           type="button"
+          onClick={() => setTab("chain")}
+          className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors ${
+            tab === "chain"
+              ? "bg-brand-gold text-text-inverse"
+              : "border border-border-default text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          <Store className="h-4 w-4" /> Chain / locations
+        </button>
+        <button
+          type="button"
           onClick={() => setTab("news")}
           className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors ${
             tab === "news"
@@ -691,7 +1072,13 @@ export function EnrichConsole({ enabled }: { enabled: boolean }) {
           <Newspaper className="h-4 w-4" /> News &amp; Missives
         </button>
       </div>
-      {tab === "venue" ? <VenueTool /> : <NewsTool />}
+      {tab === "venue" ? (
+        <VenueTool />
+      ) : tab === "chain" ? (
+        <ChainTool />
+      ) : (
+        <NewsTool />
+      )}
     </div>
   );
 }

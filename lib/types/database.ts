@@ -142,6 +142,9 @@ export interface Restaurant {
   // names the branch (e.g. "Albert Park").
   brand_id?: string | null;
   location_label?: string | null;
+  instagram_posts?: string[] | null;
+  enrichment_sources?: string[] | null;
+  enriched_at?: string | null;
 }
 
 export interface ReviewPhoto {
