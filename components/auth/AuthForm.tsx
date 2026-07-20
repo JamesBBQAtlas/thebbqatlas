@@ -71,7 +71,9 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
           </label>
           <input
             id="email"
+            name="email"
             type="email"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -86,7 +88,9 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
             </label>
             <input
               id="password"
+              name="password"
               type="password"
+              autoComplete={mode === "signup" ? "new-password" : "current-password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
