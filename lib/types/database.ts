@@ -88,6 +88,21 @@ export interface RestaurantClaim {
   created_at: string;
 }
 
+export interface Brand {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  website: string | null;
+  hero_image_url: string | null;
+  instagram_url: string | null;
+  x_url: string | null;
+  facebook_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
+  created_at: string;
+}
+
 export interface Restaurant {
   id: string;
   slug: string;
@@ -123,6 +138,10 @@ export interface Restaurant {
   event_starts_at?: string | null;
   event_ends_at?: string | null;
   owner_id?: string | null;
+  // Multi-location: a location belongs to an optional brand; location_label
+  // names the branch (e.g. "Albert Park").
+  brand_id?: string | null;
+  location_label?: string | null;
 }
 
 export interface ReviewPhoto {

@@ -3,6 +3,7 @@ import { SITE_URL } from "@/lib/seo/site";
 import { getRestaurants } from "@/lib/queries/restaurants";
 import { getGuides } from "@/lib/queries/guides";
 import { getNews } from "@/lib/queries/news";
+import { getBrands } from "@/lib/queries/brands";
 
 // Regenerate the sitemap hourly so new spots/guides appear without a redeploy.
 export const revalidate = 3600;
@@ -10,10 +11,11 @@ export const revalidate = 3600;
 const abs = (path: string) => `${SITE_URL}${path === "/" ? "" : path}`;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [restaurants, guides, news] = await Promise.all([
+  const [restaurants, guides, news, brands] = await Promise.all([
     getRestaurants(),
     getGuides(),
     getNews(),
+    getBrands(),
   ]);
   const now = new Date();
 
@@ -50,10 +52,18 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.6,
   }));
 
+  const brandEntries: MetadataRoute.Sitemap = brands.map((b) => ({
+    url: abs(`/brands/${b.slug}`),
+    lastModified: new Date(b.created_at || now),
+    changeFrequency: "weekly",
+    priority: 0.6,
+  }));
+
   return [
     ...staticEntries,
     ...restaurantEntries,
     ...guideEntries,
     ...newsEntries,
+    ...brandEntries,
   ];
 }

@@ -114,6 +114,8 @@ export async function PUT(request: Request) {
     "facebook_url",
     "tiktok_url",
     "youtube_url",
+    "brand_id",
+    "location_label",
   ]);
   const update: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields)) {

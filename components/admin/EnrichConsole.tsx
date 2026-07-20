@@ -31,6 +31,9 @@ interface EnrichedVenue {
   facebook_url: string | null;
   tiktok_url: string | null;
   youtube_url: string | null;
+  brand_name: string | null;
+  location_label: string | null;
+  is_multi_location: boolean;
   confidence: number;
   reviewer_notes: string | null;
   citations: string[];
@@ -93,6 +96,12 @@ function VenueTool() {
   // Which fields to apply, plus their (editable) values.
   const [fields, setFields] = useState<Record<string, string>>({});
   const [include, setInclude] = useState<Record<string, boolean>>({});
+  // Multi-location grouping.
+  const [brandName, setBrandName] = useState("");
+  const [locationLabel, setLocationLabel] = useState("");
+  const [isChain, setIsChain] = useState(false);
+  const [brandBusy, setBrandBusy] = useState(false);
+  const [brandStatus, setBrandStatus] = useState("");
 
   const SCALARS = [
     "description",
@@ -177,6 +186,56 @@ function VenueTool() {
     const inc: Record<string, boolean> = {};
     for (const k of Object.keys(f)) inc[k] = Boolean(f[k]);
     setInclude(inc);
+    // Prefill brand grouping if Grok spotted a chain.
+    setIsChain(Boolean(e.is_multi_location));
+    setBrandName(e.brand_name ?? "");
+    setLocationLabel(e.location_label ?? "");
+  }
+
+  async function groupUnderBrand() {
+    if (!venueId) {
+      setBrandStatus("Load a venue first.");
+      return;
+    }
+    if (!brandName.trim()) {
+      setBrandStatus("Enter a brand name.");
+      return;
+    }
+    setBrandBusy(true);
+    setBrandStatus("");
+    // 1) resolve-or-create the brand
+    const bRes = await fetch("/api/admin/brands", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: brandName.trim() }),
+    });
+    const bData = await bRes.json().catch(() => ({}));
+    if (!bRes.ok) {
+      setBrandBusy(false);
+      setBrandStatus(bData.error || "Could not create brand.");
+      return;
+    }
+    // 2) attach this venue to it
+    const aRes = await fetch("/api/admin/enrich/venue", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        restaurantId: venueId,
+        fields: {
+          brand_id: bData.id,
+          location_label: locationLabel.trim() || null,
+        },
+      }),
+    });
+    setBrandBusy(false);
+    if (!aRes.ok) {
+      const aData = await aRes.json().catch(() => ({}));
+      setBrandStatus(aData.error || "Could not attach venue to brand.");
+      return;
+    }
+    setBrandStatus(
+      `Grouped under “${brandName.trim()}”${locationLabel.trim() ? ` as “${locationLabel.trim()}”` : ""}. ✓`
+    );
   }
 
   async function apply() {
@@ -361,6 +420,52 @@ function VenueTool() {
             </div>
 
             <Citations urls={result.citations} />
+
+            {/* Multi-location grouping */}
+            <div className="mt-5 rounded-lg border border-border-subtle bg-surface-0 p-4">
+              <p className={labelClass}>
+                Brand / multi-location
+                {isChain && (
+                  <span className="ml-2 rounded-full bg-brand-sienna/15 px-2 py-0.5 text-[0.625rem] font-bold text-brand-sienna-light">
+                    chain detected
+                  </span>
+                )}
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  value={brandName}
+                  onChange={(e) => setBrandName(e.target.value)}
+                  placeholder="Brand name (e.g. Third Wave BBQ)"
+                  className={inputClass}
+                />
+                <input
+                  value={locationLabel}
+                  onChange={(e) => setLocationLabel(e.target.value)}
+                  placeholder="This branch (e.g. Albert Park)"
+                  className={inputClass}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={groupUnderBrand}
+                disabled={brandBusy || !venueId}
+                className="mt-3 inline-flex items-center gap-2 rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
+              >
+                {brandBusy ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Store className="h-4 w-4" />
+                )}
+                Group this venue under the brand
+              </button>
+              {brandStatus && (
+                <p className="mt-2 text-xs text-brand-gold">{brandStatus}</p>
+              )}
+              <p className="mt-2 text-[0.6875rem] text-text-muted">
+                Creates the brand if new, then links this location to it. Add each
+                other location as its own venue and group it the same way.
+              </p>
+            </div>
 
             <button
               type="button"

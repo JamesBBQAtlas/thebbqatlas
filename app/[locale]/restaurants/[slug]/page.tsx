@@ -29,6 +29,8 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { createClient } from "@/lib/supabase/server";
 import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
+import { getSiblingLocations } from "@/lib/queries/brands";
+import type { Brand } from "@/lib/types/database";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -82,12 +84,23 @@ export default async function RestaurantPage({ params }: Props) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [dishes, allRestaurants, metrics, myCheckIn] = await Promise.all([
-    getSignatureDishes(restaurant.id),
-    getRestaurants(),
-    getVenueMetrics(restaurant.id),
-    user ? getUserCheckIn(supabase, user.id, restaurant.id) : Promise.resolve(null),
-  ]);
+  const brandId = restaurant.brand_id ?? null;
+  const [dishes, allRestaurants, metrics, myCheckIn, siblings, brand] =
+    await Promise.all([
+      getSignatureDishes(restaurant.id),
+      getRestaurants(),
+      getVenueMetrics(restaurant.id),
+      user ? getUserCheckIn(supabase, user.id, restaurant.id) : Promise.resolve(null),
+      brandId ? getSiblingLocations(brandId, restaurant.id) : Promise.resolve([]),
+      brandId
+        ? supabase
+            .from("brands")
+            .select("name, slug")
+            .eq("id", brandId)
+            .single()
+            .then((r) => r.data as Pick<Brand, "name" | "slug"> | null)
+        : Promise.resolve(null),
+    ]);
 
   const code = resolveCountryCode(restaurant.country_code, restaurant.country);
   const cityCountry = [restaurant.city, restaurant.country].filter(Boolean).join(", ");
@@ -331,6 +344,39 @@ export default async function RestaurantPage({ params }: Props) {
               <SaveShareActions restaurantId={restaurant.id} name={restaurant.name} />
             </div>
           </div>
+
+          {/* Part of a brand — other locations */}
+          {brand && (
+            <div className="rounded-xl border border-border-subtle bg-surface-0 p-6">
+              <p className="u-eyebrow mb-1 text-text-muted">Part of</p>
+              <Link
+                href={`/brands/${brand.slug}`}
+                className="font-heading text-lg font-bold text-text-primary transition-colors hover:text-brand-gold"
+              >
+                {brand.name}
+              </Link>
+              {siblings.length > 0 && (
+                <>
+                  <p className="mt-4 mb-2 text-sm text-text-muted">
+                    Other locations
+                  </p>
+                  <ul className="space-y-1.5">
+                    {siblings.map((s) => (
+                      <li key={s.id}>
+                        <Link
+                          href={`/restaurants/${s.slug}`}
+                          className="flex items-center justify-between gap-2 text-sm text-text-secondary transition-colors hover:text-brand-gold"
+                        >
+                          <span>{s.location_label || s.city || s.name}</span>
+                          <ChevronRight className="h-3.5 w-3.5 text-border-strong" />
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
 
           {/* Details */}
           <div className="rounded-xl border border-border-subtle bg-surface-0 p-6">

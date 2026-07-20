@@ -43,6 +43,10 @@ export interface EnrichedVenue {
   facebook_url: string | null;
   tiktok_url: string | null;
   youtube_url: string | null;
+  /** If part of a multi-location chain, the brand + this branch's label. */
+  brand_name: string | null;
+  location_label: string | null;
+  is_multi_location: boolean;
   /** 0–1 self-reported confidence in the overall find. */
   confidence: number;
   /** Per-field notes / caveats for the human reviewer. */
@@ -69,10 +73,10 @@ Rules:
 - "description" is 2–4 warm, factual sentences in The BBQ Atlas's celebratory-but-honest voice. No hype, no invented awards.
 - "permanently_closed": true only if you find clear evidence the business has closed for good; else false or null.
 - "confidence" is your honest 0–1 estimate that this record is correct and about the right business.
-- If this is one location of a multi-venue chain, base the address/hours/phone on the SPECIFIC location given (or the flagship if unspecified) and note the chain in reviewer_notes.
-- "reviewer_notes": briefly flag anything uncertain, ambiguous, a multi-location chain, or that a human should double-check.
+- Multi-location chains: set "is_multi_location" true if this business has more than one physical venue. Put the overall brand name in "brand_name" (e.g. "Third Wave BBQ") and this specific branch's short label in "location_label" (e.g. "Albert Park"). Base address/hours/phone on the SPECIFIC location given, or the flagship if unspecified, and list the other known locations in reviewer_notes. If it's a single independent venue, set is_multi_location false and brand_name/location_label null.
+- "reviewer_notes": briefly flag anything uncertain, ambiguous, the other locations of a chain, or that a human should double-check.
 
-Respond ONLY with a JSON object with exactly these keys: name, description, website, phone, address, city, country, style, offerings, price_level, hours, permanently_closed, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, confidence, reviewer_notes.`;
+Respond ONLY with a JSON object with exactly these keys: name, description, website, phone, address, city, country, style, offerings, price_level, hours, permanently_closed, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, brand_name, location_label, is_multi_location, confidence, reviewer_notes.`;
 
 export async function enrichVenue(lead: VenueLead): Promise<EnrichedVenue> {
   const known = Object.entries(lead)
@@ -135,6 +139,10 @@ Return the JSON object described in your instructions.`;
     facebook_url: data.facebook_url ?? null,
     tiktok_url: data.tiktok_url ?? null,
     youtube_url: data.youtube_url ?? null,
+    brand_name: data.brand_name ?? null,
+    location_label: data.location_label ?? null,
+    is_multi_location:
+      typeof data.is_multi_location === "boolean" ? data.is_multi_location : false,
     confidence,
     reviewer_notes: data.reviewer_notes ?? null,
     citations,
