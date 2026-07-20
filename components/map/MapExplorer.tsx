@@ -16,10 +16,10 @@ const GOLD = "#D4AF37";
 const SIENNA = "#C4622D";
 const INK = "#0C0907";
 
-// Deep ocean blue so water clearly reads blue (with contrast against the dark
-// land), while land and streets from the dataviz-dark basemap stay as-is.
-const OCEAN = "#103555";
-const OCEAN_WATER = "#164770";
+// Deep ocean blue applied ONLY to water polygons (sea, lakes, rivers). The dark
+// base layer and land are left untouched, so land keeps its original colour and
+// just the water reads blue.
+const OCEAN = "#164770";
 
 // --- Session-scoped view persistence -----------------------------------------
 // Remembers where the user was on the map (and their filters) so hitting Back
@@ -54,18 +54,19 @@ function saveMapState(patch: MapViewState) {
   }
 }
 
-// Repaint ocean + water bodies once the basemap style has loaded.
+// Repaint just the water bodies (sea/lakes/rivers) once the style has loaded.
+// We deliberately do NOT touch the background layer — recolouring it bleeds
+// through the semi-transparent land and tints the whole map.
 function tintWater(map: maplibregl.Map) {
   try {
     for (const layer of map.getStyle().layers ?? []) {
       const id = layer.id.toLowerCase();
-      if (layer.type === "background") {
-        map.setPaintProperty(layer.id, "background-color", OCEAN);
-      } else if (
+      if (
         layer.type === "fill" &&
-        (id.includes("water") || id.includes("ocean") || id.includes("sea"))
+        (id.includes("water") || id.includes("ocean") || id.includes("sea")) &&
+        !id.includes("waterway") // rivers-as-lines are handled separately
       ) {
-        map.setPaintProperty(layer.id, "fill-color", OCEAN_WATER);
+        map.setPaintProperty(layer.id, "fill-color", OCEAN);
       }
     }
   } catch {

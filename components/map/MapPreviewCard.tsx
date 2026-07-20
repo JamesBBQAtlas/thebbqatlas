@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import { ArrowRight, MapPin, Wine, X } from "lucide-react";
 import { Link } from "@/i18n/navigation";
@@ -29,6 +30,7 @@ export function MapPreviewCard({
   onClose: () => void;
   onNavigate: () => void;
 }) {
+  const [imgOk, setImgOk] = useState(true);
   const code = resolveCountryCode(r.country_code, r.country);
   const firstMeat = (r.offerings ?? [])
     .map((slug) => OFFERINGS_BY_SLUG[slug])
@@ -47,16 +49,17 @@ export function MapPreviewCard({
     >
       {/* Cover */}
       <div className="relative h-40 w-full">
-        {r.hero_image_url ? (
+        {r.hero_image_url && imgOk ? (
           <Image
             src={r.hero_image_url}
             alt={`${r.name} — ${STYLE_LABELS[r.style]} barbecue`}
             fill
             sizes="420px"
             className="object-cover"
+            onError={() => setImgOk(false)}
           />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-surface-2 to-background" />
+          <div className="absolute inset-0 bg-gradient-to-br from-surface-2 via-surface-1 to-background" />
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/15 to-transparent" />
 
