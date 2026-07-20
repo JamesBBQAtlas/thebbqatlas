@@ -200,3 +200,38 @@ export interface Guide {
   published_at: string;
   created_at: string;
 }
+
+export type NewsCategory = "news" | "missive";
+
+export interface NewsPost {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string;
+  content_md: string;
+  hero_image_url: string;
+  category: NewsCategory;
+  author: string;
+  is_published: boolean;
+  published_at: string;
+  created_at: string;
+}
+
+export type CheckInVisibility = "public" | "private";
+
+export interface CheckIn {
+  id: string;
+  user_id: string;
+  restaurant_id: string;
+  note: string | null;
+  visibility: CheckInVisibility;
+  created_at: string;
+  updated_at: string;
+  restaurants?: Pick<Restaurant, "name" | "slug" | "city" | "country">;
+}
+
+export interface Follow {
+  follower_id: string;
+  following_id: string;
+  created_at: string;
+}

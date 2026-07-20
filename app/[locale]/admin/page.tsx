@@ -74,6 +74,8 @@ export default async function AdminDashboard() {
     users,
     clicksTotal,
     clicksAffiliate,
+    checkInsTotal,
+    savesTotal,
   ] = await Promise.all([
     count(db, "restaurants"),
     count(db, "restaurants", { col: "status", val: "approved" }),
@@ -87,6 +89,8 @@ export default async function AdminDashboard() {
     count(db, "profiles"),
     count(db, "click_events"),
     count(db, "click_events", { col: "event_type", val: "affiliate" }),
+    count(db, "check_ins"),
+    count(db, "saved_spots"),
   ]);
 
   const pendingTotal = subsPending + reviewsPending + photosPending;
@@ -139,17 +143,25 @@ export default async function AdminDashboard() {
           </h1>
           <p className="mt-1 text-text-muted">Key numbers across the Atlas.</p>
         </div>
-        <Link
-          href="/admin/moderation"
-          className="rounded-md border-[1.5px] border-brand-gold px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-brand-gold transition-colors hover:bg-brand-gold hover:text-text-inverse"
-        >
-          Moderation Queue
-          {pendingTotal > 0 && (
-            <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
-              {pendingTotal}
-            </span>
-          )}
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/enrich"
+            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+          >
+            AI Enrichment
+          </Link>
+          <Link
+            href="/admin/moderation"
+            className="rounded-md border-[1.5px] border-brand-gold px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-brand-gold transition-colors hover:bg-brand-gold hover:text-text-inverse"
+          >
+            Moderation Queue
+            {pendingTotal > 0 && (
+              <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
+                {pendingTotal}
+              </span>
+            )}
+          </Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
@@ -160,6 +172,8 @@ export default async function AdminDashboard() {
         <Stat label="Photos pending" value={photosPending} hint={`${photos} total`} />
         <Stat label="Videos" value="—" hint="uploads phase" />
         <Stat label="Users" value={users} />
+        <Stat label="Check-ins" value={checkInsTotal} hint="'I've been here' visits" />
+        <Stat label="Saves" value={savesTotal} hint="saved-spot bookmarks" />
         <Stat label="Clicks (all)" value={clicksTotal} />
         <Stat label="Affiliate clicks" value={clicksAffiliate} />
       </div>

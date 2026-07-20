@@ -1,11 +1,20 @@
 import { redirect } from "next/navigation";
 import { Link } from "@/i18n/navigation";
-import { Store, Map as MapIcon, Settings, Clock, Sparkles } from "lucide-react";
+import {
+  Store,
+  Map as MapIcon,
+  Settings,
+  Clock,
+  Sparkles,
+  MapPinCheckInside,
+  Lock,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { AvatarUpload } from "@/components/account/AvatarUpload";
 import { avatarFor } from "@/lib/account/avatar";
 import { getPremiumStatus } from "@/lib/account/entitlements";
+import { getUserCheckIns } from "@/lib/queries/checkins";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import type { Restaurant, Submission, AccountType } from "@/lib/types/database";
 
@@ -80,7 +89,7 @@ export default async function ProfilePage() {
     }
   }
 
-  const [{ data: submissions }, { data: claims }, { data: history }] =
+  const [{ data: submissions }, { data: claims }, { data: history }, checkIns] =
     await Promise.all([
       supabase
         .from("submissions")
@@ -98,6 +107,7 @@ export default async function ProfilePage() {
         .eq("user_id", user.id)
         .order("viewed_at", { ascending: false })
         .limit(8),
+      getUserCheckIns(supabase, user.id),
     ]);
 
   return (
@@ -202,6 +212,61 @@ export default async function ProfilePage() {
           </div>
         )}
       </section>
+
+      {/* Places you've been */}
+      {checkIns.length > 0 && (
+        <section className="mb-14">
+          <h2 className="mb-4 flex items-center gap-2 font-heading text-xl font-bold text-text-primary">
+            <MapPinCheckInside className="h-5 w-5 text-brand-sienna" />
+            Places you&apos;ve been
+            <span className="text-sm font-normal text-text-muted">
+              · {checkIns.length}
+            </span>
+          </h2>
+          <div className="space-y-3">
+            {checkIns.map((c) => (
+              <div
+                key={c.id}
+                className="flex items-start justify-between gap-4 rounded-lg border border-border-subtle bg-surface-0 p-4"
+              >
+                <div className="min-w-0">
+                  {c.restaurants?.slug ? (
+                    <Link
+                      href={`/restaurants/${c.restaurants.slug}`}
+                      className="font-semibold text-text-primary transition-colors hover:text-brand-gold"
+                    >
+                      {c.restaurants.name}
+                    </Link>
+                  ) : (
+                    <p className="font-semibold text-text-primary">A venue</p>
+                  )}
+                  {c.restaurants &&
+                    (c.restaurants.city || c.restaurants.country) && (
+                      <p className="text-sm text-text-muted">
+                        {[c.restaurants.city, c.restaurants.country]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </p>
+                    )}
+                  {c.note && (
+                    <p className="mt-1.5 text-sm italic text-text-secondary">
+                      &ldquo;{c.note}&rdquo;
+                    </p>
+                  )}
+                </div>
+                {c.visibility === "private" && (
+                  <span
+                    className="mt-0.5 flex shrink-0 items-center gap-1 text-[0.6875rem] uppercase tracking-[0.06em] text-text-muted"
+                    title="Only you can see this note"
+                  >
+                    <Lock className="h-3 w-3" /> Private
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Recently viewed */}
       {(history ?? []).length > 0 && (

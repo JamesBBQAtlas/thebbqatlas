@@ -1,4 +1,4 @@
-import type { Guide, Restaurant } from "@/lib/types/database";
+import type { Guide, NewsPost, Restaurant } from "@/lib/types/database";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import {
   groupOfferings,
@@ -118,6 +118,27 @@ export function articleJsonLd(guide: Guide) {
     datePublished: guide.published_at || guide.created_at || undefined,
     dateModified: guide.published_at || guide.created_at || undefined,
     author: { "@type": "Organization", name: SITE.name, url: SITE.url },
+    publisher: { "@id": ORG_ID },
+    mainEntityOfPage: url,
+    url,
+    isPartOf: { "@id": WEBSITE_ID },
+  };
+}
+
+export function newsJsonLd(post: NewsPost) {
+  const url = absoluteUrl(`/news/${post.slug}`);
+  return {
+    "@context": "https://schema.org",
+    "@type": post.category === "news" ? "NewsArticle" : "OpinionNewsArticle",
+    "@id": `${url}#article`,
+    headline: post.title,
+    description: post.excerpt || undefined,
+    image: post.hero_image_url || undefined,
+    datePublished: post.published_at || post.created_at || undefined,
+    dateModified: post.published_at || post.created_at || undefined,
+    author: post.author
+      ? { "@type": "Organization", name: post.author, url: SITE.url }
+      : { "@type": "Organization", name: SITE.name, url: SITE.url },
     publisher: { "@id": ORG_ID },
     mainEntityOfPage: url,
     url,

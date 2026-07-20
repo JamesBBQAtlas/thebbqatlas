@@ -7,7 +7,8 @@
     "submit": "Submit",
     "myAtlas": "My Atlas",
     "menu": "Menu",
-    "close": "Close"
+    "close": "Close",
+    "news": "News"
   },
   "Footer": {
     "strapline": "We don't rank barbecue. We celebrate it.",
@@ -29,7 +30,8 @@
     "disclaimer": "Disclaimer",
     "amazonDisclosure": "As an Amazon Associate, The BBQ Atlas earns from qualifying purchases.",
     "rights": "The BBQ Atlas Ltd. All rights reserved.",
-    "followUs": "Follow"
+    "followUs": "Follow",
+    "news": "News & Missives"
   },
   "Common": {
     "readMore": "Read more",

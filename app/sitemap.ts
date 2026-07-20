@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo/site";
 import { getRestaurants } from "@/lib/queries/restaurants";
 import { getGuides } from "@/lib/queries/guides";
+import { getNews } from "@/lib/queries/news";
 
 // Regenerate the sitemap hourly so new spots/guides appear without a redeploy.
 export const revalidate = 3600;
@@ -9,9 +10,10 @@ export const revalidate = 3600;
 const abs = (path: string) => `${SITE_URL}${path === "/" ? "" : path}`;
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [restaurants, guides] = await Promise.all([
+  const [restaurants, guides, news] = await Promise.all([
     getRestaurants(),
     getGuides(),
+    getNews(),
   ]);
   const now = new Date();
 
@@ -20,6 +22,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: abs("/map"), lastModified: now, changeFrequency: "daily", priority: 0.9 },
     { url: abs("/directory"), lastModified: now, changeFrequency: "daily", priority: 0.9 },
     { url: abs("/guides"), lastModified: now, changeFrequency: "weekly", priority: 0.7 },
+    { url: abs("/news"), lastModified: now, changeFrequency: "daily", priority: 0.7 },
     { url: abs("/submit"), lastModified: now, changeFrequency: "monthly", priority: 0.5 },
     { url: abs("/privacy"), lastModified: now, changeFrequency: "yearly", priority: 0.2 },
     { url: abs("/terms"), lastModified: now, changeFrequency: "yearly", priority: 0.2 },
@@ -40,5 +43,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.6,
   }));
 
-  return [...staticEntries, ...restaurantEntries, ...guideEntries];
+  const newsEntries: MetadataRoute.Sitemap = news.map((n) => ({
+    url: abs(`/news/${n.slug}`),
+    lastModified: new Date(n.published_at || n.created_at || now),
+    changeFrequency: "weekly",
+    priority: 0.6,
+  }));
+
+  return [
+    ...staticEntries,
+    ...restaurantEntries,
+    ...guideEntries,
+    ...newsEntries,
+  ];
 }

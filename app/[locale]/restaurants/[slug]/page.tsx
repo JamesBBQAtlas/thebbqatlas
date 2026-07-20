@@ -21,11 +21,14 @@ import { haversineKm } from "@/lib/utils/geo";
 import { FlagIcon } from "@/components/ui/FlagIcon";
 import { TrackedLink } from "@/components/monetization/TrackedLink";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
+import { CheckInButton } from "@/components/restaurants/CheckInButton";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
+import { createClient } from "@/lib/supabase/server";
+import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -74,9 +77,16 @@ export default async function RestaurantPage({ params }: Props) {
     redirect(`/restaurants/${restaurant.slug}`);
   }
 
-  const [dishes, allRestaurants] = await Promise.all([
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const [dishes, allRestaurants, metrics, myCheckIn] = await Promise.all([
     getSignatureDishes(restaurant.id),
     getRestaurants(),
+    getVenueMetrics(restaurant.id),
+    user ? getUserCheckIn(supabase, user.id, restaurant.id) : Promise.resolve(null),
   ]);
 
   const code = resolveCountryCode(restaurant.country_code, restaurant.country);
@@ -282,8 +292,36 @@ export default async function RestaurantPage({ params }: Props) {
 
         {/* Right sidebar */}
         <aside className="flex flex-col gap-6 lg:sticky lg:top-24 lg:self-start">
-          <div className="rounded-xl border border-border-subtle bg-surface-0 p-6">
-            <SaveShareActions restaurantId={restaurant.id} name={restaurant.name} />
+          <div className="space-y-4 rounded-xl border border-border-subtle bg-surface-0 p-6">
+            <CheckInButton
+              restaurantId={restaurant.id}
+              restaurantName={restaurant.name}
+              isAuthed={Boolean(user)}
+              initial={myCheckIn}
+            />
+            {(metrics.visited > 0 || metrics.saved > 0) && (
+              <div className="flex items-center gap-4 border-t border-border-subtle pt-4 text-sm">
+                {metrics.visited > 0 && (
+                  <span className="flex items-center gap-1.5 text-text-secondary">
+                    <span className="font-heading text-lg font-bold text-brand-gold">
+                      {metrics.visited.toLocaleString()}
+                    </span>
+                    {metrics.visited === 1 ? "has been here" : "have been here"}
+                  </span>
+                )}
+                {metrics.saved > 0 && (
+                  <span className="flex items-center gap-1.5 text-text-secondary">
+                    <span className="font-heading text-lg font-bold text-brand-gold">
+                      {metrics.saved.toLocaleString()}
+                    </span>
+                    saved
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="border-t border-border-subtle pt-4">
+              <SaveShareActions restaurantId={restaurant.id} name={restaurant.name} />
+            </div>
           </div>
 
           {/* Details */}
