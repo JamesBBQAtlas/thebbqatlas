@@ -99,6 +99,14 @@ export default async function RestaurantPage({ params }: Props) {
   const menu = groupOfferings(restaurant.offerings);
   const alcohol = restaurant.alcohol as AlcoholPolicy | null;
 
+  const socials = [
+    { label: "Instagram", href: restaurant.instagram_url },
+    { label: "X", href: restaurant.x_url },
+    { label: "Facebook", href: restaurant.facebook_url },
+    { label: "TikTok", href: restaurant.tiktok_url },
+    { label: "YouTube", href: restaurant.youtube_url },
+  ].filter((s): s is { label: string; href: string } => Boolean(s.href));
+
   // Nearby (by true distance). Miles for US/UK, kilometres elsewhere.
   const useMiles = code === "US" || code === "GB";
   const fmtDist = (km: number) => {
@@ -397,6 +405,28 @@ export default async function RestaurantPage({ params }: Props) {
               )}
             </dl>
           </div>
+
+          {/* Socials — find them online */}
+          {socials.length > 0 && (
+            <div className="rounded-xl border border-border-subtle bg-surface-0 p-6">
+              <h3 className="mb-4 border-b border-border-subtle pb-3 font-heading text-base font-bold text-text-primary">
+                Find them
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {socials.map((s) => (
+                  <a
+                    key={s.label}
+                    href={s.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-full border border-border-default px-3.5 py-1.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+                  >
+                    {s.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Locator map */}
           <RestaurantLocatorMap

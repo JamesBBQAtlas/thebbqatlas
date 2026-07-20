@@ -38,6 +38,11 @@ export interface EnrichedVenue {
   price_level: number | null;
   hours: Record<string, string> | null;
   permanently_closed: boolean | null;
+  instagram_url: string | null;
+  x_url: string | null;
+  facebook_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
   /** 0–1 self-reported confidence in the overall find. */
   confidence: number;
   /** Per-field notes / caveats for the human reviewer. */
@@ -51,10 +56,11 @@ Where to look (be aggressive and exhaustive across ALL of these):
 - START with the venue's own website (if given) and its Instagram — most of our venues live on Instagram.
 - THEN aggressively check X/Twitter, Facebook, Threads, TikTok, YouTube and any other social profiles you can find, plus the venue's own site, official menus, reservation pages, and reputable local press or food directories.
 - Cross-reference across several of these to confirm each fact.
-- NEVER use Google Maps or any Google listing as a source, and never copy content from Google — treat google.com as off-limits entirely.
+- You MAY use general web search (including Google as a search engine) to DISCOVER the venue's own website and social profiles. But do NOT extract, copy, or rely on structured listing data from Google Maps or a Google business/knowledge-panel listing — get the actual facts (hours, phone, address) from the venue's own site and social channels. Never cite Google Maps as a source.
+- Capture the venue's social profile URLs when you find them: instagram_url, x_url (X/Twitter), facebook_url, tiktok_url, youtube_url. Use full https URLs, or null if not found.
 
 Rules:
-- Only report facts you can actually corroborate from the allowed sources above (official site, Instagram, X, Facebook, other socials, press). Never invent a phone number, address, or opening hours.
+- Only report facts you can actually corroborate from the venue's own site, Instagram, X, Facebook, other socials, or press. Never invent a phone number, address, or opening hours.
 - If a field cannot be verified, return null for it rather than guessing.
 - "style" MUST be one slug from this list or null: ${STYLE_LIST}.
 - "offerings" MUST be a subset of these slugs (menu items you can corroborate), else []: ${OFFERING_LIST}.
@@ -63,9 +69,10 @@ Rules:
 - "description" is 2–4 warm, factual sentences in The BBQ Atlas's celebratory-but-honest voice. No hype, no invented awards.
 - "permanently_closed": true only if you find clear evidence the business has closed for good; else false or null.
 - "confidence" is your honest 0–1 estimate that this record is correct and about the right business.
-- "reviewer_notes": briefly flag anything uncertain, ambiguous, or that a human should double-check.
+- If this is one location of a multi-venue chain, base the address/hours/phone on the SPECIFIC location given (or the flagship if unspecified) and note the chain in reviewer_notes.
+- "reviewer_notes": briefly flag anything uncertain, ambiguous, a multi-location chain, or that a human should double-check.
 
-Respond ONLY with a JSON object with exactly these keys: name, description, website, phone, address, city, country, style, offerings, price_level, hours, permanently_closed, confidence, reviewer_notes.`;
+Respond ONLY with a JSON object with exactly these keys: name, description, website, phone, address, city, country, style, offerings, price_level, hours, permanently_closed, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, confidence, reviewer_notes.`;
 
 export async function enrichVenue(lead: VenueLead): Promise<EnrichedVenue> {
   const known = Object.entries(lead)
@@ -123,6 +130,11 @@ Return the JSON object described in your instructions.`;
       typeof data.permanently_closed === "boolean"
         ? data.permanently_closed
         : null,
+    instagram_url: data.instagram_url ?? null,
+    x_url: data.x_url ?? null,
+    facebook_url: data.facebook_url ?? null,
+    tiktok_url: data.tiktok_url ?? null,
+    youtube_url: data.youtube_url ?? null,
     confidence,
     reviewer_notes: data.reviewer_notes ?? null,
     citations,

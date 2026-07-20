@@ -26,6 +26,11 @@ interface EnrichedVenue {
   price_level: number | null;
   hours: Record<string, string> | null;
   permanently_closed: boolean | null;
+  instagram_url: string | null;
+  x_url: string | null;
+  facebook_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
   confidence: number;
   reviewer_notes: string | null;
   citations: string[];
@@ -99,6 +104,13 @@ function VenueTool() {
     "style",
     "price_level",
   ] as const;
+  const SOCIALS = [
+    "instagram_url",
+    "x_url",
+    "facebook_url",
+    "tiktok_url",
+    "youtube_url",
+  ] as const;
 
   async function loadVenue() {
     if (!slug.trim()) return;
@@ -155,6 +167,11 @@ function VenueTool() {
       price_level: e.price_level != null ? String(e.price_level) : "",
       offerings: e.offerings.join(", "),
       hours: e.hours ? JSON.stringify(e.hours, null, 2) : "",
+      instagram_url: e.instagram_url ?? "",
+      x_url: e.x_url ?? "",
+      facebook_url: e.facebook_url ?? "",
+      tiktok_url: e.tiktok_url ?? "",
+      youtube_url: e.youtube_url ?? "",
     };
     setFields(f);
     const inc: Record<string, boolean> = {};
@@ -308,7 +325,7 @@ function VenueTool() {
             )}
 
             <div className="space-y-3">
-              {[...SCALARS, "offerings", "hours"].map((k) => (
+              {[...SCALARS, "offerings", "hours", ...SOCIALS].map((k) => (
                 <div key={k}>
                   <label className="flex items-center gap-2">
                     <input

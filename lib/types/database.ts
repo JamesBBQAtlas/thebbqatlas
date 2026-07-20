@@ -101,6 +101,11 @@ export interface Restaurant {
   country: string;
   country_code?: string | null;
   website: string | null;
+  instagram_url?: string | null;
+  x_url?: string | null;
+  facebook_url?: string | null;
+  tiktok_url?: string | null;
+  youtube_url?: string | null;
   alcohol?: "none" | "serves" | "byob" | "both" | null;
   offerings?: string[] | null;
   price_level: number;

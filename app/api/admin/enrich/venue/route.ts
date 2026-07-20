@@ -17,7 +17,7 @@ export async function GET(request: Request) {
   const { data } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, slug, description, website, phone, address, city, country, style, offerings, price_level, hours, permanently_closed"
+      "id, name, slug, description, website, phone, address, city, country, style, offerings, price_level, hours, permanently_closed, instagram_url, x_url, facebook_url, tiktok_url, youtube_url"
     )
     .eq("slug", slug)
     .maybeSingle();
@@ -109,6 +109,11 @@ export async function PUT(request: Request) {
     "price_level",
     "hours",
     "permanently_closed",
+    "instagram_url",
+    "x_url",
+    "facebook_url",
+    "tiktok_url",
+    "youtube_url",
   ]);
   const update: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(fields)) {

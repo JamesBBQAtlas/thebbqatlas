@@ -81,20 +81,20 @@ export async function grokJSON<T>({
     temperature,
   };
   if (search) {
-    // Atlas policy: hunt aggressively across the open web + socials, but NEVER
-    // source from Google (esp. Google Maps) — we don't want any question of
-    // having copied their listing data. Enforced here at the API level, not
-    // just requested in the prompt. Image understanding lets Grok read details
-    // (hours, menus) straight off social post images.
+    // Atlas policy: hunt aggressively across the open web + socials. Using
+    // Google as a general search engine to DISCOVER a venue's own site/socials
+    // is fine — but we never lift structured listing data from Google MAPS, so
+    // there's no question of having copied it. We block the Maps domains at the
+    // API level and reinforce "no Maps content" in the prompt. Image
+    // understanding lets Grok read details (hours, menus) off social images.
     body.tools = [
       {
         type: "web_search",
         filters: {
           excluded_domains: [
-            "google.com",
             "maps.google.com",
-            "goo.gl",
             "maps.app.goo.gl",
+            "goo.gl",
           ],
         },
         enable_image_understanding: true,
