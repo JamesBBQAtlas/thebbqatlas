@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Search, SlidersHorizontal, X, MapPin } from "lucide-react";
+import { Search, SlidersHorizontal, X, MapPin, Navigation, Loader2 } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
@@ -93,6 +93,7 @@ export function MapExplorer({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
+  const geoMarkerRef = useRef<maplibregl.Marker | null>(null);
   const router = useRouter();
 
   // Restore the last view once (client-only; the map is imported ssr:false).
@@ -104,6 +105,11 @@ export function MapExplorer({
   const [country, setCountry] = useState<string>(initialState.country ?? "all");
   const [query, setQuery] = useState(initialState.query ?? "");
   const [selected, setSelected] = useState<Restaurant | null>(null);
+
+  // Location (place) search — geocode a city/country/postcode and fly there.
+  const [geoBusy, setGeoBusy] = useState(false);
+  const [placeLabel, setPlaceLabel] = useState<string | null>(null);
+  const [geoMiss, setGeoMiss] = useState(false);
 
   const bySlug = useMemo(() => {
     const m = new Map<string, Restaurant>();
@@ -313,6 +319,70 @@ export function MapExplorer({
     flyTo(r);
   }
 
+  // Geocode the search box as a *place* (city, country, postcode) and move the
+  // map there, dropping a marker. Venue-name filtering still happens live in the
+  // list; this is the "search by location" path.
+  async function searchPlace() {
+    const q = query.trim();
+    const map = mapRef.current;
+    if (!q || !map || geoBusy) return;
+    setGeoBusy(true);
+    setGeoMiss(false);
+    try {
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const top = Array.isArray(data) ? data[0] : null;
+      if (!top) {
+        setGeoMiss(true);
+        setPlaceLabel(null);
+        return;
+      }
+      const lat = parseFloat(top.lat);
+      const lon = parseFloat(top.lon);
+
+      geoMarkerRef.current?.remove();
+      const el = document.createElement("div");
+      el.className = "atlas-geo-marker";
+      geoMarkerRef.current = new maplibregl.Marker({ element: el })
+        .setLngLat([lon, lat])
+        .addTo(map);
+
+      const bbox = top.boundingbox?.map(Number) as
+        | [number, number, number, number]
+        | undefined;
+      if (bbox && bbox.every(Number.isFinite)) {
+        const [s, n, w, e] = bbox;
+        map.fitBounds(
+          [
+            [w, s],
+            [e, n],
+          ],
+          { padding: 70, maxZoom: 13, duration: 900 }
+        );
+      } else {
+        map.flyTo({ center: [lon, lat], zoom: 11, speed: 1.4 });
+      }
+
+      // Trim Nominatim's long display_name to the first few parts.
+      setPlaceLabel(
+        String(top.display_name || q).split(",").slice(0, 3).join(", ")
+      );
+      setSelected(null);
+    } catch {
+      setGeoMiss(true);
+      setPlaceLabel(null);
+    } finally {
+      setGeoBusy(false);
+    }
+  }
+
+  function clearPlace() {
+    geoMarkerRef.current?.remove();
+    geoMarkerRef.current = null;
+    setPlaceLabel(null);
+    setGeoMiss(false);
+  }
+
   // Snapshot the exact current view right before leaving for a full page.
   function persistView() {
     const m = mapRef.current;
@@ -337,11 +407,56 @@ export function MapExplorer({
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
             <input
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search name or place"
+              onChange={(e) => {
+                setQuery(e.target.value);
+                if (geoMiss) setGeoMiss(false);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  searchPlace();
+                }
+              }}
+              placeholder="Search a venue, city or country"
               className="w-full rounded-md border border-border-default bg-surface-1 py-2.5 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-brand-gold/20"
             />
           </div>
+
+          {/* Location search: geocode the query and fly there */}
+          <button
+            type="button"
+            onClick={searchPlace}
+            disabled={!query.trim() || geoBusy}
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-md border border-border-default bg-surface-1 px-3 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {geoBusy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Navigation className="h-3.5 w-3.5" />
+            )}
+            Jump to a city or place
+          </button>
+
+          {placeLabel && (
+            <div className="mt-2 flex items-center gap-2 rounded-md border border-brand-gold/40 bg-brand-gold/10 px-3 py-1.5 text-xs text-text-secondary">
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-gold" />
+              <span className="truncate">{placeLabel}</span>
+              <button
+                type="button"
+                onClick={clearPlace}
+                aria-label="Clear location"
+                className="ml-auto shrink-0 text-text-muted transition-colors hover:text-text-primary"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+          {geoMiss && (
+            <p className="mt-2 text-xs text-text-muted">
+              No place found for “{query.trim()}”. Try a city or country name.
+            </p>
+          )}
+
           <div className="mt-3 grid grid-cols-2 gap-2">
             <select
               value={style}

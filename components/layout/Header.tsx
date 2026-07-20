@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Menu, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Link, usePathname } from "@/i18n/navigation";
@@ -29,9 +30,17 @@ export function Header() {
         <Link
           href="/"
           aria-label="The BBQ Atlas — home"
-          className="flex shrink-0 items-center"
+          className="group flex shrink-0 items-center gap-2.5"
         >
-          <span className="font-heading text-xl font-bold uppercase tracking-[0.06em] text-text-primary transition-colors duration-200 hover:text-brand-gold sm:text-[1.4rem]">
+          <Image
+            src="/logos/crest-emblem.png"
+            alt=""
+            width={44}
+            height={44}
+            priority
+            className="h-9 w-9 object-contain transition-transform duration-200 group-hover:scale-[1.04] [filter:drop-shadow(0_2px_5px_rgba(0,0,0,0.55))] sm:h-10 sm:w-10"
+          />
+          <span className="font-heading text-xl font-bold uppercase tracking-[0.06em] text-text-primary transition-colors duration-200 group-hover:text-brand-gold sm:text-[1.4rem]">
             The BBQ Atlas
           </span>
         </Link>

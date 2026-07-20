@@ -254,6 +254,18 @@
   color: #7d6f61;
 }
 
+/* Marker dropped where a place search lands */
+.atlas-geo-marker {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: rgba(212, 175, 55, 0.28);
+  border: 2px solid #d4af37;
+  box-shadow:
+    0 0 0 5px rgba(212, 175, 55, 0.14),
+    0 0 12px rgba(212, 175, 55, 0.55);
+}
+
 /* In-map preview card entrance */
 @keyframes atlas-card-in {
   from {
