@@ -2,6 +2,7 @@ import type { BbqStyle } from "@/lib/constants/styles";
 
 export type ModerationStatus = "pending" | "approved" | "rejected";
 export type UserRole = "user" | "admin";
+export type AccountType = "consumer" | "owner" | "seller";
 export type SubmissionKind = "new_venue" | "correction" | "closure";
 export type MapItemCategory =
   | "restaurant"
@@ -18,6 +19,18 @@ export interface Profile {
   display_name: string | null;
   avatar_url: string | null;
   role: UserRole;
+  account_type: AccountType;
+  created_at: string;
+}
+
+export interface RestaurantClaim {
+  id: string;
+  restaurant_id: string;
+  user_id: string;
+  role_requested: "owner" | "seller";
+  status: ModerationStatus;
+  note: string | null;
+  contact_email: string | null;
   created_at: string;
 }
 
@@ -50,6 +63,7 @@ export interface Restaurant {
   hours?: Record<string, string> | null;
   event_starts_at?: string | null;
   event_ends_at?: string | null;
+  owner_id?: string | null;
 }
 
 export interface ReviewPhoto {

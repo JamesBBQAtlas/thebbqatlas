@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
@@ -361,9 +361,18 @@ export default async function RestaurantPage({ params }: Props) {
             caption={cityCountry}
           />
 
-          {/* Keep listings honest */}
-          <div className="text-center">
-            <ReportCorrection restaurantId={restaurant.id} name={restaurant.name} />
+          {/* Ownership + keeping listings honest */}
+          <div className="space-y-2 text-center">
+            <Link
+              href={`/list?claim=${restaurant.slug}`}
+              className="inline-flex items-center gap-1.5 text-xs text-text-muted underline-offset-2 transition-colors hover:text-brand-gold hover:underline"
+            >
+              <Store className="h-3.5 w-3.5" />
+              Own this business? Claim your listing
+            </Link>
+            <div>
+              <ReportCorrection restaurantId={restaurant.id} name={restaurant.name} />
+            </div>
           </div>
         </aside>
       </div>

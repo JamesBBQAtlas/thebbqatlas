@@ -10,6 +10,7 @@ import {
   MapPin,
   Wrench,
   DoorClosed,
+  BadgeCheck,
 } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
@@ -45,9 +46,19 @@ export type CorrectionItem = {
   targetSlug?: string;
 };
 
-type Tab = "submissions" | "corrections" | "reviews" | "photos";
-type Bucket = "subs" | "corrections" | "reviews" | "photos";
-type ApiType = "submission" | "review" | "photo";
+export type ClaimModItem = {
+  id: string;
+  role: string;
+  restaurantName?: string;
+  restaurantSlug?: string;
+  note?: string;
+  contactEmail?: string;
+  created_at: string;
+};
+
+type Tab = "submissions" | "corrections" | "claims" | "reviews" | "photos";
+type Bucket = "subs" | "corrections" | "claims" | "reviews" | "photos";
+type ApiType = "submission" | "review" | "photo" | "claim";
 
 function fmtDate(iso: string) {
   try {
@@ -104,17 +115,20 @@ function EmptyState({ label }: { label: string }) {
 export function ModerationConsole({
   submissions: initialSubs,
   corrections: initialCorrections,
+  claims: initialClaims,
   reviews: initialReviews,
   photos: initialPhotos,
 }: {
   submissions: Submission[];
   corrections: CorrectionItem[];
+  claims: ClaimModItem[];
   reviews: ReviewItem[];
   photos: PhotoItem[];
 }) {
   const [tab, setTab] = useState<Tab>("submissions");
   const [subs, setSubs] = useState(initialSubs);
   const [corrections, setCorrections] = useState(initialCorrections);
+  const [claims, setClaims] = useState(initialClaims);
   const [reviews, setReviews] = useState(initialReviews);
   const [photos, setPhotos] = useState(initialPhotos);
   const [busy, setBusy] = useState<string | null>(null);
@@ -136,6 +150,7 @@ export function ModerationConsole({
         if (bucket === "subs") setSubs((p) => p.filter((s) => s.id !== id));
         if (bucket === "corrections")
           setCorrections((p) => p.filter((c) => c.id !== id));
+        if (bucket === "claims") setClaims((p) => p.filter((c) => c.id !== id));
         if (bucket === "reviews") setReviews((p) => p.filter((r) => r.id !== id));
         if (bucket === "photos") setPhotos((p) => p.filter((ph) => ph.id !== id));
       }
@@ -147,6 +162,7 @@ export function ModerationConsole({
   const tabs: { key: Tab; label: string; icon: typeof Store; count: number }[] = [
     { key: "submissions", label: "Submissions", icon: Store, count: subs.length },
     { key: "corrections", label: "Corrections", icon: Wrench, count: corrections.length },
+    { key: "claims", label: "Claims", icon: BadgeCheck, count: claims.length },
     { key: "reviews", label: "Reviews", icon: MessageSquare, count: reviews.length },
     { key: "photos", label: "Photos", icon: ImageIcon, count: photos.length },
   ];
@@ -310,6 +326,65 @@ export function ModerationConsole({
                     busy={busy === c.id}
                     onApprove={() => act("submission", c.id, "approve", "corrections")}
                     onReject={() => act("submission", c.id, "reject", "corrections")}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+
+      {/* Claims */}
+      {tab === "claims" &&
+        (claims.length === 0 ? (
+          <EmptyState label="No pending ownership or seller claims." />
+        ) : (
+          <div className="space-y-4">
+            {claims.map((c) => (
+              <div
+                key={c.id}
+                className="rounded-xl border border-border-subtle bg-surface-0 p-6"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-gold/15 px-2.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em] text-brand-gold">
+                        <BadgeCheck className="h-3 w-3" />
+                        {c.role} claim
+                      </span>
+                      {c.restaurantSlug ? (
+                        <Link
+                          href={`/restaurants/${c.restaurantSlug}`}
+                          className="font-heading font-bold text-text-primary hover:text-brand-gold"
+                        >
+                          {c.restaurantName ?? "Venue"}
+                        </Link>
+                      ) : (
+                        <span className="font-heading font-bold text-text-primary">
+                          {c.restaurantName ?? "Venue"}
+                        </span>
+                      )}
+                      <span className="text-xs text-text-muted">
+                        {fmtDate(c.created_at)}
+                      </span>
+                    </div>
+                    {c.note && (
+                      <p className="mt-3 max-w-2xl text-sm leading-relaxed text-text-secondary">
+                        {c.note}
+                      </p>
+                    )}
+                    {c.contactEmail && (
+                      <p className="mt-2 text-xs text-text-muted">
+                        Contact: {c.contactEmail}
+                      </p>
+                    )}
+                    <p className="mt-2 text-xs text-text-muted">
+                      Approving grants this user ownership of the venue.
+                    </p>
+                  </div>
+                  <Actions
+                    busy={busy === c.id}
+                    onApprove={() => act("claim", c.id, "approve", "claims")}
+                    onReject={() => act("claim", c.id, "reject", "claims")}
                   />
                 </div>
               </div>

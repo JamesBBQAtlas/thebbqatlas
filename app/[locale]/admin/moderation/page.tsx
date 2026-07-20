@@ -7,6 +7,7 @@ import {
   type ReviewItem,
   type PhotoItem,
   type CorrectionItem,
+  type ClaimModItem,
 } from "@/components/admin/ModerationConsole";
 import type { Submission } from "@/lib/types/database";
 
@@ -44,7 +45,7 @@ export default async function ModerationPage() {
     ? createAdminClient()
     : supabase;
 
-  const [subsRes, reviewsRes, photosRes] = await Promise.all([
+  const [subsRes, reviewsRes, photosRes, claimsRes] = await Promise.all([
     db
       .from("submissions")
       .select("*")
@@ -58,6 +59,11 @@ export default async function ModerationPage() {
     db
       .from("review_photos")
       .select("*, reviews(restaurant_id, restaurants(name, slug))")
+      .eq("status", "pending")
+      .order("created_at", { ascending: true }),
+    db
+      .from("restaurant_claims")
+      .select("*, restaurants(name, slug)")
       .eq("status", "pending")
       .order("created_at", { ascending: true }),
   ]);
@@ -128,6 +134,16 @@ export default async function ModerationPage() {
     restaurantSlug: p.reviews?.restaurants?.slug,
   }));
 
+  const claims: ClaimModItem[] = (claimsRes.data ?? []).map((c) => ({
+    id: c.id,
+    role: c.role_requested,
+    restaurantName: c.restaurants?.name,
+    restaurantSlug: c.restaurants?.slug,
+    note: c.note ?? undefined,
+    contactEmail: c.contact_email ?? undefined,
+    created_at: c.created_at,
+  }));
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-16 sm:px-10">
       <h1 className="mb-1 font-heading text-3xl font-bold text-text-primary">
@@ -139,6 +155,7 @@ export default async function ModerationPage() {
       <ModerationConsole
         submissions={submissions}
         corrections={corrections}
+        claims={claims}
         reviews={reviews}
         photos={photos}
       />

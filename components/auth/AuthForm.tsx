@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type AuthMode = "login" | "signup" | "magic";
+
+const inputCls =
+  "w-full rounded-md border border-border-default bg-surface-1 px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-brand-gold/20";
 
 export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
@@ -17,11 +16,19 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
   const [loading, setLoading] = useState(false);
   const supabase = createClient();
 
+  const title =
+    mode === "signup" ? "Create your account" : mode === "magic" ? "Magic link" : "Welcome back";
+  const subtitle =
+    mode === "signup"
+      ? "Save spots, submit venues, and make the Atlas yours."
+      : mode === "magic"
+        ? "We'll email you a one-tap sign-in link."
+        : "Sign in to your BBQ Atlas.";
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
-
     if (mode === "signup") {
       const { error } = await supabase.auth.signUp({
         email,
@@ -51,46 +58,99 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
   };
 
   return (
-    <Card className="w-full max-w-md mx-auto">
-      <CardHeader>
-        <CardTitle>
-          {mode === "signup" ? "Create Account" : mode === "magic" ? "Magic Link" : "Sign In"}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <form onSubmit={handleEmailAuth} className="space-y-4">
+    <div className="rounded-2xl border border-border-subtle bg-surface-0 p-8 shadow-xl">
+      <div className="mb-6 text-center">
+        <h1 className="font-heading text-2xl font-bold text-text-primary">{title}</h1>
+        <p className="mt-1 text-sm text-text-muted">{subtitle}</p>
+      </div>
+
+      <form onSubmit={handleEmailAuth} className="space-y-4">
+        <div>
+          <label htmlFor="email" className="u-eyebrow mb-1.5 block text-[0.6875rem] text-text-muted">
+            Email
+          </label>
+          <input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            placeholder="you@example.com"
+            className={inputCls}
+          />
+        </div>
+        {mode !== "magic" && (
           <div>
-            <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+            <label htmlFor="password" className="u-eyebrow mb-1.5 block text-[0.6875rem] text-text-muted">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              minLength={6}
+              placeholder="••••••••"
+              className={inputCls}
+            />
           </div>
-          {mode !== "magic" && (
-            <div>
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-            </div>
-          )}
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? "Loading..." : mode === "signup" ? "Sign Up" : mode === "magic" ? "Send Magic Link" : "Sign In"}
-          </Button>
-        </form>
+        )}
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full rounded-md bg-brand-gold px-4 py-2.5 text-sm font-bold uppercase tracking-[0.06em] text-text-inverse transition-colors hover:bg-brand-gold/90 disabled:opacity-40"
+        >
+          {loading
+            ? "Please wait…"
+            : mode === "signup"
+              ? "Sign up"
+              : mode === "magic"
+                ? "Send magic link"
+                : "Sign in"}
+        </button>
+      </form>
 
-        <div className="relative">
-          <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-white/20" /></div>
-          <div className="relative flex justify-center text-xs"><span className="bg-brand-black px-2 text-white/50">or</span></div>
+      <div className="relative my-5">
+        <div className="absolute inset-0 flex items-center">
+          <span className="w-full border-t border-border-subtle" />
         </div>
-
-        <Button variant="secondary" className="w-full" onClick={handleGoogle} type="button">
-          Continue with Google
-        </Button>
-
-        <div className="flex flex-wrap gap-2 text-sm text-white/60 justify-center">
-          {mode !== "login" && <button type="button" onClick={() => setMode("login")} className="hover:text-brand-gold">Sign In</button>}
-          {mode !== "signup" && <button type="button" onClick={() => setMode("signup")} className="hover:text-brand-gold">Sign Up</button>}
-          {mode !== "magic" && <button type="button" onClick={() => setMode("magic")} className="hover:text-brand-gold">Magic Link</button>}
+        <div className="relative flex justify-center text-xs">
+          <span className="bg-surface-0 px-2 text-text-muted">or</span>
         </div>
+      </div>
 
-        {message && <p className="text-sm text-center text-brand-gold">{message}</p>}
-      </CardContent>
-    </Card>
+      <button
+        type="button"
+        onClick={handleGoogle}
+        className="w-full rounded-md border border-border-default px-4 py-2.5 text-sm font-semibold text-text-primary transition-colors hover:border-border-strong"
+      >
+        Continue with Google
+      </button>
+
+      <div className="mt-6 flex flex-wrap justify-center gap-3 text-sm text-text-muted">
+        {mode !== "login" && (
+          <button type="button" onClick={() => setMode("login")} className="hover:text-brand-gold">
+            Sign in
+          </button>
+        )}
+        {mode !== "signup" && (
+          <button type="button" onClick={() => setMode("signup")} className="hover:text-brand-gold">
+            Create account
+          </button>
+        )}
+        {mode !== "magic" && (
+          <button type="button" onClick={() => setMode("magic")} className="hover:text-brand-gold">
+            Magic link
+          </button>
+        )}
+      </div>
+
+      {message && (
+        <p className="mt-4 rounded-md border border-border-subtle bg-surface-1 px-3 py-2 text-center text-sm text-text-secondary">
+          {message}
+        </p>
+      )}
+    </div>
   );
 }

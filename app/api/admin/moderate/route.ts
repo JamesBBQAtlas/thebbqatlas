@@ -146,6 +146,39 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true });
     }
 
+    if (type === "claim") {
+      const { data: claim } = await admin
+        .from("restaurant_claims")
+        .select("id, restaurant_id, user_id, role_requested")
+        .eq("id", id)
+        .single();
+      if (!claim) {
+        return NextResponse.json({ error: "Not found" }, { status: 404 });
+      }
+      await admin
+        .from("restaurant_claims")
+        .update({ status: action === "approve" ? "approved" : "rejected" })
+        .eq("id", id);
+      if (action === "approve") {
+        // Record ownership on the venue and set the user's account type.
+        await admin
+          .from("restaurants")
+          .update({ owner_id: claim.user_id })
+          .eq("id", claim.restaurant_id);
+        await admin
+          .from("profiles")
+          .upsert(
+            {
+              id: claim.user_id,
+              account_type:
+                claim.role_requested === "seller" ? "seller" : "owner",
+            },
+            { onConflict: "id" }
+          );
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     return NextResponse.json({ error: "Unknown type" }, { status: 400 });
   } catch (err) {
     return NextResponse.json(
