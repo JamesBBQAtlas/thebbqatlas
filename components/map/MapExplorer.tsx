@@ -16,10 +16,10 @@ const GOLD = "#D4AF37";
 const SIENNA = "#C4622D";
 const INK = "#0C0907";
 
-// Subtle deep-navy so open water reads blue rather than black, while land and
-// streets from the dataviz-dark basemap stay exactly as-is.
-const OCEAN = "#0E1B27";
-const OCEAN_WATER = "#12242F";
+// Deep ocean blue so water clearly reads blue (with contrast against the dark
+// land), while land and streets from the dataviz-dark basemap stay as-is.
+const OCEAN = "#103555";
+const OCEAN_WATER = "#164770";
 
 // --- Session-scoped view persistence -----------------------------------------
 // Remembers where the user was on the map (and their filters) so hitting Back
@@ -110,6 +110,7 @@ export function MapExplorer({
   const [geoBusy, setGeoBusy] = useState(false);
   const [placeLabel, setPlaceLabel] = useState<string | null>(null);
   const [geoMiss, setGeoMiss] = useState(false);
+  const [areaCount, setAreaCount] = useState<number | null>(null);
 
   const bySlug = useMemo(() => {
     const m = new Map<string, Restaurant>();
@@ -350,6 +351,7 @@ export function MapExplorer({
       const bbox = top.boundingbox?.map(Number) as
         | [number, number, number, number]
         | undefined;
+      let inArea: number;
       if (bbox && bbox.every(Number.isFinite)) {
         const [s, n, w, e] = bbox;
         map.fitBounds(
@@ -359,14 +361,24 @@ export function MapExplorer({
           ],
           { padding: 70, maxZoom: 13, duration: 900 }
         );
+        inArea = restaurants.filter(
+          (r) => r.lat >= s && r.lat <= n && r.lng >= w && r.lng <= e
+        ).length;
       } else {
         map.flyTo({ center: [lon, lat], zoom: 11, speed: 1.4 });
+        inArea = restaurants.filter(
+          (r) => Math.abs(r.lat - lat) < 0.6 && Math.abs(r.lng - lon) < 0.6
+        ).length;
       }
 
+      // Clear the venue text-filter so all nearby pins stay visible at the
+      // destination (otherwise the place name filters the map to nothing).
+      setQuery("");
       // Trim Nominatim's long display_name to the first few parts.
       setPlaceLabel(
         String(top.display_name || q).split(",").slice(0, 3).join(", ")
       );
+      setAreaCount(inArea);
       setSelected(null);
     } catch {
       setGeoMiss(true);
@@ -381,6 +393,7 @@ export function MapExplorer({
     geoMarkerRef.current = null;
     setPlaceLabel(null);
     setGeoMiss(false);
+    setAreaCount(null);
   }
 
   // Snapshot the exact current view right before leaving for a full page.
@@ -438,17 +451,26 @@ export function MapExplorer({
           </button>
 
           {placeLabel && (
-            <div className="mt-2 flex items-center gap-2 rounded-md border border-brand-gold/40 bg-brand-gold/10 px-3 py-1.5 text-xs text-text-secondary">
-              <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-gold" />
-              <span className="truncate">{placeLabel}</span>
-              <button
-                type="button"
-                onClick={clearPlace}
-                aria-label="Clear location"
-                className="ml-auto shrink-0 text-text-muted transition-colors hover:text-text-primary"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+            <div className="mt-2 rounded-md border border-brand-gold/40 bg-brand-gold/10 px-3 py-1.5">
+              <div className="flex items-center gap-2 text-xs text-text-secondary">
+                <MapPin className="h-3.5 w-3.5 shrink-0 text-brand-gold" />
+                <span className="truncate">{placeLabel}</span>
+                <button
+                  type="button"
+                  onClick={clearPlace}
+                  aria-label="Clear location"
+                  className="ml-auto shrink-0 text-text-muted transition-colors hover:text-text-primary"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {areaCount !== null && (
+                <p className="mt-1 pl-[1.375rem] text-[0.6875rem] text-text-muted">
+                  {areaCount === 0
+                    ? "No Atlas spots here yet"
+                    : `${areaCount} Atlas ${areaCount === 1 ? "spot" : "spots"} in this area`}
+                </p>
+              )}
             </div>
           )}
           {geoMiss && (
