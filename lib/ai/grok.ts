@@ -11,27 +11,22 @@
  * call throws a friendly, catchable error, so the rest of the app runs fine
  * with the feature simply dormant.
  *
- * xAI exposes an OpenAI-compatible Chat Completions API with "Live Search",
- * so we talk to it over plain fetch — no extra dependency.
+ * Uses xAI's Responses API (/v1/responses) with server-side "agent tools"
+ * (web_search + x_search). This replaces the old Chat-Completions
+ * `search_parameters` / "Live Search", which xAI has deprecated (HTTP 410).
  */
 
 const XAI_BASE = process.env.XAI_BASE_URL ?? "https://api.x.ai/v1";
-export const GROK_MODEL = process.env.XAI_MODEL ?? "grok-4";
+export const GROK_MODEL = process.env.XAI_MODEL ?? "grok-4.5";
 export const GROK_ENABLED = Boolean(process.env.XAI_API_KEY);
 
 export class GrokError extends Error {}
 
-interface SearchParams {
-  mode?: "auto" | "on" | "off";
-  return_citations?: boolean;
-  max_search_results?: number;
-}
-
 interface GrokJSONOptions {
   system: string;
   user: string;
-  /** Live web search. Defaults to "on" so Grok actually hunts. */
-  search?: SearchParams | false;
+  /** Give Grok live web/X search tools so it can actually hunt. */
+  search?: boolean;
   temperature?: number;
 }
 
@@ -41,15 +36,36 @@ interface GrokJSONResult<T> {
   model: string;
 }
 
+/** Pull the assistant's final text out of a Responses API payload. */
+function extractText(json: unknown): string {
+  const j = json as {
+    output_text?: string;
+    output?: Array<{
+      type?: string;
+      content?: Array<{ type?: string; text?: string }>;
+    }>;
+  };
+  if (typeof j.output_text === "string" && j.output_text) return j.output_text;
+  let text = "";
+  for (const item of j.output ?? []) {
+    if (item?.type !== "message") continue;
+    for (const c of item.content ?? []) {
+      if (c?.type === "output_text" && typeof c.text === "string") text += c.text;
+    }
+  }
+  return text;
+}
+
 /**
- * Call Grok and parse a single JSON object back. Instructs the model to reply
- * with strict JSON; we also defensively extract the first {...} block in case
- * the model wraps it in prose.
+ * Call Grok and parse a single JSON object back. Instructs the model (via the
+ * caller's prompt) to reply with strict JSON; we strip inline citation markers
+ * (`[[1]](url)`) the search tools inject, then defensively extract the first
+ * {...} block in case the model wraps it in prose.
  */
 export async function grokJSON<T>({
   system,
   user,
-  search = { mode: "on", return_citations: true, max_search_results: 12 },
+  search = true,
   temperature = 0.2,
 }: GrokJSONOptions): Promise<GrokJSONResult<T>> {
   if (!GROK_ENABLED) {
@@ -60,18 +76,17 @@ export async function grokJSON<T>({
 
   const body: Record<string, unknown> = {
     model: GROK_MODEL,
+    instructions: system,
+    input: user,
     temperature,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-    response_format: { type: "json_object" },
   };
-  if (search) body.search_parameters = search;
+  if (search) {
+    body.tools = [{ type: "web_search" }, { type: "x_search" }];
+  }
 
   let res: Response;
   try {
-    res = await fetch(`${XAI_BASE}/chat/completions`, {
+    res = await fetch(`${XAI_BASE}/responses`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -93,17 +108,17 @@ export async function grokJSON<T>({
   }
 
   const json = await res.json();
-  const content: string = json?.choices?.[0]?.message?.content ?? "";
-  const citations: string[] =
-    json?.citations ??
-    json?.choices?.[0]?.message?.citations ??
-    [];
+  const citations: string[] = Array.isArray(json?.citations) ? json.citations : [];
+
+  const raw = extractText(json);
+  // Strip inline citation markers like [[1]](https://…) the tools inject.
+  const cleaned = raw.replace(/\[\[\d+\]\]\([^)]*\)/g, "").trim();
 
   let parsed: T;
   try {
-    parsed = JSON.parse(content) as T;
+    parsed = JSON.parse(cleaned) as T;
   } catch {
-    const match = content.match(/\{[\s\S]*\}/);
+    const match = cleaned.match(/\{[\s\S]*\}/);
     if (!match) {
       throw new GrokError("Grok returned a response we couldn't parse as JSON.");
     }
@@ -112,7 +127,7 @@ export async function grokJSON<T>({
 
   return {
     data: parsed,
-    citations: Array.isArray(citations) ? citations.slice(0, 20) : [],
+    citations: citations.slice(0, 20),
     model: json?.model ?? GROK_MODEL,
   };
 }

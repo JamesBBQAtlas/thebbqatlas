@@ -163,10 +163,7 @@ Return the JSON object described in your instructions.`;
   const { data, citations } = await grokJSON<Partial<NewsDraft>>({
     system: NEWS_SYSTEM,
     user,
-    search:
-      category === "news"
-        ? { mode: "on", return_citations: true, max_search_results: 12 }
-        : { mode: "auto", return_citations: true, max_search_results: 6 },
+    search: true,
     temperature: category === "missive" ? 0.7 : 0.35,
   });
 

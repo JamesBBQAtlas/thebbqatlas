@@ -39,7 +39,7 @@ const opt = (name, def) => {
 
 const XAI_API_KEY = process.env.XAI_API_KEY;
 const XAI_BASE = process.env.XAI_BASE_URL ?? "https://api.x.ai/v1";
-const XAI_MODEL = process.env.XAI_MODEL ?? "grok-4";
+const XAI_MODEL = process.env.XAI_MODEL ?? "grok-4.5";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -68,7 +68,7 @@ async function enrich(v) {
     .map((k) => `- ${k}: ${v[k]}`)
     .join("\n");
 
-  const res = await fetch(`${XAI_BASE}/chat/completions`, {
+  const res = await fetch(`${XAI_BASE}/responses`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -77,23 +77,27 @@ async function enrich(v) {
     body: JSON.stringify({
       model: XAI_MODEL,
       temperature: 0.2,
-      response_format: { type: "json_object" },
-      search_parameters: { mode: "on", return_citations: true, max_search_results: 10 },
-      messages: [
-        { role: "system", content: SYSTEM },
-        {
-          role: "user",
-          content: `Known about this venue:\n${known}\n\nReturn the JSON object.`,
-        },
-      ],
+      instructions: SYSTEM,
+      input: `Known about this venue:\n${known}\n\nReturn the JSON object.`,
+      tools: [{ type: "web_search" }, { type: "x_search" }],
     }),
   });
   if (!res.ok) {
     throw new Error(`Grok ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
   const json = await res.json();
-  const content = json?.choices?.[0]?.message?.content ?? "{}";
-  const citations = json?.citations ?? [];
+  let content = "";
+  if (typeof json?.output_text === "string") content = json.output_text;
+  if (!content && Array.isArray(json?.output)) {
+    for (const item of json.output) {
+      if (item?.type !== "message") continue;
+      for (const c of item.content ?? []) {
+        if (c?.type === "output_text" && typeof c.text === "string") content += c.text;
+      }
+    }
+  }
+  content = content.replace(/\[\[\d+\]\]\([^)]*\)/g, "").trim();
+  const citations = Array.isArray(json?.citations) ? json.citations : [];
   let data;
   try {
     data = JSON.parse(content);
