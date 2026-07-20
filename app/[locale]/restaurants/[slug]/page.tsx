@@ -22,9 +22,22 @@ import { FlagIcon } from "@/components/ui/FlagIcon";
 import { TrackedLink } from "@/components/monetization/TrackedLink";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
+import { JsonLd } from "@/components/seo/JsonLd";
+import { restaurantJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
+import { routing } from "@/i18n/routing";
 
 interface Props {
   params: { locale: string; slug: string };
+}
+
+// Pre-render every approved restaurant (ISR: refresh hourly).
+export const revalidate = 3600;
+
+export async function generateStaticParams() {
+  const restaurants = await getRestaurants();
+  return routing.locales.flatMap((locale) =>
+    restaurants.map((r) => ({ locale, slug: r.slug }))
+  );
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -97,6 +110,17 @@ export default async function RestaurantPage({ params }: Props) {
 
   return (
     <>
+      <JsonLd
+        data={[
+          restaurantJsonLd(restaurant),
+          breadcrumbJsonLd([
+            { name: "Atlas", path: "/" },
+            { name: "Directory", path: "/directory" },
+            { name: restaurant.name, path: `/restaurants/${restaurant.slug}` },
+          ]),
+        ]}
+      />
+
       {/* Hero */}
       <section className="relative h-[52vh] min-h-[360px] w-full overflow-hidden pt-18">
         {restaurant.hero_image_url ? (

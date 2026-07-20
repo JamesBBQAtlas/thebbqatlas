@@ -37,6 +37,13 @@
     "loading": "Loading",
     "backToMap": "Back to the map"
   },
+  "Cookies": {
+    "title": "Cookie preferences",
+    "message": "We use cookies to understand how the Atlas is used and make it better. Analytics only — no ads.",
+    "privacyLink": "Read our privacy policy",
+    "accept": "Accept",
+    "decline": "Decline"
+  },
   "Restaurant": {
     "breadcrumbHome": "Atlas",
     "breadcrumbDirectory": "Directory",

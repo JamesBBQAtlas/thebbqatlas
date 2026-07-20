@@ -16,6 +16,10 @@ import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { JsonLd } from "@/components/seo/JsonLd";
+import { Analytics } from "@/components/analytics/Analytics";
+import { CookieConsent } from "@/components/analytics/CookieConsent";
+import { organizationJsonLd, websiteJsonLd } from "@/lib/seo/jsonld";
 import { BRAND } from "@/lib/constants/styles";
 import "../globals.css";
 
@@ -58,10 +62,13 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <body className="flex min-h-screen flex-col bg-background font-body text-text-primary antialiased">
+        <JsonLd data={[organizationJsonLd(), websiteJsonLd()]} />
+        <Analytics />
         <NextIntlClientProvider messages={messages}>
           <Header />
           <main className="flex-1">{children}</main>
           <Footer />
+          <CookieConsent />
         </NextIntlClientProvider>
       </body>
     </html>

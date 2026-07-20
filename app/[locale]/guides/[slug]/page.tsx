@@ -1,26 +1,62 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import { notFound } from "next/navigation";
+import { setRequestLocale } from "next-intl/server";
 import ReactMarkdown from "react-markdown";
-import { getGuideBySlug } from "@/lib/queries/guides";
+import { getGuideBySlug, getGuides } from "@/lib/queries/guides";
 import { AdSlot } from "@/components/monetization/AdSlot";
 import { AffiliateLink } from "@/components/monetization/AffiliateLink";
+import { JsonLd } from "@/components/seo/JsonLd";
+import { articleJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
+import { routing } from "@/i18n/routing";
 
 interface Props {
-  params: { slug: string };
+  params: { locale: string; slug: string };
 }
 
-export async function generateMetadata({ params }: Props) {
+export const revalidate = 3600;
+
+export async function generateStaticParams() {
+  const guides = await getGuides();
+  return routing.locales.flatMap((locale) =>
+    guides.map((g) => ({ locale, slug: g.slug }))
+  );
+}
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const guide = await getGuideBySlug(params.slug);
   if (!guide) return { title: "Guide Not Found" };
-  return { title: guide.title, description: guide.excerpt };
+  return {
+    title: guide.title,
+    description: guide.excerpt,
+    alternates: { canonical: `/guides/${guide.slug}` },
+    openGraph: {
+      title: guide.title,
+      description: guide.excerpt,
+      type: "article",
+      publishedTime: guide.published_at || undefined,
+      images: guide.hero_image_url ? [guide.hero_image_url] : [],
+    },
+  };
 }
 
 export default async function GuidePage({ params }: Props) {
+  setRequestLocale(params.locale);
   const guide = await getGuideBySlug(params.slug);
   if (!guide) notFound();
 
   return (
     <article className="mx-auto max-w-3xl px-4 py-10">
+      <JsonLd
+        data={[
+          articleJsonLd(guide),
+          breadcrumbJsonLd([
+            { name: "Atlas", path: "/" },
+            { name: "Guides", path: "/guides" },
+            { name: guide.title, path: `/guides/${guide.slug}` },
+          ]),
+        ]}
+      />
       <div className="relative aspect-[21/9] rounded-xl overflow-hidden mb-8">
         <Image src={guide.hero_image_url} alt={guide.title} fill className="object-cover" priority />
       </div>

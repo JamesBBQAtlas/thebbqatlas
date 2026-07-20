@@ -48,6 +48,6 @@ export const config = {
   // Run on page routes only. Exclude API + auth route handlers, Next internals,
   // and static assets (so the map tiles, images, and video are never rewritten).
   matcher: [
-    "/((?!api|auth|_next/static|_next/image|favicon.ico|logos|images|markers|video|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm)$).*)",
+    "/((?!api|auth|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|manifest.webmanifest|logos|images|markers|video|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|txt|xml)$).*)",
   ],
 };
