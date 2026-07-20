@@ -38,9 +38,9 @@
     "backToMap": "Back to the map"
   },
   "Cookies": {
-    "title": "Cookie preferences",
-    "message": "We use cookies for analytics and advertising — to understand how the Atlas is used, keep it free, and make it better. You can change your mind anytime.",
-    "privacyLink": "Read our privacy policy",
+    "title": "A quick word about cookies",
+    "message": "We use cookies to learn which spots you love, keep The BBQ Atlas free, and show the occasional relevant ad. No funny business — change your mind whenever.",
+    "privacyLink": "See our privacy policy",
     "accept": "Accept all",
     "decline": "Decline"
   },
