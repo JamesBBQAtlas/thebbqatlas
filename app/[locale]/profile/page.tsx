@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 import { Link } from "@/i18n/navigation";
-import { Store, Map as MapIcon, Settings, Clock } from "lucide-react";
+import { Store, Map as MapIcon, Settings, Clock, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { AvatarUpload } from "@/components/account/AvatarUpload";
 import { avatarFor } from "@/lib/account/avatar";
+import { getPremiumStatus } from "@/lib/account/entitlements";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import type { Restaurant, Submission, AccountType } from "@/lib/types/database";
 
@@ -55,6 +56,7 @@ export default async function ProfilePage() {
   const accountType = (profile?.account_type ?? "consumer") as AccountType;
   const displayName = profile?.display_name ?? user.email?.split("@")[0] ?? "Member";
   const avatar = avatarFor(profile?.avatar_url, accountType);
+  const premium = await getPremiumStatus(supabase, user.id);
 
   const { data: savedRows } = await supabase
     .from("saved_spots")
@@ -116,6 +118,18 @@ export default async function ProfilePage() {
               <span className="rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-brand-sienna">
                 {ACCOUNT_LABELS[accountType]}
               </span>
+              {premium.isPremium ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-brand-gold/50 bg-brand-gold/10 px-2.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em] text-brand-gold">
+                  <Sparkles className="h-3 w-3" /> Premium
+                </span>
+              ) : (
+                <Link
+                  href="/premium"
+                  className="inline-flex items-center gap-1 rounded-full border border-border-default px-2.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-text-muted transition-colors hover:border-brand-gold/50 hover:text-brand-gold"
+                >
+                  <Sparkles className="h-3 w-3" /> Go Premium
+                </Link>
+              )}
             </div>
           </div>
         </div>

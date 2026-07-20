@@ -24,6 +24,49 @@ export interface Profile {
   created_at: string;
 }
 
+export interface Subscription {
+  id: string;
+  user_id: string;
+  stripe_subscription_id: string | null;
+  stripe_customer_id: string | null;
+  status: string;
+  price_id: string | null;
+  plan: string | null;
+  current_period_end: string | null;
+  cancel_at_period_end: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Order {
+  id: string;
+  user_id: string | null;
+  stripe_session_id: string | null;
+  stripe_payment_intent: string | null;
+  type: string;
+  description: string | null;
+  amount_total: number | null;
+  currency: string | null;
+  status: string;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface Address {
+  id: string;
+  user_id: string;
+  full_name: string | null;
+  line1: string;
+  line2: string | null;
+  city: string;
+  region: string | null;
+  postal_code: string | null;
+  country: string;
+  phone: string | null;
+  is_default: boolean;
+  created_at: string;
+}
+
 export interface ViewHistoryItem {
   id: string;
   user_id: string;
