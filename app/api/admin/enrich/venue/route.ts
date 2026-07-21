@@ -148,6 +148,23 @@ export async function PUT(request: Request) {
     return NextResponse.json({ error: "No allowed fields." }, { status: 400 });
   }
 
+  // Capture current values so we can record (and return) exactly what changed.
+  const cols = Object.keys(update);
+  const { data: current } = await ctx.db
+    .from("restaurants")
+    .select(cols.join(","))
+    .eq("id", restaurantId)
+    .single();
+  const before = (current ?? {}) as Record<string, unknown>;
+  const changes = cols
+    .map((f) => ({ field: f, from: before[f] ?? null, to: update[f] }))
+    .filter((c) => JSON.stringify(c.from ?? null) !== JSON.stringify(c.to ?? null));
+
+  // Stamp enrichment metadata so freshness reflects this update.
+  update.enriched_at = new Date().toISOString();
+  const citations: string[] = Array.isArray(body.citations) ? body.citations : [];
+  if (citations.length) update.enrichment_sources = citations;
+
   const { error } = await ctx.db
     .from("restaurants")
     .update(update)
@@ -155,5 +172,20 @@ export async function PUT(request: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true, applied: Object.keys(update) });
+
+  // Audit trail — record exactly what changed. Best-effort.
+  try {
+    await ctx.db.from("enrichment_runs").insert({
+      restaurant_id: restaurantId,
+      entity_type: "venue_apply",
+      result: { changes } as unknown as Record<string, unknown>,
+      citations: citations.length ? citations : null,
+      model: process.env.XAI_MODEL ?? "grok-4.5",
+      created_by: ctx.userId,
+    });
+  } catch {
+    // audit is secondary — never fail the apply
+  }
+
+  return NextResponse.json({ ok: true, applied: cols, changes });
 }

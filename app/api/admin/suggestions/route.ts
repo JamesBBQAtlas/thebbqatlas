@@ -50,6 +50,7 @@ export async function PATCH(request: Request) {
     if (ALLOWED.has(k) && v !== undefined) update[k] = v;
   }
   if (s.restaurant_id && Object.keys(update).length > 0) {
+    update.enriched_at = new Date().toISOString();
     const { error } = await ctx.db
       .from("restaurants")
       .update(update)

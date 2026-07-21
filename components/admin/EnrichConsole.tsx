@@ -54,6 +54,12 @@ const inputClass =
 const labelClass =
   "mb-1 block text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-text-muted";
 
+function shortVal(v: unknown): string {
+  if (v === null || v === undefined || v === "") return "(empty)";
+  const s = typeof v === "object" ? JSON.stringify(v) : String(v);
+  return s.length > 60 ? `${s.slice(0, 60)}…` : s;
+}
+
 function Citations({ urls }: { urls: string[] }) {
   if (!urls.length) return null;
   return (
@@ -106,6 +112,9 @@ function VenueTool({
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const [result, setResult] = useState<EnrichedVenue | null>(null);
+  const [applyResult, setApplyResult] = useState<
+    { field: string; from: unknown; to: unknown }[] | null
+  >(null);
   // Which fields to apply, plus their (editable) values.
   const [fields, setFields] = useState<Record<string, string>>({});
   const [include, setInclude] = useState<Record<string, boolean>>({});
@@ -345,6 +354,7 @@ function VenueTool({
     setBusy("apply");
     setError("");
     setStatus("");
+    setApplyResult(null);
     const payload: Record<string, unknown> = {};
     for (const [k, on] of Object.entries(include)) {
       if (!on) continue;
@@ -369,7 +379,11 @@ function VenueTool({
     const res = await fetch("/api/admin/enrich/venue", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ restaurantId: venueId, fields: payload }),
+      body: JSON.stringify({
+        restaurantId: venueId,
+        fields: payload,
+        citations: result?.citations ?? [],
+      }),
     });
     const data = await res.json().catch(() => ({}));
     setBusy(null);
@@ -377,7 +391,17 @@ function VenueTool({
       setError(data.error || "Could not apply.");
       return;
     }
-    setStatus(`Applied ${data.applied?.length ?? 0} field(s) to the venue. ✓`);
+    const changes = (data.changes ?? []) as {
+      field: string;
+      from: unknown;
+      to: unknown;
+    }[];
+    setApplyResult(changes);
+    setStatus(
+      changes.length
+        ? `Saved ${changes.length} change${changes.length === 1 ? "" : "s"} to the venue. ✓`
+        : "No changes needed — the venue already had these values. ✓"
+    );
   }
 
   return (
@@ -698,6 +722,36 @@ function VenueTool({
                 )}
                 {venueId ? "Apply ticked fields to venue" : "Load a venue to apply"}
               </button>
+            )}
+
+            {/* Change summary after applying */}
+            {applyResult && (
+              <div className="mt-3 rounded-lg border border-brand-gold/40 bg-brand-gold/10 p-3">
+                <p className="text-sm font-semibold text-brand-gold">
+                  {applyResult.length
+                    ? `Saved ${applyResult.length} change${applyResult.length === 1 ? "" : "s"} to the venue ✓`
+                    : "Nothing to change — the venue already had these values ✓"}
+                </p>
+                {applyResult.length > 0 && (
+                  <ul className="mt-2 space-y-1 text-xs">
+                    {applyResult.map((c) => (
+                      <li key={c.field} className="text-text-secondary">
+                        <span className="font-semibold text-text-primary">
+                          {c.field.replace(/_/g, " ")}
+                        </span>
+                        :{" "}
+                        <span className="text-text-muted line-through">
+                          {shortVal(c.from)}
+                        </span>{" "}
+                        → <span className="text-brand-gold">{shortVal(c.to)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <p className="mt-2 text-[0.625rem] text-text-muted">
+                  Recorded to this venue&apos;s enrichment audit trail.
+                </p>
+              </div>
             )}
           </div>
         )}
