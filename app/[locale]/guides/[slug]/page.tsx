@@ -9,6 +9,7 @@ import { AffiliateLink } from "@/components/monetization/AffiliateLink";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { articleJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { TrackView } from "@/components/account/TrackView";
+import { BookmarkButton } from "@/components/content/BookmarkButton";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -67,7 +68,17 @@ export default async function GuidePage({ params }: Props) {
       <div className="relative aspect-[21/9] rounded-xl overflow-hidden mb-8">
         <Image src={guide.hero_image_url} alt={guide.title} fill className="object-cover" priority />
       </div>
-      <h1 className="text-3xl md:text-4xl font-bold">{guide.title}</h1>
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="text-3xl md:text-4xl font-bold">{guide.title}</h1>
+        <div className="shrink-0 pt-1">
+          <BookmarkButton
+            entityType="guide"
+            entityId={guide.id}
+            title={guide.title}
+            slug={guide.slug}
+          />
+        </div>
+      </div>
       <p className="text-white/60 mt-2">{guide.excerpt}</p>
       <AdSlot slot="in-content" className="my-6 h-0" />
       <div className="prose prose-invert max-w-none mt-8 prose-headings:text-brand-gold prose-a:text-brand-orange">

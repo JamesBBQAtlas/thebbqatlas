@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { MapPinCheckInside, Check, Lock, Globe2, X, Loader2 } from "lucide-react";
+import { MediaUpload } from "@/components/media/MediaUpload";
 import type { CheckInVisibility } from "@/lib/types/database";
 
 interface Props {
@@ -138,10 +139,13 @@ export function CheckInButton({
               placeholder="What did you eat? How was the smoke?"
               className="w-full resize-none rounded-lg border border-border-default bg-surface-1 px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-brand-gold/60 focus:outline-none"
             />
-            <p className="mt-1 text-[0.6875rem] text-text-muted">
-              Photos &amp; videos on your visit go through moderation before they
-              appear.
-            </p>
+            <div className="mt-3 rounded-lg border border-border-subtle bg-surface-1 p-3">
+              <MediaUpload
+                restaurantId={restaurantId}
+                source="checkin"
+                label="Add photos from your visit"
+              />
+            </div>
 
             <div className="mt-4 flex gap-2">
               <button

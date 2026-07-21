@@ -31,6 +31,8 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { createClient } from "@/lib/supabase/server";
 import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
+import { getApprovedMedia } from "@/lib/queries/media";
+import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { getSiblingLocations } from "@/lib/queries/brands";
 import type { Brand } from "@/lib/types/database";
 import { routing } from "@/i18n/routing";
@@ -87,12 +89,13 @@ export default async function RestaurantPage({ params }: Props) {
   } = await supabase.auth.getUser();
 
   const brandId = restaurant.brand_id ?? null;
-  const [dishes, allRestaurants, metrics, myCheckIn, siblings, brand] =
+  const [dishes, allRestaurants, metrics, myCheckIn, media, siblings, brand] =
     await Promise.all([
       getSignatureDishes(restaurant.id),
       getRestaurants(),
       getVenueMetrics(restaurant.id),
       user ? getUserCheckIn(supabase, user.id, restaurant.id) : Promise.resolve(null),
+      getApprovedMedia(restaurant.id),
       brandId ? getSiblingLocations(brandId, restaurant.id) : Promise.resolve([]),
       brandId
         ? supabase
@@ -299,6 +302,12 @@ export default async function RestaurantPage({ params }: Props) {
                 <InstagramEmbed posts={restaurant.instagram_posts} />
               </section>
             )}
+
+          <CommunityGallery
+            restaurantId={restaurant.id}
+            media={media}
+            canUpload={Boolean(user)}
+          />
 
           {dishes.length > 0 && (
             <section className="mb-12">

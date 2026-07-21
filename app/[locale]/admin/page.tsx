@@ -76,6 +76,7 @@ export default async function AdminDashboard() {
     clicksAffiliate,
     checkInsTotal,
     savesTotal,
+    mediaPending,
   ] = await Promise.all([
     count(db, "restaurants"),
     count(db, "restaurants", { col: "status", val: "approved" }),
@@ -91,6 +92,7 @@ export default async function AdminDashboard() {
     count(db, "click_events", { col: "event_type", val: "affiliate" }),
     count(db, "check_ins"),
     count(db, "saved_spots"),
+    count(db, "media", { col: "status", val: "pending" }),
   ]);
 
   const pendingTotal = subsPending + reviewsPending + photosPending;
@@ -149,6 +151,17 @@ export default async function AdminDashboard() {
             className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
           >
             Pending Venues
+          </Link>
+          <Link
+            href="/admin/media"
+            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+          >
+            Media
+            {mediaPending > 0 && (
+              <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
+                {mediaPending}
+              </span>
+            )}
           </Link>
           <Link
             href="/admin/enrich"

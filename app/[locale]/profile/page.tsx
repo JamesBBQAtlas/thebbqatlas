@@ -8,6 +8,7 @@ import {
   Sparkles,
   MapPinCheckInside,
   Lock,
+  Bookmark,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
@@ -89,8 +90,13 @@ export default async function ProfilePage() {
     }
   }
 
-  const [{ data: submissions }, { data: claims }, { data: history }, checkIns] =
-    await Promise.all([
+  const [
+    { data: submissions },
+    { data: claims },
+    { data: history },
+    checkIns,
+    { data: bookmarks },
+  ] = await Promise.all([
       supabase
         .from("submissions")
         .select("*")
@@ -108,6 +114,11 @@ export default async function ProfilePage() {
         .order("viewed_at", { ascending: false })
         .limit(8),
       getUserCheckIns(supabase, user.id),
+      supabase
+        .from("bookmarks")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false }),
     ]);
 
   return (
@@ -263,6 +274,31 @@ export default async function ProfilePage() {
                   </span>
                 )}
               </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Saved reading */}
+      {(bookmarks ?? []).length > 0 && (
+        <section className="mb-14">
+          <h2 className="mb-4 flex items-center gap-2 font-heading text-xl font-bold text-text-primary">
+            <Bookmark className="h-5 w-5 text-brand-gold" />
+            Saved reading
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {(bookmarks ?? []).map((b) => (
+              <Link
+                key={b.id}
+                href={
+                  b.entity_type === "news"
+                    ? `/news/${b.slug}`
+                    : `/guides/${b.slug}`
+                }
+                className="rounded-full border border-border-subtle bg-surface-0 px-4 py-1.5 text-sm text-text-secondary transition-colors hover:border-border-default hover:text-brand-gold"
+              >
+                {b.title ?? b.slug ?? "Saved item"}
+              </Link>
             ))}
           </div>
         </section>

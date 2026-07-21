@@ -9,6 +9,7 @@ import { getNews, getNewsBySlug } from "@/lib/queries/news";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { newsJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { TrackView } from "@/components/account/TrackView";
+import { BookmarkButton } from "@/components/content/BookmarkButton";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -100,9 +101,19 @@ export default async function NewsPostPage({ params }: Props) {
         )}
       </div>
 
-      <h1 className="font-heading text-3xl font-bold leading-tight text-text-primary sm:text-4xl">
-        {post.title}
-      </h1>
+      <div className="flex items-start justify-between gap-4">
+        <h1 className="font-heading text-3xl font-bold leading-tight text-text-primary sm:text-4xl">
+          {post.title}
+        </h1>
+        <div className="shrink-0 pt-1">
+          <BookmarkButton
+            entityType="news"
+            entityId={post.id}
+            title={post.title}
+            slug={post.slug}
+          />
+        </div>
+      </div>
       <p className="mt-3 text-lg text-text-secondary">{post.excerpt}</p>
 
       <div className="relative mt-8 aspect-[21/9] overflow-hidden rounded-xl">
