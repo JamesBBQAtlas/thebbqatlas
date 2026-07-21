@@ -177,6 +177,12 @@ export default async function AdminDashboard() {
             )}
           </Link>
           <Link
+            href="/admin/health"
+            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+          >
+            SEO Health
+          </Link>
+          <Link
             href="/admin/enrich"
             className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
           >
