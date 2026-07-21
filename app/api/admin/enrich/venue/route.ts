@@ -71,9 +71,22 @@ export async function POST(request: Request) {
     );
   }
 
+  let enriched;
   try {
-    const enriched = await enrichVenue(lead);
-    // Provenance: log the hunt (and its sources) whether or not it's applied.
+    enriched = await enrichVenue(lead);
+  } catch (err) {
+    const msg =
+      err instanceof GrokError
+        ? err.message
+        : err instanceof Error
+          ? `Enrichment error: ${err.message}`
+          : "Enrichment failed.";
+    return NextResponse.json({ error: msg }, { status: 502 });
+  }
+
+  // Provenance: log the hunt (and its sources). Best-effort — a logging failure
+  // must never lose a successful enrichment.
+  try {
     await ctx.db.from("enrichment_runs").insert({
       restaurant_id: body.restaurantId ?? null,
       entity_type: "venue",
@@ -83,11 +96,11 @@ export async function POST(request: Request) {
       model: process.env.XAI_MODEL ?? "grok-4.5",
       created_by: ctx.userId,
     });
-    return NextResponse.json({ enriched });
-  } catch (err) {
-    const msg = err instanceof GrokError ? err.message : "Enrichment failed.";
-    return NextResponse.json({ error: msg }, { status: 502 });
+  } catch {
+    // provenance logging is secondary — ignore
   }
+
+  return NextResponse.json({ enriched });
 }
 
 /**

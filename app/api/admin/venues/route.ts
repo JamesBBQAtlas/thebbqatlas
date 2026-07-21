@@ -152,16 +152,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
-  // Provenance log — the audit trail of where this venue's data came from.
-  await ctx.db.from("enrichment_runs").insert({
-    restaurant_id: data.id,
-    entity_type: "venue_create",
-    lead: body.lead ?? null,
-    result: v as unknown as Record<string, unknown>,
-    citations: citations.length ? citations : null,
-    model: body.model ?? null,
-    created_by: ctx.userId,
-  });
+  // Provenance log — best-effort; must never fail a successful creation.
+  try {
+    await ctx.db.from("enrichment_runs").insert({
+      restaurant_id: data.id,
+      entity_type: "venue_create",
+      lead: body.lead ?? null,
+      result: v as unknown as Record<string, unknown>,
+      citations: citations.length ? citations : null,
+      model: body.model ?? null,
+      created_by: ctx.userId,
+    });
+  } catch {
+    // ignore — provenance is secondary
+  }
 
   return NextResponse.json({ id: data.id, slug: data.slug, status: data.status });
 }

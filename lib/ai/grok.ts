@@ -97,11 +97,15 @@ export async function grokJSON<T>({
             "goo.gl",
           ],
         },
-        enable_image_understanding: true,
       },
       { type: "x_search" },
     ];
   }
+
+  // Fail cleanly before the serverless function is force-killed (~60s), so a
+  // slow hunt surfaces a clear "took too long" instead of a generic error.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 55_000);
 
   let res: Response;
   try {
@@ -112,11 +116,17 @@ export async function grokJSON<T>({
         Authorization: `Bearer ${process.env.XAI_API_KEY}`,
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new GrokError("Grok took too long and timed out — please try again.");
+    }
     throw new GrokError(
       `Could not reach Grok: ${err instanceof Error ? err.message : "network error"}`
     );
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!res.ok) {
@@ -126,7 +136,12 @@ export async function grokJSON<T>({
     );
   }
 
-  const json = await res.json();
+  let json: { citations?: unknown; model?: string };
+  try {
+    json = await res.json();
+  } catch {
+    throw new GrokError("Grok returned an unreadable response — please try again.");
+  }
   const citations: string[] = Array.isArray(json?.citations) ? json.citations : [];
 
   const raw = extractText(json);
