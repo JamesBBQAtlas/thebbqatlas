@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { enrichVenue } from "@/lib/ai/enrich";
+import { enrichVenue, type EnrichedVenue } from "@/lib/ai/enrich";
+import { CLAUDE_ENABLED } from "@/lib/ai/claude";
 
 /**
  * The self-healing data engine. It finds venues with gaps or drift, runs Grok,
@@ -64,17 +65,49 @@ export async function findThinVenues(
   return ((data ?? []) as VenueRow[]).filter((r) => !skip.has(r.id)).slice(0, limit);
 }
 
-/** Run Grok on one venue and build a gap-fill/closure suggestion, or null. */
+type AgreeBy = "both" | "grok" | "claude" | "conflict";
+interface FieldAgreement {
+  by: AgreeBy;
+  grok?: string;
+  claude?: string;
+}
+
+const disp = (v: unknown): string => {
+  if (v === null || v === undefined) return "—";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v);
+};
+const norm = (v: unknown): string => {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v).trim().toLowerCase().replace(/\/+$/, "");
+};
+const has = (v: unknown): boolean =>
+  v !== null && v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0);
+const similar = (a: unknown, b: unknown): boolean => {
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+};
+
+/**
+ * Run BOTH engines on a venue (Grok always; Claude when enabled), then
+ * reconcile into a proposal + per-field agreement so nothing slips through a
+ * single model's blind spot. Returns null if neither finds anything to fill.
+ */
 export async function buildSuggestion(v: VenueRow): Promise<{
   kind: string;
   title: string;
   summary: string;
   current: Record<string, unknown>;
   proposed: Record<string, unknown>;
+  agreement: Record<string, FieldAgreement>;
+  models: string[];
   sources: string[];
   confidence: number;
 } | null> {
-  const e = await enrichVenue({
+  const lead = {
     name: v.name,
     instagram: v.instagram_url ?? undefined,
     website: v.website ?? undefined,
@@ -82,91 +115,140 @@ export async function buildSuggestion(v: VenueRow): Promise<{
     city: v.city ?? undefined,
     country: v.country ?? undefined,
     phone: v.phone ?? undefined,
-  });
+  };
+
+  const [g, c] = await Promise.all([
+    enrichVenue(lead, "grok").catch(() => null),
+    CLAUDE_ENABLED ? enrichVenue(lead, "claude").catch(() => null) : Promise.resolve(null),
+  ]);
+  if (!g && !c) return null;
+
+  const models: string[] = [];
+  if (g) models.push("grok");
+  if (c) models.push("claude");
 
   const proposed: Record<string, unknown> = {};
   const current: Record<string, unknown> = {};
+  const agreement: Record<string, FieldAgreement> = {};
 
-  const fill = (field: string, cur: unknown, next: unknown) => {
-    const isEmpty = cur === null || cur === undefined || cur === "";
-    if (isEmpty && next !== null && next !== undefined && next !== "") {
-      proposed[field] = next;
-      current[field] = cur ?? null;
+  const reconcile = (field: string, curVal: unknown, gVal: unknown, cVal: unknown) => {
+    const curEmpty = !has(curVal);
+    if (!curEmpty) return;
+    const gHas = has(gVal);
+    const cHas = has(cVal);
+    if (!gHas && !cHas) return;
+
+    if (gHas && cHas) {
+      if (similar(gVal, cVal)) {
+        proposed[field] = gVal;
+        agreement[field] = { by: "both" };
+      } else {
+        proposed[field] = gVal; // default to Grok's; conflict surfaced for review
+        agreement[field] = { by: "conflict", grok: disp(gVal), claude: disp(cVal) };
+      }
+    } else if (gHas) {
+      proposed[field] = gVal;
+      agreement[field] = { by: "grok" };
+    } else {
+      proposed[field] = cVal;
+      agreement[field] = { by: "claude" };
     }
+    current[field] = curVal ?? null;
   };
 
-  fill("website", v.website, e.website);
-  fill("phone", v.phone, e.phone);
-  fill("hours", v.hours, e.hours);
-  fill("price_level", v.price_level, e.price_level);
-  for (const s of FILLABLE_SOCIAL) fill(s, v[s], e[s]);
-  if ((v.offerings?.length ?? 0) === 0 && e.offerings.length) {
-    proposed.offerings = e.offerings;
-    current.offerings = v.offerings ?? [];
+  const gf = (k: keyof EnrichedVenue) => (g ? g[k] : undefined);
+  const cf = (k: keyof EnrichedVenue) => (c ? c[k] : undefined);
+
+  reconcile("website", v.website, gf("website"), cf("website"));
+  reconcile("phone", v.phone, gf("phone"), cf("phone"));
+  reconcile("hours", v.hours, gf("hours"), cf("hours"));
+  reconcile("price_level", v.price_level, gf("price_level"), cf("price_level"));
+  for (const s of FILLABLE_SOCIAL) reconcile(s, v[s], gf(s), cf(s));
+  if ((v.offerings?.length ?? 0) === 0) {
+    reconcile("offerings", [], gf("offerings"), cf("offerings"));
   }
-  // Only suggest a description when the current one is a thin stub.
-  if ((v.description?.trim().length ?? 0) < 40 && (e.description?.length ?? 0) > 60) {
-    proposed.description = e.description;
-    current.description = v.description ?? null;
+  if ((v.description?.trim().length ?? 0) < 40) {
+    const gd = (g?.description?.length ?? 0) > 60 ? g?.description : undefined;
+    const cd = (c?.description?.length ?? 0) > 60 ? c?.description : undefined;
+    reconcile("description", v.description, gd, cd);
   }
 
-  // Closure signal — flagged for human confirmation, never auto-applied.
-  const isClosure = e.permanently_closed === true && v.permanently_closed !== true;
+  // Closure — flagged for human confirmation, never auto-applied.
+  const gClosed = g?.permanently_closed === true;
+  const cClosed = c?.permanently_closed === true;
+  const isClosure = (gClosed || cClosed) && v.permanently_closed !== true;
   if (isClosure) {
     proposed.permanently_closed = true;
     current.permanently_closed = v.permanently_closed ?? false;
+    agreement.permanently_closed = {
+      by: gClosed && cClosed ? "both" : gClosed ? "grok" : "claude",
+    };
   }
 
   if (Object.keys(proposed).length === 0) return null;
 
+  const byBoth = Object.values(agreement).filter((a) => a.by === "both").length;
+  const bySingle = Object.values(agreement).filter((a) => a.by === "grok" || a.by === "claude").length;
+  const conflicts = Object.values(agreement).filter((a) => a.by === "conflict").length;
+
+  const confidence =
+    g && c
+      ? Math.min(1, ((g.confidence + c.confidence) / 2) * (byBoth > 0 ? 1.05 : 1))
+      : (g?.confidence ?? c?.confidence ?? 0);
+
   const fieldCount = Object.keys(proposed).filter((k) => k !== "permanently_closed").length;
   const kind = isClosure ? "closure" : "gap_fill";
-  const title = isClosure ? `Possibly closed: ${v.name}` : `Fill ${fieldCount} gap${fieldCount === 1 ? "" : "s"}: ${v.name}`;
-  const summary = isClosure
-    ? `Grok found signs this venue may be permanently closed. Confirm before hiding it.`
-    : `Grok found ${fieldCount} missing detail${fieldCount === 1 ? "" : "s"} to fill in.`;
+  const dual = c && g;
+  const title = isClosure
+    ? `Possibly closed: ${v.name}`
+    : `Fill ${fieldCount} gap${fieldCount === 1 ? "" : "s"}: ${v.name}`;
+  const summary = dual
+    ? `Grok + Claude agree on ${byBoth}, ${bySingle} found by one only${conflicts ? `, ${conflicts} to reconcile` : ""}.`
+    : `${g ? "Grok" : "Claude"} found ${fieldCount} detail${fieldCount === 1 ? "" : "s"} to fill.`;
 
-  return {
-    kind,
-    title,
-    summary,
-    current,
-    proposed,
-    sources: e.citations,
-    confidence: e.confidence,
-  };
+  const sources = [...new Set([...(g?.citations ?? []), ...(c?.citations ?? [])])].slice(0, 20);
+
+  return { kind, title, summary, current, proposed, agreement, models, sources, confidence };
 }
 
 /**
- * Sweep a batch of thin venues into the suggestions queue. Bounded (default
- * small) so a single run stays within serverless time limits.
+ * Sweep a batch of thin venues into the suggestions queue. Venues run in
+ * parallel (each doing Grok + Claude concurrently) so a dual-AI batch still
+ * finishes within the serverless time budget.
  */
 export async function runSelfHealSweep(
   db: SupabaseClient,
   limit = 4
 ): Promise<{ scanned: number; created: number }> {
-  const venues = await findThinVenues(db, limit);
-  let created = 0;
-  for (const v of venues) {
-    try {
-      const s = await buildSuggestion(v);
-      if (!s) continue;
-      const { error } = await db.from("suggestions").insert({
-        kind: s.kind,
-        restaurant_id: v.id,
-        title: s.title,
-        summary: s.summary,
-        current: s.current,
-        proposed: s.proposed,
-        sources: s.sources,
-        confidence: s.confidence,
-        status: "pending",
-        created_by: "self-heal",
-      });
-      if (!error) created++;
-    } catch {
-      // Skip a venue that errors; the next sweep can retry it.
-    }
-  }
-  return { scanned: venues.length, created };
+  // Dual-AI is heavier — keep the concurrent batch smaller when Claude is on.
+  const cap = Math.min(limit, CLAUDE_ENABLED ? 5 : 8);
+  const venues = await findThinVenues(db, cap);
+
+  const results = await Promise.all(
+    venues.map(async (v) => {
+      try {
+        const s = await buildSuggestion(v);
+        if (!s) return false;
+        const { error } = await db.from("suggestions").insert({
+          kind: s.kind,
+          restaurant_id: v.id,
+          title: s.title,
+          summary: s.summary,
+          current: s.current,
+          proposed: s.proposed,
+          agreement: s.agreement,
+          models: s.models,
+          sources: s.sources,
+          confidence: s.confidence,
+          status: "pending",
+          created_by: "self-heal",
+        });
+        return !error;
+      } catch {
+        return false;
+      }
+    })
+  );
+
+  return { scanned: venues.length, created: results.filter(Boolean).length };
 }

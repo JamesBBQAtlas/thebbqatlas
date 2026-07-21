@@ -1,5 +1,16 @@
 import { grokJSON } from "./grok";
+import { claudeJSON } from "./claude";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
+
+export type Engine = "grok" | "claude";
+
+/** Route a JSON hunt to the chosen engine (same prompt, independent opinions). */
+function runEngine<T>(
+  engine: Engine,
+  opts: { system: string; user: string; search?: boolean; temperature?: number }
+) {
+  return engine === "claude" ? claudeJSON<T>(opts) : grokJSON<T>(opts);
+}
 import { OFFERINGS } from "@/lib/constants/offerings";
 import type { BbqStyle } from "@/lib/constants/styles";
 
@@ -81,7 +92,10 @@ Rules:
 
 Respond ONLY with a JSON object with exactly these keys: name, description, website, phone, address, city, country, style, offerings, price_level, hours, permanently_closed, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, brand_name, location_label, is_multi_location, confidence, reviewer_notes.`;
 
-export async function enrichVenue(lead: VenueLead): Promise<EnrichedVenue> {
+export async function enrichVenue(
+  lead: VenueLead,
+  engine: Engine = "grok"
+): Promise<EnrichedVenue> {
   const known = Object.entries(lead)
     .filter(([, v]) => v && String(v).trim())
     .map(([k, v]) => `- ${k}: ${v}`)
@@ -94,7 +108,7 @@ ${known || "- (almost nothing — start from the name/handle above)"}
 
 Return the JSON object described in your instructions.`;
 
-  const { data, citations } = await grokJSON<Partial<EnrichedVenue>>({
+  const { data, citations } = await runEngine<Partial<EnrichedVenue>>(engine, {
     system: VENUE_SYSTEM,
     user,
   });

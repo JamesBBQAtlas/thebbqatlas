@@ -17,11 +17,41 @@ interface Suggestion {
   summary: string;
   current: Record<string, unknown> | null;
   proposed: Record<string, unknown> | null;
+  agreement: Record<string, { by: string; grok?: string; claude?: string }> | null;
+  models: string[] | null;
   sources: string[] | null;
   confidence: number | null;
   restaurant_id: string | null;
   created_at: string;
   restaurants: { name: string; slug: string } | null;
+}
+
+function AgreementBadge({
+  a,
+}: {
+  a?: { by: string; grok?: string; claude?: string };
+}) {
+  if (!a) return <span className="text-text-muted">—</span>;
+  if (a.by === "both")
+    return (
+      <span className="rounded-full bg-brand-gold/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-gold">
+        Both agree
+      </span>
+    );
+  if (a.by === "conflict")
+    return (
+      <span
+        className="rounded-full bg-destructive/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.05em] text-destructive"
+        title={`Grok: ${a.grok ?? "—"} · Claude: ${a.claude ?? "—"}`}
+      >
+        Differ
+      </span>
+    );
+  return (
+    <span className="rounded-full bg-brand-sienna/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-sienna-light">
+      {a.by === "claude" ? "Claude only" : "Grok only"}
+    </span>
+  );
 }
 
 function fmt(v: unknown): string {
@@ -108,6 +138,11 @@ export default async function OptimizePage() {
                           {Math.round(s.confidence * 100)}% confident
                         </span>
                       )}
+                      {Array.isArray(s.models) && s.models.length > 0 && (
+                        <span className="text-xs text-text-muted">
+                          · {s.models.length === 2 ? "Grok + Claude" : s.models[0] === "claude" ? "Claude" : "Grok"}
+                        </span>
+                      )}
                     </div>
                     <h2 className="mt-1.5 font-heading text-lg font-bold text-text-primary">
                       {s.restaurants?.slug ? (
@@ -133,6 +168,7 @@ export default async function OptimizePage() {
                         <th className="px-3 py-2 font-semibold">Field</th>
                         <th className="px-3 py-2 font-semibold">Current</th>
                         <th className="px-3 py-2 font-semibold">Proposed</th>
+                        <th className="px-3 py-2 font-semibold">AI</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -144,6 +180,9 @@ export default async function OptimizePage() {
                           </td>
                           <td className="px-3 py-2 text-brand-gold">
                             {fmt(s.proposed?.[f])}
+                          </td>
+                          <td className="px-3 py-2">
+                            <AgreementBadge a={s.agreement?.[f]} />
                           </td>
                         </tr>
                       ))}

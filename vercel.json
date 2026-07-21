@@ -1,7 +1,7 @@
 {
   "crons": [
     {
-      "path": "/api/admin/selfheal?limit=8",
+      "path": "/api/admin/selfheal?limit=5",
       "schedule": "0 6 * * *"
     }
   ]
