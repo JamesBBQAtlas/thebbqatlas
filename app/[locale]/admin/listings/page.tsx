@@ -2,54 +2,104 @@ import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { Link } from "@/i18n/navigation";
-import { Sparkles, Search, ExternalLink } from "lucide-react";
 import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
-import { CATEGORY_LABELS } from "@/lib/constants/categories";
+import { CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/constants/categories";
+import { freshness } from "@/lib/admin/freshness";
+import { ListingsTable, type ListingRow } from "@/components/admin/ListingsTable";
 import type { Restaurant, MapItemCategory } from "@/lib/types/database";
 
 export const metadata = { title: "Listings" };
 export const dynamic = "force-dynamic";
 
-type Fresh = "green" | "amber" | "red";
-
-/** Traffic-light on enrichment age: ≤1mo green, ≤3mo amber, older/never red. */
-function freshness(enrichedAt: string | null | undefined): {
-  tone: Fresh;
-  label: string;
-} {
-  if (!enrichedAt) return { tone: "red", label: "Never" };
-  const days = Math.floor((Date.now() - new Date(enrichedAt).getTime()) / 86_400_000);
-  const label =
-    days < 1 ? "Today" : days < 30 ? `${days}d ago` : `${Math.floor(days / 30)}mo ago`;
-  if (days <= 30) return { tone: "green", label };
-  if (days <= 90) return { tone: "amber", label };
-  return { tone: "red", label };
+async function count(
+  db: SupabaseClient,
+  table: string,
+  filter?: { col: string; val: string }
+): Promise<number> {
+  try {
+    let q = db.from(table).select("*", { count: "exact", head: true });
+    if (filter) q = q.eq(filter.col, filter.val);
+    const { count } = await q;
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
-const TONE_CLASSES: Record<Fresh, string> = {
-  green: "bg-emerald-500/15 text-emerald-400",
-  amber: "bg-amber-500/15 text-amber-400",
-  red: "bg-red-500/15 text-red-400",
-};
-const DOT: Record<Fresh, string> = {
-  green: "bg-emerald-400",
-  amber: "bg-amber-400",
-  red: "bg-red-400",
-};
-
-const FILTERS: { key: string; label: string; tone?: Fresh }[] = [
-  { key: "all", label: "All" },
-  { key: "green", label: "Fresh (≤1mo)", tone: "green" },
-  { key: "amber", label: "Ageing (1–3mo)", tone: "amber" },
-  { key: "red", label: "Stale / never", tone: "red" },
-];
-
-export default async function ListingsPage({
-  searchParams,
+function Stat({
+  label,
+  value,
+  sub,
+  tone = "default",
 }: {
-  searchParams: { q?: string; fresh?: string };
+  label: string;
+  value: number | string;
+  sub?: string;
+  tone?: "default" | "green" | "amber" | "red" | "gold";
 }) {
+  const color =
+    tone === "green"
+      ? "text-emerald-400"
+      : tone === "amber"
+        ? "text-amber-400"
+        : tone === "red"
+          ? "text-red-400"
+          : tone === "gold"
+            ? "text-brand-gold"
+            : "text-text-primary";
+  return (
+    <div className="rounded-xl border border-border-subtle bg-surface-0 p-4">
+      <div className={`font-heading text-2xl font-bold ${color}`}>{value}</div>
+      <div className="mt-0.5 text-sm text-text-secondary">{label}</div>
+      {sub && <div className="mt-0.5 text-xs text-text-muted">{sub}</div>}
+    </div>
+  );
+}
+
+function Bar({
+  label,
+  value,
+  total,
+  health = false,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  health?: boolean;
+}) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+  const color = !health
+    ? "#D4AF37"
+    : pct >= 70
+      ? "#34D399"
+      : pct >= 40
+        ? "#FBBF24"
+        : "#F87171";
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-xs">
+        <span className="text-text-secondary">{label}</span>
+        <span className="text-text-muted">
+          {value} · {pct}%
+        </span>
+      </div>
+      <div className="mt-1 h-2 overflow-hidden rounded-full bg-surface-2">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+      </div>
+    </div>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="mt-8">
+      <h2 className="mb-3 font-heading text-lg font-bold text-text-primary">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+export default async function ListingsPage() {
   const supabase = await createClient();
   const {
     data: { user },
@@ -73,154 +123,189 @@ export default async function ListingsPage({
     ? createAdminClient()
     : supabase;
 
-  const q = (searchParams.q ?? "").trim();
-  const fresh = searchParams.fresh ?? "all";
+  const [{ data: venueData }, checkIns, saves, mediaApproved, mediaPending, reviewsApproved, reviewsPending, guides, news, bookmarks, suggestionsPending] =
+    await Promise.all([
+      db
+        .from("restaurants")
+        .select(
+          "id, name, slug, city, country, style, category, enriched_at, status, website, phone, hours, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, lat, lng, hero_image_url, created_at, brand_id"
+        )
+        .limit(2000),
+      count(db, "check_ins"),
+      count(db, "saved_spots"),
+      count(db, "media", { col: "status", val: "approved" }),
+      count(db, "media", { col: "status", val: "pending" }),
+      count(db, "reviews", { col: "status", val: "approved" }),
+      count(db, "reviews", { col: "status", val: "pending" }),
+      count(db, "guides"),
+      count(db, "news"),
+      count(db, "bookmarks"),
+      count(db, "suggestions", { col: "status", val: "pending" }),
+    ]);
 
-  let query = db
-    .from("restaurants")
-    .select(
-      "id, name, slug, city, country, style, category, enriched_at, status, website, phone, hours, instagram_url"
-    )
-    .order("enriched_at", { ascending: true, nullsFirst: true })
-    .limit(500);
-  if (q) query = query.or(`name.ilike.%${q}%,city.ilike.%${q}%,country.ilike.%${q}%`);
-  const { data } = await query;
-  const all = (data ?? []) as Restaurant[];
+  const all = (venueData ?? []) as Restaurant[];
+  const approved = all.filter((r) => r.status === "approved");
+  const A = approved.length || 1; // avoid /0
 
-  // Counts per bucket (over the search results, before the freshness filter).
-  const counts: Record<string, number> = { all: all.length, green: 0, amber: 0, red: 0 };
-  for (const r of all) counts[freshness(r.enriched_at).tone]++;
+  // Freshness distribution
+  const freshCount = { green: 0, amber: 0, red: 0 };
+  for (const r of all) freshCount[freshness(r.enriched_at).tone]++;
 
-  const rows =
-    fresh === "all" ? all : all.filter((r) => freshness(r.enriched_at).tone === fresh);
-
-  const gaps = (r: Restaurant) =>
-    [!r.website && "site", !r.phone && "phone", !r.hours && "hours", !r.instagram_url && "IG"].filter(
-      Boolean
-    ) as string[];
-
-  const chipHref = (key: string) => {
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    if (key !== "all") params.set("fresh", key);
-    const qs = params.toString();
-    return `/admin/listings${qs ? `?${qs}` : ""}`;
+  // Completeness (of approved)
+  const hasSocial = (r: Restaurant) =>
+    r.instagram_url || r.x_url || r.facebook_url || r.tiktok_url || r.youtube_url;
+  const hasGeo = (r: Restaurant) =>
+    Number.isFinite(r.lat) && Number.isFinite(r.lng) && !(r.lat === 0 && r.lng === 0);
+  const comp = {
+    website: approved.filter((r) => r.website).length,
+    phone: approved.filter((r) => r.phone).length,
+    hours: approved.filter((r) => r.hours).length,
+    socials: approved.filter(hasSocial).length,
+    photos: approved.filter((r) => (r.instagram_posts?.length ?? 0) > 0 || r.hero_image_url).length,
+    geo: approved.filter(hasGeo).length,
   };
 
+  // Coverage
+  const countries = new Set(all.map((r) => r.country).filter(Boolean));
+  const cities = new Set(all.map((r) => r.city).filter(Boolean));
+  const brands = new Set(all.map((r) => r.brand_id).filter(Boolean));
+
+  // Category mix
+  const catCounts = new Map<string, number>();
+  for (const r of all) {
+    const c = r.category ?? "restaurant";
+    catCounts.set(c, (catCounts.get(c) ?? 0) + 1);
+  }
+
+  // Top countries / styles
+  const tally = (key: (r: Restaurant) => string | null | undefined) => {
+    const m = new Map<string, number>();
+    for (const r of all) {
+      const k = key(r);
+      if (k) m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => b[1] - a[1]);
+  };
+  const topCountries = tally((r) => r.country).slice(0, 8);
+  const topStyles = tally((r) => r.style).slice(0, 8);
+
+  // Growth
+  const now = Date.now();
+  const since = (days: number) =>
+    all.filter((r) => r.created_at && now - new Date(r.created_at).getTime() <= days * 86_400_000)
+      .length;
+
+  const rows: ListingRow[] = all.map((r) => ({
+    id: r.id,
+    name: r.name,
+    slug: r.slug,
+    city: r.city,
+    country: r.country,
+    style: r.style,
+    category: r.category ?? null,
+    status: r.status,
+    enriched_at: r.enriched_at ?? null,
+    website: r.website,
+    phone: r.phone ?? null,
+    instagram_url: r.instagram_url ?? null,
+    has_hours: Boolean(r.hours),
+  }));
+
   return (
-    <div className="mx-auto max-w-5xl px-6 py-16 sm:px-10">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="font-heading text-3xl font-bold text-text-primary">Listings</h1>
-          <p className="mt-1 text-text-muted">
-            Every venue on the Atlas. Enrich or update any one with AI in a click.
-          </p>
+    <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10">
+      <h1 className="font-heading text-3xl font-bold text-text-primary">Listings &amp; Insights</h1>
+      <p className="mt-1 text-text-muted">
+        The whole catalogue at a glance — then search, sort, filter and enrich any venue below.
+      </p>
+
+      {/* Headline */}
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+        <Stat label="Venues live" value={approved.length} tone="gold" sub={`${all.length - approved.length} pending`} />
+        <Stat label="Countries" value={countries.size} />
+        <Stat label="Cities" value={cities.size} />
+        <Stat label="Brands" value={brands.size} />
+        <Stat label="Added (30d)" value={since(30)} sub={`${since(7)} this week`} />
+        <Stat label="Check-ins" value={checkIns} />
+      </div>
+
+      {/* Enrichment health */}
+      <Section title="Enrichment health">
+        <div className="grid grid-cols-3 gap-3">
+          <Stat label="Fresh (≤1mo)" value={freshCount.green} tone="green" sub={`${Math.round((freshCount.green / (all.length || 1)) * 100)}%`} />
+          <Stat label="Ageing (1–3mo)" value={freshCount.amber} tone="amber" sub={`${Math.round((freshCount.amber / (all.length || 1)) * 100)}%`} />
+          <Stat label="Stale / never" value={freshCount.red} tone="red" sub={`${Math.round((freshCount.red / (all.length || 1)) * 100)}%`} />
         </div>
-        <form className="flex items-center gap-2">
-          {fresh !== "all" && <input type="hidden" name="fresh" value={fresh} />}
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
-            <input
-              name="q"
-              defaultValue={q}
-              placeholder="Search name, city, country"
-              className="w-64 rounded-md border border-border-default bg-surface-0 py-2 pl-9 pr-3 text-sm text-text-primary placeholder:text-text-muted focus:border-brand-gold/60 focus:outline-none"
-            />
+      </Section>
+
+      {/* Completeness */}
+      <Section title="Data completeness (of live venues)">
+        <div className="grid grid-cols-1 gap-x-8 gap-y-3 rounded-xl border border-border-subtle bg-surface-0 p-5 sm:grid-cols-2 lg:grid-cols-3">
+          <Bar label="Website" value={comp.website} total={A} health />
+          <Bar label="Phone" value={comp.phone} total={A} health />
+          <Bar label="Opening hours" value={comp.hours} total={A} health />
+          <Bar label="Socials" value={comp.socials} total={A} health />
+          <Bar label="Photos" value={comp.photos} total={A} health />
+          <Bar label="On the map (geo)" value={comp.geo} total={A} health />
+        </div>
+      </Section>
+
+      {/* Reach */}
+      <Section title="Reach">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="rounded-xl border border-border-subtle bg-surface-0 p-5">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.06em] text-text-muted">
+              Top countries
+            </h3>
+            <div className="space-y-2.5">
+              {topCountries.map(([c, n]) => (
+                <Bar key={c} label={c} value={n} total={all.length} />
+              ))}
+            </div>
           </div>
-        </form>
-      </div>
+          <div className="rounded-xl border border-border-subtle bg-surface-0 p-5">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.06em] text-text-muted">
+              Top styles
+            </h3>
+            <div className="space-y-2.5">
+              {topStyles.map(([s, n]) => (
+                <Bar key={s} label={STYLE_LABELS[s as BbqStyle] ?? s} value={n} total={all.length} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </Section>
 
-      {/* Freshness filter */}
-      <div className="mb-5 flex flex-wrap items-center gap-2">
-        {FILTERS.map((f) => (
-          <Link
-            key={f.key}
-            href={chipHref(f.key)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors ${
-              fresh === f.key
-                ? "border-brand-gold/60 bg-brand-gold/10 text-brand-gold"
-                : "border-border-subtle bg-surface-0 text-text-secondary hover:border-brand-gold/50 hover:text-brand-gold"
-            }`}
-          >
-            {f.tone && <span className={`h-2 w-2 rounded-full ${DOT[f.tone]}`} />}
-            {f.label}
-            <span className="text-text-muted">{counts[f.key] ?? 0}</span>
-          </Link>
-        ))}
-      </div>
+      {/* Item types */}
+      <Section title="Item types">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+          {CATEGORY_ORDER.map((c) => (
+            <Stat key={c} label={CATEGORY_LABELS[c as MapItemCategory]} value={catCounts.get(c) ?? 0} />
+          ))}
+        </div>
+      </Section>
 
-      <div className="overflow-hidden rounded-xl border border-border-subtle">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-surface-1 text-xs uppercase tracking-[0.06em] text-text-muted">
-            <tr>
-              <th className="px-4 py-3 font-semibold">Venue</th>
-              <th className="px-4 py-3 font-semibold">Type / Style</th>
-              <th className="px-4 py-3 font-semibold">Gaps</th>
-              <th className="px-4 py-3 font-semibold">Last enriched</th>
-              <th className="px-4 py-3 text-right font-semibold">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const g = gaps(r);
-              const f = freshness(r.enriched_at);
-              return (
-                <tr key={r.id} className="border-t border-border-subtle bg-surface-0 align-top">
-                  <td className="px-4 py-3">
-                    <div className="font-semibold text-text-primary">{r.name}</div>
-                    <div className="text-xs text-text-muted">
-                      {[r.city, r.country].filter(Boolean).join(", ")}
-                      {r.status !== "approved" && (
-                        <span className="ml-2 rounded-full bg-brand-sienna/15 px-1.5 py-0.5 text-[0.5625rem] font-bold uppercase text-brand-sienna-light">
-                          {r.status}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-text-secondary">
-                    {r.category && r.category !== "restaurant"
-                      ? CATEGORY_LABELS[r.category as MapItemCategory]
-                      : STYLE_LABELS[r.style as BbqStyle] ?? r.style}
-                  </td>
-                  <td className="px-4 py-3 text-xs">
-                    {g.length === 0 ? (
-                      <span className="text-emerald-400">complete</span>
-                    ) : (
-                      <span className="text-brand-sienna-light">{g.join(", ")}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${TONE_CLASSES[f.tone]}`}
-                    >
-                      <span className={`h-1.5 w-1.5 rounded-full ${DOT[f.tone]}`} />
-                      {f.label}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
-                      <Link
-                        href={`/restaurants/${r.slug}`}
-                        className="text-text-muted transition-colors hover:text-brand-gold"
-                        title="View listing"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </Link>
-                      <Link
-                        href={`/admin/enrich?slug=${r.slug}`}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-                      >
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Enrich
-                      </Link>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* Community & content */}
+      <Section title="Community &amp; content">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
+          <Stat label="Saves" value={saves} />
+          <Stat label="Photos live" value={mediaApproved} sub={`${mediaPending} pending`} tone={mediaPending ? "amber" : "default"} />
+          <Stat label="Reviews" value={reviewsApproved} sub={`${reviewsPending} pending`} tone={reviewsPending ? "amber" : "default"} />
+          <Stat label="Guides" value={guides} />
+          <Stat label="News" value={news} />
+          <Stat label="Bookmarks" value={bookmarks} />
+        </div>
+        {suggestionsPending > 0 && (
+          <p className="mt-3 text-sm text-brand-gold">
+            {suggestionsPending} self-healing suggestion{suggestionsPending === 1 ? "" : "s"} awaiting
+            your review in Self-Healing.
+          </p>
+        )}
+      </Section>
+
+      {/* Interactive table */}
+      <Section title="All listings">
+        <ListingsTable rows={rows} />
+      </Section>
     </div>
   );
 }
