@@ -4,9 +4,27 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { restaurantSlug } from "@/lib/utils/slug";
 import { resolveCountryCode } from "@/lib/constants/countries";
+import { sendModerationOutcome } from "@/lib/email/senders";
 
 type ModType = "submission" | "review" | "photo";
 type Action = "approve" | "reject";
+
+/** Resolve who to email about a submission's outcome (best-effort). */
+async function submitterEmail(
+  admin: SupabaseClient,
+  submission: { contact_email?: string | null; submitted_by?: string | null }
+): Promise<string | null> {
+  if (submission.contact_email) return submission.contact_email;
+  if (submission.submitted_by) {
+    try {
+      const { data } = await admin.auth.admin.getUserById(submission.submitted_by);
+      return data?.user?.email ?? null;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 const FALLBACK_HERO =
   "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&q=80";
@@ -78,6 +96,16 @@ export async function POST(request: Request) {
           .from("submissions")
           .update({ moderation_status: "rejected", admin_notes: notes ?? null })
           .eq("id", id);
+        const to = await submitterEmail(admin, submission);
+        if (to) {
+          await sendModerationOutcome({
+            to,
+            venueName: submission.name,
+            approved: false,
+            kind,
+            notes,
+          });
+        }
         return NextResponse.json({ ok: true });
       }
 
@@ -116,6 +144,15 @@ export async function POST(request: Request) {
         .from("submissions")
         .update({ moderation_status: "approved" })
         .eq("id", id);
+      const to = await submitterEmail(admin, submission);
+      if (to) {
+        await sendModerationOutcome({
+          to,
+          venueName: submission.name,
+          approved: true,
+          kind,
+        });
+      }
       return NextResponse.json({ ok: true });
     }
 

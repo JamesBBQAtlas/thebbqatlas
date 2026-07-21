@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { MARKETING_CONSENT_TEXT } from "@/lib/email/consent";
 
 type AuthMode = "login" | "signup" | "magic";
 
@@ -12,6 +13,7 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const supabase = createClient();
@@ -30,12 +32,26 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
     setLoading(true);
     setMessage("");
     if (mode === "signup") {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          data: {
+            marketing_opt_in: marketingOptIn,
+            marketing_opt_in_text: MARKETING_CONSENT_TEXT,
+          },
+        },
       });
-      setMessage(error ? error.message : "Check your email to confirm your account.");
+      if (error) {
+        setMessage(error.message);
+      } else if (data.session) {
+        // No email confirmation required — session is live now.
+        await fetch("/api/account/post-signup", { method: "POST" }).catch(() => {});
+        window.location.href = "/profile";
+      } else {
+        setMessage("Check your email to confirm your account.");
+      }
     } else if (mode === "magic") {
       const { error } = await supabase.auth.signInWithOtp({
         email,
@@ -99,6 +115,19 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
               className={inputCls}
             />
           </div>
+        )}
+        {mode === "signup" && (
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border-subtle bg-surface-1 p-3">
+            <input
+              type="checkbox"
+              checked={marketingOptIn}
+              onChange={(e) => setMarketingOptIn(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-gold"
+            />
+            <span className="text-xs leading-relaxed text-text-secondary">
+              {MARKETING_CONSENT_TEXT}
+            </span>
+          </label>
         )}
         <button
           type="submit"

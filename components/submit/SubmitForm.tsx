@@ -94,6 +94,12 @@ export function SubmitForm() {
     } else {
       setStatus("success");
       setMessage("Thanks — our team will review your submission within 48 hours.");
+      // Fire the confirmation email (server verifies a real recent submission).
+      fetch("/api/email/submission-received", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: contactEmail || undefined, venueName: name }),
+      }).catch(() => {});
     }
     setLoading(false);
   };

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendCorrectionAck } from "@/lib/email/senders";
 
 /**
  * Public "report a correction / closure" endpoint. Creates a pending
@@ -63,5 +64,12 @@ export async function POST(request: Request) {
   if (error) {
     return NextResponse.json({ error: "Could not file report" }, { status: 500 });
   }
+
+  // Acknowledge to the reporter if they left an email (transactional).
+  const ackEmail = email?.trim();
+  if (ackEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ackEmail)) {
+    await sendCorrectionAck({ to: ackEmail, venueName: target.name });
+  }
+
   return NextResponse.json({ ok: true });
 }

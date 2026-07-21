@@ -88,6 +88,17 @@ export async function POST(request: Request) {
             },
             { onConflict: "stripe_session_id" }
           );
+          // BBQ Mail order-receipt hook — DORMANT scaffold (Phase 8c).
+          // When billing goes live, send the receipt here, e.g.:
+          //   import { sendOrderReceipt } from "@/lib/email/senders";
+          //   const email = s.customer_details?.email;
+          //   if (email) await sendOrderReceipt({
+          //     to: email,
+          //     description: s.metadata?.description ?? "The BBQ Atlas order",
+          //     amount: formatAmount(s.amount_total, s.currency),
+          //   });
+          // Intentionally not wired until Stripe is activated. sendOrderReceipt
+          // is already gated on RESEND_API_KEY, so this stays a no-op regardless.
         }
         break;
       }
