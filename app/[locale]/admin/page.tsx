@@ -77,6 +77,7 @@ export default async function AdminDashboard() {
     checkInsTotal,
     savesTotal,
     mediaPending,
+    suggestionsPending,
   ] = await Promise.all([
     count(db, "restaurants"),
     count(db, "restaurants", { col: "status", val: "approved" }),
@@ -93,6 +94,7 @@ export default async function AdminDashboard() {
     count(db, "check_ins"),
     count(db, "saved_spots"),
     count(db, "media", { col: "status", val: "pending" }),
+    count(db, "suggestions", { col: "status", val: "pending" }),
   ]);
 
   const pendingTotal = subsPending + reviewsPending + photosPending;
@@ -160,6 +162,17 @@ export default async function AdminDashboard() {
             {mediaPending > 0 && (
               <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
                 {mediaPending}
+              </span>
+            )}
+          </Link>
+          <Link
+            href="/admin/optimize"
+            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+          >
+            Self-Healing
+            {suggestionsPending > 0 && (
+              <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
+                {suggestionsPending}
               </span>
             )}
           </Link>
