@@ -396,12 +396,9 @@ function VenueTool({
       from: unknown;
       to: unknown;
     }[];
+    // Feedback shows in the summary card by the Apply button (right panel),
+    // not as a left-column status under "Send Grok hunting".
     setApplyResult(changes);
-    setStatus(
-      changes.length
-        ? `Saved ${changes.length} change${changes.length === 1 ? "" : "s"} to the venue. ✓`
-        : "No changes needed — the venue already had these values. ✓"
-    );
   }
 
   return (
@@ -748,9 +745,12 @@ function VenueTool({
                     ))}
                   </ul>
                 )}
-                <p className="mt-2 text-[0.625rem] text-text-muted">
-                  Recorded to this venue&apos;s enrichment audit trail.
-                </p>
+                <a
+                  href={`/admin/audit?restaurant=${venueId}`}
+                  className="mt-2 inline-block text-[0.625rem] text-text-muted underline-offset-2 hover:text-brand-gold hover:underline"
+                >
+                  Recorded to the audit trail — view this venue&apos;s history →
+                </a>
               </div>
             )}
           </div>
