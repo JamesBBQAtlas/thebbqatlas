@@ -141,7 +141,13 @@ export async function grokJSON<T>({
     if (!match) {
       throw new GrokError("Grok returned a response we couldn't parse as JSON.");
     }
-    parsed = JSON.parse(match[0]) as T;
+    try {
+      parsed = JSON.parse(match[0]) as T;
+    } catch {
+      throw new GrokError(
+        "Grok returned malformed JSON (its answer was likely cut off). Try again, or narrow the search with a city."
+      );
+    }
   }
 
   return {

@@ -651,13 +651,7 @@ interface ChainLoc {
   country: string | null;
   phone: string | null;
   hours: Record<string, string> | null;
-  website: string | null;
   instagram_url: string | null;
-  x_url: string | null;
-  facebook_url: string | null;
-  tiktok_url: string | null;
-  youtube_url: string | null;
-  instagram_posts: string[];
 }
 interface ChainResult {
   is_chain: boolean;
@@ -753,20 +747,21 @@ function ChainTool({
           venue: {
             name: loc.name || result.brand_name,
             description: result.description ?? "",
-            // Location's own website/socials when it has them, else the brand's.
-            website: loc.website || result.website,
+            website: result.website,
             phone: loc.phone,
             address: loc.address,
             city: loc.city,
             country: loc.country,
             style: result.style,
             hours: loc.hours,
+            // Branch's own Instagram if it has one, else the brand's; the rest
+            // inherit the brand (enrich a location individually for its full
+            // own socials/photos).
             instagram_url: loc.instagram_url || result.instagram_url,
-            x_url: loc.x_url || result.x_url,
-            facebook_url: loc.facebook_url || result.facebook_url,
-            tiktok_url: loc.tiktok_url || result.tiktok_url,
-            youtube_url: loc.youtube_url || result.youtube_url,
-            instagram_posts: loc.instagram_posts ?? [],
+            x_url: result.x_url,
+            facebook_url: result.facebook_url,
+            tiktok_url: result.tiktok_url,
+            youtube_url: result.youtube_url,
             location_label: loc.location_label,
           },
           publish,
@@ -892,16 +887,9 @@ function ChainTool({
                       {[loc.address, loc.city, loc.country].filter(Boolean).join(", ") ||
                         "no address — will fail geocoding"}
                     </p>
-                    {(loc.instagram_url ||
-                      loc.facebook_url ||
-                      loc.tiktok_url ||
-                      loc.youtube_url ||
-                      loc.instagram_posts?.length > 0) && (
+                    {loc.instagram_url && (
                       <p className="mt-1 text-[0.6875rem] text-brand-gold">
-                        own socials found
-                        {loc.instagram_posts?.length
-                          ? ` · ${loc.instagram_posts.length} IG posts`
-                          : ""}
+                        own Instagram found
                       </p>
                     )}
                   </div>
