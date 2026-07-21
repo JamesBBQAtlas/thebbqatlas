@@ -7,6 +7,7 @@ import { Search, SlidersHorizontal, X, MapPin, Navigation, Loader2 } from "lucid
 import { useRouter } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
+import { CATEGORY_ORDER, CATEGORY_LABELS_PLURAL } from "@/lib/constants/categories";
 import { resolveCountryCode, countryName } from "@/lib/constants/countries";
 import { FlagIcon } from "@/components/ui/FlagIcon";
 import { MapPreviewCard } from "./MapPreviewCard";
@@ -31,6 +32,7 @@ type MapViewState = {
   zoom?: number;
   style?: string;
   country?: string;
+  category?: string;
   query?: string;
   sidebarOpen?: boolean;
 };
@@ -106,6 +108,7 @@ export function MapExplorer({
   const [sidebarOpen, setSidebarOpen] = useState(initialState.sidebarOpen ?? true);
   const [style, setStyle] = useState<string>(initialState.style ?? "all");
   const [country, setCountry] = useState<string>(initialState.country ?? "all");
+  const [category, setCategory] = useState<string>(initialState.category ?? "all");
   const [query, setQuery] = useState(initialState.query ?? "");
   const [selected, setSelected] = useState<Restaurant | null>(null);
 
@@ -134,13 +137,20 @@ export function MapExplorer({
     const q = query.trim().toLowerCase();
     return restaurants.filter((r) => {
       if (style !== "all" && r.style !== style) return false;
+      if (category !== "all" && (r.category ?? "restaurant") !== category) return false;
       if (country !== "all" && (resolveCountryCode(r.country_code, r.country) ?? r.country) !== country)
         return false;
       if (q && !`${r.name} ${r.city} ${r.country}`.toLowerCase().includes(q))
         return false;
       return Number.isFinite(r.lat) && Number.isFinite(r.lng);
     });
-  }, [restaurants, style, country, query]);
+  }, [restaurants, style, category, country, query]);
+
+  const presentCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of restaurants) set.add(r.category ?? "restaurant");
+    return CATEGORY_ORDER.filter((c) => set.has(c));
+  }, [restaurants]);
 
   const geojson = useMemo(
     () => ({
@@ -313,8 +323,8 @@ export function MapExplorer({
 
   // Persist filters + sidebar state alongside the remembered map position.
   useEffect(() => {
-    saveMapState({ style, country, query, sidebarOpen });
-  }, [style, country, query, sidebarOpen]);
+    saveMapState({ style, country, category, query, sidebarOpen });
+  }, [style, country, category, query, sidebarOpen]);
 
   function flyTo(r: Restaurant) {
     mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 12, speed: 1.4 });
@@ -484,6 +494,20 @@ export function MapExplorer({
             </p>
           )}
 
+          {presentCategories.length > 1 && (
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="mt-3 w-full rounded-md border border-border-default bg-surface-1 px-2 py-2 text-sm text-text-primary focus:border-border-strong focus:outline-none"
+            >
+              <option value="all">All item types</option>
+              {presentCategories.map((c) => (
+                <option key={c} value={c}>
+                  {CATEGORY_LABELS_PLURAL[c]}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="mt-3 grid grid-cols-2 gap-2">
             <select
               value={style}

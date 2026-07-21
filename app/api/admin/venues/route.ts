@@ -27,7 +27,21 @@ interface VenueInput {
   youtube_url?: string | null;
   instagram_posts?: string[];
   location_label?: string | null;
+  category?: string | null;
+  event_starts_at?: string | null;
+  event_ends_at?: string | null;
 }
+
+const CATEGORIES = new Set([
+  "restaurant",
+  "food_truck",
+  "retailer",
+  "market",
+  "event",
+  "festival",
+  "school",
+  "caterer",
+]);
 
 /**
  * POST — create a brand-new venue from a (usually Grok-enriched) lead. We
@@ -121,6 +135,9 @@ export async function POST(request: Request) {
     instagram_posts: Array.isArray(v.instagram_posts) ? v.instagram_posts : null,
     brand_id: brandId,
     location_label: v.location_label ?? null,
+    category: v.category && CATEGORIES.has(v.category) ? v.category : "restaurant",
+    event_starts_at: v.event_starts_at || null,
+    event_ends_at: v.event_ends_at || null,
     enrichment_sources: citations.length ? citations : null,
     enriched_at: new Date().toISOString(),
     status: publish ? "approved" : "pending",

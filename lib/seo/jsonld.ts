@@ -106,6 +106,39 @@ export function restaurantJsonLd(r: Restaurant) {
   };
 }
 
+export function eventJsonLd(r: Restaurant) {
+  const url = absoluteUrl(`/restaurants/${r.slug}`);
+  const code = resolveCountryCode(r.country_code, r.country);
+  return {
+    "@context": "https://schema.org",
+    "@type": r.category === "festival" ? "Festival" : "Event",
+    name: r.name,
+    description: r.description || undefined,
+    image: r.hero_image_url || undefined,
+    startDate: r.event_starts_at || undefined,
+    endDate: r.event_ends_at || undefined,
+    eventStatus: r.permanently_closed
+      ? "https://schema.org/EventCancelled"
+      : "https://schema.org/EventScheduled",
+    url,
+    location: {
+      "@type": "Place",
+      name: r.name,
+      address: {
+        "@type": "PostalAddress",
+        streetAddress: r.address || undefined,
+        addressLocality: r.city || undefined,
+        addressCountry: code || r.country || undefined,
+      },
+      geo:
+        Number.isFinite(r.lat) && Number.isFinite(r.lng)
+          ? { "@type": "GeoCoordinates", latitude: r.lat, longitude: r.lng }
+          : undefined,
+    },
+    isPartOf: { "@id": WEBSITE_ID },
+  };
+}
+
 export function articleJsonLd(guide: Guide) {
   const url = absoluteUrl(`/guides/${guide.slug}`);
   return {

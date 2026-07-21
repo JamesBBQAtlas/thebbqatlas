@@ -6,6 +6,7 @@ const EXPLORE = [
   { href: "/map", key: "map" },
   { href: "/directory", key: "directory" },
   { href: "/styles", key: "styles" },
+  { href: "/events", key: "events" },
   { href: "/guides", key: "guides" },
   { href: "/news", key: "news" },
   { href: "/gear", key: "gear" },

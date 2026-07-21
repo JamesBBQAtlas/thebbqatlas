@@ -117,6 +117,10 @@ function VenueTool({
   const [isNewVenue, setIsNewVenue] = useState(false);
   const [createBusy, setCreateBusy] = useState<null | "publish" | "queue">(null);
   const [createStatus, setCreateStatus] = useState("");
+  const [category, setCategory] = useState("restaurant");
+  const [eventStart, setEventStart] = useState("");
+  const [eventEnd, setEventEnd] = useState("");
+  const isEvent = category === "event" || category === "festival";
 
   const SCALARS = [
     "name",
@@ -285,6 +289,9 @@ function VenueTool({
       youtube_url: fields.youtube_url || null,
       instagram_posts: result?.instagram_posts ?? [],
       location_label: locationLabel.trim() || null,
+      category,
+      event_starts_at: isEvent && eventStart ? eventStart : null,
+      event_ends_at: isEvent && eventEnd ? eventEnd : null,
     };
   }
 
@@ -407,6 +414,48 @@ function VenueTool({
             — create it from what Grok finds
           </span>
         </label>
+
+        {isNewVenue && (
+          <div className="mb-4 rounded-lg border border-border-subtle bg-surface-1 p-3">
+            <label className={labelClass}>Item type</label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className={inputClass}
+            >
+              <option value="restaurant">Restaurant</option>
+              <option value="food_truck">Food Truck</option>
+              <option value="caterer">Caterer</option>
+              <option value="retailer">Shop / Retailer</option>
+              <option value="market">Market</option>
+              <option value="event">Event</option>
+              <option value="festival">Festival</option>
+              <option value="school">Cooking School</option>
+            </select>
+            {isEvent && (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div>
+                  <label className={labelClass}>Starts</label>
+                  <input
+                    type="date"
+                    value={eventStart}
+                    onChange={(e) => setEventStart(e.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>Ends</label>
+                  <input
+                    type="date"
+                    value={eventEnd}
+                    onChange={(e) => setEventEnd(e.target.value)}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <p className={labelClass}>What we know</p>
         <div className="space-y-2">

@@ -3,6 +3,12 @@ import { MapPin } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
 import { STYLE_LABELS, STYLE_PIN_COLORS } from "@/lib/constants/styles";
+import {
+  CATEGORY_LABELS,
+  isTimeBased,
+  eventStatus,
+  formatEventDates,
+} from "@/lib/constants/categories";
 import { OFFERINGS_BY_SLUG } from "@/lib/constants/offerings";
 import { resolveCountryCode } from "@/lib/constants/countries";
 import { FlagIcon } from "@/components/ui/FlagIcon";
@@ -36,6 +42,11 @@ export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
             Featured
           </span>
         )}
+        {r.category && r.category !== "restaurant" && (
+          <span className="absolute right-4 top-4 rounded-sm bg-surface-0/85 px-2.5 py-1 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-brand-gold shadow-md backdrop-blur-sm">
+            {CATEGORY_LABELS[r.category]}
+          </span>
+        )}
       </div>
       <div className="p-5">
         <h3 className="font-heading text-xl font-bold text-text-primary transition-colors group-hover:text-brand-gold">
@@ -46,6 +57,15 @@ export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
           {[r.city, r.country].filter(Boolean).join(", ")}
           <FlagIcon code={code} className="text-sm" />
         </p>
+        {isTimeBased(r.category) &&
+          formatEventDates(r.event_starts_at, r.event_ends_at) && (
+            <p className="mt-1 text-[0.8125rem] font-semibold text-brand-gold">
+              {formatEventDates(r.event_starts_at, r.event_ends_at)}
+              {eventStatus(r.event_starts_at, r.event_ends_at) === "past" && (
+                <span className="ml-1.5 font-normal text-text-muted">· past</span>
+              )}
+            </p>
+          )}
         <p className="mt-2 line-clamp-2 text-[0.9375rem] leading-relaxed text-text-secondary">
           {r.description}
         </p>

@@ -28,7 +28,13 @@ import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocator
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
 import { JsonLd } from "@/components/seo/JsonLd";
-import { restaurantJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
+import { restaurantJsonLd, breadcrumbJsonLd, eventJsonLd } from "@/lib/seo/jsonld";
+import {
+  CATEGORY_LABELS,
+  isTimeBased,
+  eventStatus,
+  formatEventDates,
+} from "@/lib/constants/categories";
 import { createClient } from "@/lib/supabase/server";
 import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
 import { getApprovedMedia } from "@/lib/queries/media";
@@ -151,7 +157,9 @@ export default async function RestaurantPage({ params }: Props) {
     <>
       <JsonLd
         data={[
-          restaurantJsonLd(restaurant),
+          isTimeBased(restaurant.category)
+            ? eventJsonLd(restaurant)
+            : restaurantJsonLd(restaurant),
           breadcrumbJsonLd([
             { name: "Atlas", path: "/" },
             { name: "Directory", path: "/directory" },
@@ -218,6 +226,34 @@ export default async function RestaurantPage({ params }: Props) {
                   Permanently closed
                 </span>
               )}
+              {restaurant.category && restaurant.category !== "restaurant" && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-gold/50 bg-brand-gold/10 px-3.5 py-1 text-xs font-bold uppercase tracking-[0.06em] text-brand-gold">
+                  {CATEGORY_LABELS[restaurant.category]}
+                </span>
+              )}
+              {isTimeBased(restaurant.category) &&
+                formatEventDates(restaurant.event_starts_at, restaurant.event_ends_at) && (
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-gold">
+                    {formatEventDates(
+                      restaurant.event_starts_at,
+                      restaurant.event_ends_at
+                    )}
+                    {eventStatus(
+                      restaurant.event_starts_at,
+                      restaurant.event_ends_at
+                    ) === "ongoing" && (
+                      <span className="rounded-full bg-brand-gold/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em]">
+                        On now
+                      </span>
+                    )}
+                    {eventStatus(
+                      restaurant.event_starts_at,
+                      restaurant.event_ends_at
+                    ) === "past" && (
+                      <span className="text-text-muted">· past event</span>
+                    )}
+                  </span>
+                )}
               <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-sienna bg-brand-sienna/10 px-3.5 py-1 text-xs font-semibold uppercase tracking-[0.06em] text-brand-sienna-light">
                 {STYLE_LABELS[restaurant.style]}
               </span>
