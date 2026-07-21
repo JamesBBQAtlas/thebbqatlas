@@ -34,6 +34,7 @@ import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { getSiblingLocations } from "@/lib/queries/brands";
+import { slugify } from "@/lib/seo/hubs";
 import type { Brand } from "@/lib/types/database";
 import { routing } from "@/i18n/routing";
 
@@ -522,6 +523,34 @@ export default async function RestaurantPage({ params }: Props) {
           </div>
         </aside>
       </div>
+
+      {/* Explore more — programmatic internal linking into hubs */}
+      <section className="mx-auto max-w-[1200px] px-6 pb-8 sm:px-10">
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href={`/styles/${restaurant.style}`}
+            className="rounded-full border border-border-subtle bg-surface-0 px-3.5 py-1.5 text-sm text-text-secondary transition-colors hover:border-brand-gold/50 hover:text-brand-gold"
+          >
+            {STYLE_LABELS[restaurant.style]} barbecue
+          </Link>
+          {restaurant.city && restaurant.country && (
+            <Link
+              href={`/directory/${slugify(restaurant.country)}/${slugify(restaurant.city)}`}
+              className="rounded-full border border-border-subtle bg-surface-0 px-3.5 py-1.5 text-sm text-text-secondary transition-colors hover:border-brand-gold/50 hover:text-brand-gold"
+            >
+              Barbecue in {restaurant.city}
+            </Link>
+          )}
+          {restaurant.country && (
+            <Link
+              href={`/directory/${slugify(restaurant.country)}`}
+              className="rounded-full border border-border-subtle bg-surface-0 px-3.5 py-1.5 text-sm text-text-secondary transition-colors hover:border-brand-gold/50 hover:text-brand-gold"
+            >
+              Barbecue in {restaurant.country}
+            </Link>
+          )}
+        </div>
+      </section>
 
       {/* Nearby on the Atlas — by real distance */}
       {nearby.length > 0 && (

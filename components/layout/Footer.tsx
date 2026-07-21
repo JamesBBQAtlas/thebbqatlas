@@ -5,6 +5,7 @@ import { Link } from "@/i18n/navigation";
 const EXPLORE = [
   { href: "/map", key: "map" },
   { href: "/directory", key: "directory" },
+  { href: "/styles", key: "styles" },
   { href: "/guides", key: "guides" },
   { href: "/news", key: "news" },
   { href: "/gear", key: "gear" },

@@ -125,6 +125,37 @@ export function articleJsonLd(guide: Guide) {
   };
 }
 
+/** An ItemList of venues — helps search + AI engines read a hub as a ranked set. */
+export function itemListJsonLd(
+  name: string,
+  items: { name: string; path: string }[]
+) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    name,
+    numberOfItems: items.length,
+    itemListElement: items.map((it, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      name: it.name,
+      url: absoluteUrl(it.path),
+    })),
+  };
+}
+
+/** A CollectionPage wrapper for hub/landing pages. */
+export function collectionPageJsonLd(name: string, description: string, path: string) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name,
+    description,
+    url: absoluteUrl(path),
+    isPartOf: { "@id": WEBSITE_ID },
+  };
+}
+
 export function newsJsonLd(post: NewsPost) {
   const url = absoluteUrl(`/news/${post.slug}`);
   return {
