@@ -75,18 +75,20 @@ export async function POST(request: Request) {
     v.location_label ? `${name} ${v.location_label}` : name
   );
 
-  // Optional brand attachment.
+  // Optional brand attachment. Brand-level socials come from body.brand (the
+  // brand's own accounts); the venue keeps its own location-level socials.
   let brandId: string | null = null;
   if (body.brand?.name) {
+    const b = body.brand as Record<string, string | null | undefined>;
     const brand = await resolveOrCreateBrand(ctx.db, {
-      name: String(body.brand.name),
-      description: v.description ?? null,
-      website: v.website ?? null,
-      instagram_url: v.instagram_url ?? null,
-      x_url: v.x_url ?? null,
-      facebook_url: v.facebook_url ?? null,
-      tiktok_url: v.tiktok_url ?? null,
-      youtube_url: v.youtube_url ?? null,
+      name: String(b.name),
+      description: b.description ?? v.description ?? null,
+      website: b.website ?? null,
+      instagram_url: b.instagram_url ?? null,
+      x_url: b.x_url ?? null,
+      facebook_url: b.facebook_url ?? null,
+      tiktok_url: b.tiktok_url ?? null,
+      youtube_url: b.youtube_url ?? null,
     });
     brandId = brand?.id ?? null;
   }

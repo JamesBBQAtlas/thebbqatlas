@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Sparkles,
   Loader2,
@@ -78,7 +78,17 @@ function Citations({ urls }: { urls: string[] }) {
   );
 }
 
-function VenueTool() {
+function VenueTool({
+  onFindAllLocations,
+}: {
+  onFindAllLocations: (lead: {
+    name?: string;
+    instagram?: string;
+    website?: string;
+    city?: string;
+    country?: string;
+  }) => void;
+}) {
   const [lead, setLead] = useState({
     name: "",
     instagram: "",
@@ -528,6 +538,26 @@ function VenueTool() {
                   className={inputClass}
                 />
               </div>
+
+              {isChain && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onFindAllLocations({
+                      name: brandName || result?.brand_name || fields.name || lead.name,
+                      instagram: lead.instagram,
+                      website: fields.website || lead.website,
+                      city: fields.city || lead.city,
+                      country: fields.country || lead.country,
+                    })
+                  }
+                  className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand-sienna px-4 py-2.5 text-sm font-bold uppercase tracking-[0.04em] text-text-inverse transition-colors hover:bg-brand-sienna/90"
+                >
+                  <Store className="h-4 w-4" />
+                  Find all locations of this chain →
+                </button>
+              )}
+
               {!isNewVenue && (
                 <button
                   type="button"
@@ -621,6 +651,13 @@ interface ChainLoc {
   country: string | null;
   phone: string | null;
   hours: Record<string, string> | null;
+  website: string | null;
+  instagram_url: string | null;
+  x_url: string | null;
+  facebook_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
+  instagram_posts: string[];
 }
 interface ChainResult {
   is_chain: boolean;
@@ -641,7 +678,11 @@ interface ChainResult {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function ChainTool() {
+function ChainTool({
+  seed,
+}: {
+  seed: { lead: ChainSeedLead; nonce: number } | null;
+}) {
   const [lead, setLead] = useState({
     name: "",
     instagram: "",
@@ -656,7 +697,25 @@ function ChainTool() {
   const [publish, setPublish] = useState(false);
   const [progress, setProgress] = useState("");
 
-  async function hunt() {
+  // When the Venue tab hands us a chain to find, prefill and auto-run.
+  const seenSeed = useRef<number | null>(null);
+  useEffect(() => {
+    if (!seed || seed.nonce === seenSeed.current) return;
+    seenSeed.current = seed.nonce;
+    const next = {
+      name: seed.lead.name ?? "",
+      instagram: seed.lead.instagram ?? "",
+      website: seed.lead.website ?? "",
+      city: seed.lead.city ?? "",
+      country: seed.lead.country ?? "",
+    };
+    setLead(next);
+    hunt(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed]);
+
+  async function hunt(override?: Partial<typeof lead>) {
+    const useLead = { ...lead, ...(override ?? {}) };
     setBusy("hunt");
     setError("");
     setProgress("");
@@ -664,7 +723,7 @@ function ChainTool() {
     const res = await fetch("/api/admin/enrich/chain", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lead }),
+      body: JSON.stringify({ lead: useLead }),
     });
     const data = await res.json().catch(() => ({}));
     setBusy(null);
@@ -694,22 +753,36 @@ function ChainTool() {
           venue: {
             name: loc.name || result.brand_name,
             description: result.description ?? "",
-            website: result.website,
+            // Location's own website/socials when it has them, else the brand's.
+            website: loc.website || result.website,
             phone: loc.phone,
             address: loc.address,
             city: loc.city,
             country: loc.country,
             style: result.style,
             hours: loc.hours,
-            instagram_url: result.instagram_url,
-            x_url: result.x_url,
-            facebook_url: result.facebook_url,
-            tiktok_url: result.tiktok_url,
-            youtube_url: result.youtube_url,
+            instagram_url: loc.instagram_url || result.instagram_url,
+            x_url: loc.x_url || result.x_url,
+            facebook_url: loc.facebook_url || result.facebook_url,
+            tiktok_url: loc.tiktok_url || result.tiktok_url,
+            youtube_url: loc.youtube_url || result.youtube_url,
+            instagram_posts: loc.instagram_posts ?? [],
             location_label: loc.location_label,
           },
           publish,
-          brand: result.brand_name ? { name: result.brand_name } : undefined,
+          // Brand-level identity (brand's own accounts) stays on the brand.
+          brand: result.brand_name
+            ? {
+                name: result.brand_name,
+                description: result.description,
+                website: result.website,
+                instagram_url: result.instagram_url,
+                x_url: result.x_url,
+                facebook_url: result.facebook_url,
+                tiktok_url: result.tiktok_url,
+                youtube_url: result.youtube_url,
+              }
+            : undefined,
           lead,
           citations: result.citations,
         }),
@@ -755,7 +828,7 @@ function ChainTool() {
         </div>
         <button
           type="button"
-          onClick={hunt}
+          onClick={() => hunt()}
           disabled={busy !== null}
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-brand-gold px-5 py-2.5 text-sm font-bold uppercase tracking-[0.06em] text-text-inverse transition-colors hover:bg-brand-gold/90 disabled:opacity-40"
         >
@@ -819,6 +892,18 @@ function ChainTool() {
                       {[loc.address, loc.city, loc.country].filter(Boolean).join(", ") ||
                         "no address — will fail geocoding"}
                     </p>
+                    {(loc.instagram_url ||
+                      loc.facebook_url ||
+                      loc.tiktok_url ||
+                      loc.youtube_url ||
+                      loc.instagram_posts?.length > 0) && (
+                      <p className="mt-1 text-[0.6875rem] text-brand-gold">
+                        own socials found
+                        {loc.instagram_posts?.length
+                          ? ` · ${loc.instagram_posts.length} IG posts`
+                          : ""}
+                      </p>
+                    )}
                   </div>
                 </li>
               ))}
@@ -1016,8 +1101,25 @@ function NewsTool() {
   );
 }
 
+interface ChainSeedLead {
+  name?: string;
+  instagram?: string;
+  website?: string;
+  city?: string;
+  country?: string;
+}
+
 export function EnrichConsole({ enabled }: { enabled: boolean }) {
   const [tab, setTab] = useState<Tab>("venue");
+  const [chainSeed, setChainSeed] = useState<{
+    lead: ChainSeedLead;
+    nonce: number;
+  } | null>(null);
+
+  const goFindChain = (lead: ChainSeedLead) => {
+    setChainSeed((prev) => ({ lead, nonce: (prev?.nonce ?? 0) + 1 }));
+    setTab("chain");
+  };
 
   if (!enabled) {
     return (
@@ -1073,9 +1175,9 @@ export function EnrichConsole({ enabled }: { enabled: boolean }) {
         </button>
       </div>
       {tab === "venue" ? (
-        <VenueTool />
+        <VenueTool onFindAllLocations={goFindChain} />
       ) : tab === "chain" ? (
-        <ChainTool />
+        <ChainTool seed={chainSeed} />
       ) : (
         <NewsTool />
       )}

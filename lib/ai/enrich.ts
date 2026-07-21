@@ -219,6 +219,15 @@ export interface ChainLocation {
   country: string | null;
   phone: string | null;
   hours: Record<string, string> | null;
+  // Location-specific socials/website, when a venue runs its own accounts
+  // distinct from the brand's. Null → the location inherits the brand's.
+  website: string | null;
+  instagram_url: string | null;
+  x_url: string | null;
+  facebook_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
+  instagram_posts: string[];
 }
 
 export interface ChainResult {
@@ -245,11 +254,12 @@ Where to look: start with the business's own website (often has a "Locations" pa
 Rules:
 - "is_chain": true only if there is genuinely more than one physical venue.
 - For EACH location, give: name (usually the brand + area), location_label (short branch label like "Albert Park"), address, city, country, phone, hours (keyed mon..sun or null). Only include locations you can actually corroborate. Never invent an address.
+- IMPORTANT — per-location socials: many chains run BOTH a main brand account AND separate accounts for individual venues (e.g. @brand vs @brand_albertpark). For each location, ALSO look for that specific venue's OWN website, instagram_url, x_url, facebook_url, tiktok_url, youtube_url and up to 3 recent public instagram_posts permalinks. If a location has its own account, put it on that location. If it has none of its own, leave those null / [] — it will inherit the brand's.
 - Brand-level fields (description, website, style, socials) describe the whole brand. "style" MUST be one slug from: ${STYLE_LIST} or null.
 - "confidence" 0–1 that the location list is correct and complete.
 - "reviewer_notes": flag any location you're unsure about or that needs checking.
 
-Respond ONLY with a JSON object with keys: is_chain, brand_name, description, website, style, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, locations, confidence, reviewer_notes. "locations" is an array of {name, location_label, address, city, country, phone, hours}.`;
+Respond ONLY with a JSON object with keys: is_chain, brand_name, description, website, style, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, locations, confidence, reviewer_notes. "locations" is an array of {name, location_label, address, city, country, phone, hours, website, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts}.`;
 
 export async function discoverChain(lead: VenueLead): Promise<ChainResult> {
   const known = Object.entries(lead)
@@ -285,6 +295,20 @@ Return the JSON object described in your instructions.`;
           l?.hours && typeof l.hours === "object"
             ? (l.hours as Record<string, string>)
             : null,
+        website: l?.website ?? null,
+        instagram_url: l?.instagram_url ?? null,
+        x_url: l?.x_url ?? null,
+        facebook_url: l?.facebook_url ?? null,
+        tiktok_url: l?.tiktok_url ?? null,
+        youtube_url: l?.youtube_url ?? null,
+        instagram_posts: Array.isArray(l?.instagram_posts)
+          ? l.instagram_posts
+              .filter(
+                (u: unknown) =>
+                  typeof u === "string" && /instagram\.com\/(p|reel)\//.test(u)
+              )
+              .slice(0, 3)
+          : [],
       }))
     : [];
 
