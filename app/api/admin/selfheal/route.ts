@@ -5,7 +5,7 @@ import { GROK_ENABLED } from "@/lib/ai/grok";
 import { runSelfHealSweep } from "@/lib/selfheal/venues";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * Run a self-healing sweep: find thin/closed venues, run Grok, and file

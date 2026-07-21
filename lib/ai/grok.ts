@@ -97,15 +97,17 @@ export async function grokJSON<T>({
             "goo.gl",
           ],
         },
+        // Read details (hours, menus) straight off social post images.
+        enable_image_understanding: true,
       },
       { type: "x_search" },
     ];
   }
 
-  // Fail cleanly before the serverless function is force-killed (~60s), so a
-  // slow hunt surfaces a clear "took too long" instead of a generic error.
+  // Safety net well inside the (Pro) 300s function limit — a stuck hunt surfaces
+  // a clear "took too long" rather than consuming the whole budget.
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 55_000);
+  const timer = setTimeout(() => controller.abort(), 120_000);
 
   let res: Response;
   try {

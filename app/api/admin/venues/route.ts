@@ -5,7 +5,7 @@ import { uniqueRestaurantSlug, resolveOrCreateBrand } from "@/lib/admin/venues";
 import { BBQ_STYLES } from "@/lib/constants/styles";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 interface VenueInput {
   name?: string;

@@ -4,7 +4,7 @@ import { GROK_ENABLED, GrokError } from "@/lib/ai/grok";
 import { enrichVenue, type VenueLead } from "@/lib/ai/enrich";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /** GET ?slug= — resolve a venue by slug so the console can load & apply to it. */
 export async function GET(request: Request) {

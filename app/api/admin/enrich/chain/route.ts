@@ -4,7 +4,7 @@ import { GROK_ENABLED, GrokError } from "@/lib/ai/grok";
 import { discoverChain, type VenueLead } from "@/lib/ai/enrich";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 /**
  * POST — ask Grok whether a business is a multi-location chain and, if so, find

@@ -4,7 +4,7 @@ import { GROK_ENABLED, GrokError } from "@/lib/ai/grok";
 import { researchNews } from "@/lib/ai/enrich";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 function slugify(s: string): string {
   return s

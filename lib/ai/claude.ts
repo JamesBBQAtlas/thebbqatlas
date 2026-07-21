@@ -66,6 +66,9 @@ export async function claudeJSON<T>({
     body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 8 }];
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+
   let res: Response;
   try {
     res = await fetch(`${ANTHROPIC_BASE}/messages`, {
@@ -76,11 +79,17 @@ export async function claudeJSON<T>({
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify(body),
+      signal: controller.signal,
     });
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new ClaudeError("Claude took too long and timed out — please try again.");
+    }
     throw new ClaudeError(
       `Could not reach Claude: ${err instanceof Error ? err.message : "network error"}`
     );
+  } finally {
+    clearTimeout(timer);
   }
 
   if (!res.ok) {
@@ -88,7 +97,12 @@ export async function claudeJSON<T>({
     throw new ClaudeError(`Claude request failed (${res.status}). ${detail.slice(0, 300)}`);
   }
 
-  const json = await res.json();
+  let json: { content?: unknown; model?: string };
+  try {
+    json = await res.json();
+  } catch {
+    throw new ClaudeError("Claude returned an unreadable response — please try again.");
+  }
   const { text, urls } = collectText(json?.content);
   const cleaned = text.replace(/\[\[\d+\]\]\([^)]*\)/g, "").trim();
 
