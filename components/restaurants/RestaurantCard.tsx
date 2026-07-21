@@ -2,10 +2,11 @@ import Image from "next/image";
 import { MapPin } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
-import { STYLE_LABELS } from "@/lib/constants/styles";
+import { STYLE_LABELS, STYLE_PIN_COLORS } from "@/lib/constants/styles";
 import { OFFERINGS_BY_SLUG } from "@/lib/constants/offerings";
 import { resolveCountryCode } from "@/lib/constants/countries";
 import { FlagIcon } from "@/components/ui/FlagIcon";
+import { HeroPlaceholder } from "@/components/restaurants/HeroPlaceholder";
 
 export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
   const code = resolveCountryCode(r.country_code, r.country);
@@ -28,7 +29,7 @@ export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
             className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
           />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-surface-2 to-background" />
+          <HeroPlaceholder variant="card" styleColor={STYLE_PIN_COLORS[r.style]} />
         )}
         {r.is_featured && (
           <span className="absolute left-4 top-4 rounded-sm bg-brand-gold px-2.5 py-1 text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-text-inverse shadow-md">

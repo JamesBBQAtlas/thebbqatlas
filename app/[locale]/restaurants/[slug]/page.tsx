@@ -9,7 +9,7 @@ import {
   getRestaurants,
   getSignatureDishes,
 } from "@/lib/queries/restaurants";
-import { STYLE_LABELS } from "@/lib/constants/styles";
+import { STYLE_LABELS, STYLE_PIN_COLORS } from "@/lib/constants/styles";
 import {
   groupOfferings,
   OFFERING_CATEGORY_LABELS,
@@ -23,6 +23,7 @@ import { TrackedLink } from "@/components/monetization/TrackedLink";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { CheckInButton } from "@/components/restaurants/CheckInButton";
 import { InstagramEmbed } from "@/components/restaurants/InstagramEmbed";
+import { HeroPlaceholder } from "@/components/restaurants/HeroPlaceholder";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
@@ -173,7 +174,11 @@ export default async function RestaurantPage({ params }: Props) {
             className="object-cover"
           />
         ) : (
-          <div className="absolute inset-0 bg-gradient-to-br from-surface-2 to-background" />
+          <HeroPlaceholder
+            variant="hero"
+            styleColor={STYLE_PIN_COLORS[restaurant.style]}
+            claimHref={`/list?claim=${restaurant.slug}`}
+          />
         )}
         <div className="absolute inset-0 bg-gradient-to-b from-background/10 via-background/40 to-background" />
 
