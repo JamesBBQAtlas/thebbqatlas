@@ -80,6 +80,7 @@ function Citations({ urls }: { urls: string[] }) {
 
 function VenueTool({
   onFindAllLocations,
+  initialSlug,
 }: {
   onFindAllLocations: (lead: {
     name?: string;
@@ -88,6 +89,7 @@ function VenueTool({
     city?: string;
     country?: string;
   }) => void;
+  initialSlug?: string;
 }) {
   const [lead, setLead] = useState({
     name: "",
@@ -141,12 +143,24 @@ function VenueTool({
     "youtube_url",
   ] as const;
 
-  async function loadVenue() {
-    if (!slug.trim()) return;
+  // Deep-link: /admin/enrich?slug=xxx auto-loads that venue on open.
+  const didAutoLoad = useRef(false);
+  useEffect(() => {
+    if (initialSlug && !didAutoLoad.current) {
+      didAutoLoad.current = true;
+      loadVenue(initialSlug);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSlug]);
+
+  async function loadVenue(override?: string) {
+    const useSlug = (override ?? slug).trim();
+    if (!useSlug) return;
+    if (override) setSlug(override);
     setBusy("load");
     setError("");
     setStatus("");
-    const res = await fetch(`/api/admin/enrich/venue?slug=${encodeURIComponent(slug.trim())}`);
+    const res = await fetch(`/api/admin/enrich/venue?slug=${encodeURIComponent(useSlug)}`);
     const data = await res.json().catch(() => ({}));
     setBusy(null);
     if (!res.ok) {
@@ -381,7 +395,7 @@ function VenueTool({
             />
             <button
               type="button"
-              onClick={loadVenue}
+              onClick={() => loadVenue()}
               disabled={busy !== null}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-default px-3 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/50 hover:text-brand-gold disabled:opacity-40"
             >
@@ -1146,7 +1160,13 @@ interface ChainSeedLead {
   country?: string;
 }
 
-export function EnrichConsole({ enabled }: { enabled: boolean }) {
+export function EnrichConsole({
+  enabled,
+  initialSlug,
+}: {
+  enabled: boolean;
+  initialSlug?: string;
+}) {
   const [tab, setTab] = useState<Tab>("venue");
   const [chainSeed, setChainSeed] = useState<{
     lead: ChainSeedLead;
@@ -1212,7 +1232,7 @@ export function EnrichConsole({ enabled }: { enabled: boolean }) {
         </button>
       </div>
       {tab === "venue" ? (
-        <VenueTool onFindAllLocations={goFindChain} />
+        <VenueTool onFindAllLocations={goFindChain} initialSlug={initialSlug} />
       ) : tab === "chain" ? (
         <ChainTool seed={chainSeed} />
       ) : (

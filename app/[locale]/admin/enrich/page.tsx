@@ -6,7 +6,11 @@ import { GROK_ENABLED } from "@/lib/ai/grok";
 export const metadata = { title: "AI Enrichment" };
 export const dynamic = "force-dynamic";
 
-export default async function EnrichPage() {
+export default async function EnrichPage({
+  searchParams,
+}: {
+  searchParams: { slug?: string };
+}) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -40,7 +44,7 @@ export default async function EnrichPage() {
         address — and let it hunt the web for the rest. Everything comes back as
         a draft for you to check and polish; nothing publishes on its own.
       </p>
-      <EnrichConsole enabled={GROK_ENABLED} />
+      <EnrichConsole enabled={GROK_ENABLED} initialSlug={searchParams.slug} />
     </div>
   );
 }
