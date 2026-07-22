@@ -63,7 +63,16 @@ export async function claudeJSON<T>({
     messages: [{ role: "user", content: user }],
   };
   if (search) {
-    body.tools = [{ type: "web_search_20250305", name: "web_search", max_uses: 8 }];
+    body.tools = [
+      {
+        type: "web_search_20250305",
+        name: "web_search",
+        max_uses: 8,
+        // Match Grok's API-level Maps exclusion so Claude's research leg never
+        // pulls Google Maps / short-link results into enrichment (F-13).
+        blocked_domains: ["maps.google.com", "maps.app.goo.gl", "goo.gl"],
+      },
+    ];
   }
 
   const controller = new AbortController();

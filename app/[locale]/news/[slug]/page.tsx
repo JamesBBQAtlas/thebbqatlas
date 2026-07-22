@@ -132,6 +132,11 @@ export default async function NewsPostPage({ params }: Props) {
         <ReactMarkdown>{post.content_md}</ReactMarkdown>
       </div>
 
+      <p className="mt-10 text-xs text-text-muted">
+        Researched with AI assistance and reviewed by our editors before
+        publishing.
+      </p>
+
       <div className="mt-14 border-t border-border-subtle pt-8">
         <Link
           href="/news"

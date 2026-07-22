@@ -98,6 +98,10 @@ export default async function GuidePage({ params }: Props) {
           {guide.content_md}
         </ReactMarkdown>
       </div>
+      <p className="mt-12 border-t border-border-subtle pt-6 text-xs text-text-muted">
+        Researched with AI assistance and reviewed by our editors before
+        publishing.
+      </p>
     </article>
   );
 }

@@ -27,7 +27,7 @@ import "../globals.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.thebbqatlas.com"
+    process.env.NEXT_PUBLIC_SITE_URL ?? "https://thebbqatlas.com"
   ),
   title: {
     default: `${BRAND.name} — The Michelin Guide for Barbecue`,
@@ -38,6 +38,15 @@ export const metadata: Metadata = {
   openGraph: {
     siteName: BRAND.name,
     type: "website",
+    // Branded default OG image (per-route pages set their own where relevant).
+    images: [{ url: "/logos/crest-gold.jpg", width: 1200, height: 1200 }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${BRAND.name} — The Michelin Guide for Barbecue`,
+    description:
+      "A curated global atlas of the world's great barbecue. Explore the map, read the guides, celebrate the craft.",
+    images: ["/logos/crest-gold.jpg"],
   },
   applicationName: BRAND.name,
   appleWebApp: {
@@ -93,8 +102,16 @@ export default async function LocaleLayout({
         <JsonLd data={[organizationJsonLd(), websiteJsonLd()]} />
         <Analytics />
         <NextIntlClientProvider messages={messages}>
+          <a
+            href="#main-content"
+            className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-md focus:bg-brand-gold focus:px-4 focus:py-2 focus:font-semibold focus:text-brand-black"
+          >
+            Skip to content
+          </a>
           <Header />
-          <main className="flex-1">{children}</main>
+          <main id="main-content" className="flex-1">
+            {children}
+          </main>
           <FooterGate>
             <Footer />
           </FooterGate>
