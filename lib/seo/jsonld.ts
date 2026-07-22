@@ -202,8 +202,9 @@ export function newsJsonLd(post: NewsPost) {
     image: safeVenueImage(post.hero_image_url) || SITE.logo,
     datePublished: post.published_at || post.created_at || undefined,
     dateModified: post.published_at || post.created_at || undefined,
+    // E-E-A-T: a named byline is a Person; fall back to the publisher org.
     author: post.author
-      ? { "@type": "Organization", name: post.author, url: SITE.url }
+      ? { "@type": "Person", name: post.author }
       : { "@type": "Organization", name: SITE.name, url: SITE.url },
     publisher: { "@id": ORG_ID },
     mainEntityOfPage: url,

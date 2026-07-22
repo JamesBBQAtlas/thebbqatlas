@@ -1,9 +1,14 @@
-import Link from "next/link";
+import { Link } from "@/i18n/navigation";
 import { EditorialImage } from "@/components/ui/EditorialImage";
 import { getGuides } from "@/lib/queries/guides";
 import { AdSlot } from "@/components/monetization/AdSlot";
 
-export const metadata = { title: "Guides" };
+export const metadata = {
+  title: "Guides",
+  description:
+    "Expert BBQ guides — regional styles, techniques, gear and road-trip routes to fuel your next smoke session.",
+  alternates: { canonical: "/guides" },
+};
 
 export default async function GuidesPage() {
   const guides = await getGuides();

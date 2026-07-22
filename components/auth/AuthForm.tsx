@@ -9,8 +9,18 @@ type AuthMode = "login" | "signup" | "magic";
 const inputCls =
   "w-full rounded-md border border-border-default bg-surface-1 px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-brand-gold/20";
 
-export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
+export function AuthForm({
+  mode: initialMode = "login",
+  next = "/profile",
+}: {
+  mode?: AuthMode;
+  next?: string;
+}) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
+  const callbackUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`
+      : `/auth/callback?next=${encodeURIComponent(next)}`;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [marketingOptIn, setMarketingOptIn] = useState(false);
@@ -36,7 +46,7 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo: callbackUrl,
           data: {
             marketing_opt_in: marketingOptIn,
             marketing_opt_in_text: MARKETING_CONSENT_TEXT,
@@ -48,20 +58,20 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
       } else if (data.session) {
         // No email confirmation required — session is live now.
         await fetch("/api/account/post-signup", { method: "POST" }).catch(() => {});
-        window.location.href = "/profile";
+        window.location.href = next;
       } else {
         setMessage("Check your email to confirm your account.");
       }
     } else if (mode === "magic") {
       const { error } = await supabase.auth.signInWithOtp({
         email,
-        options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+        options: { emailRedirectTo: callbackUrl },
       });
       setMessage(error ? error.message : "Magic link sent — check your email.");
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) setMessage(error.message);
-      else window.location.href = "/profile";
+      else window.location.href = next;
     }
     setLoading(false);
   };
@@ -69,7 +79,7 @@ export function AuthForm({ mode: initialMode = "login" }: { mode?: AuthMode }) {
   const handleGoogle = async () => {
     await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: { redirectTo: callbackUrl },
     });
   };
 

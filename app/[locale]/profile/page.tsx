@@ -19,7 +19,10 @@ import { getUserCheckIns } from "@/lib/queries/checkins";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import type { Restaurant, Submission, AccountType } from "@/lib/types/database";
 
-export const metadata = { title: "My Atlas" };
+export const metadata = {
+  title: "My Atlas",
+  robots: { index: false, follow: false },
+};
 export const dynamic = "force-dynamic";
 
 const ACCOUNT_LABELS: Record<AccountType, string> = {
