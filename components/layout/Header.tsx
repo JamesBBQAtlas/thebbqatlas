@@ -25,8 +25,8 @@ export function Header() {
     pathname === href || pathname.startsWith(`${href}/`);
 
   return (
-    <header className="fixed inset-x-0 top-0 z-50 h-18 border-b border-border-default/40 bg-background/70 backdrop-blur-xl">
-      <div className="mx-auto flex h-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
+    <header className="safe-top fixed inset-x-0 top-0 z-50 border-b border-border-default/40 bg-background/70 backdrop-blur-xl">
+      <div className="mx-auto flex h-18 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
         {/* Logo lockup */}
         <Link
           href="/"

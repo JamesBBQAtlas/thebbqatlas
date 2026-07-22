@@ -54,6 +54,45 @@
   html {
     scroll-behavior: smooth;
     -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    /* Keep anchored jumps clear of the fixed 72px header */
+    scroll-padding-top: 5rem;
+  }
+
+  /* App-like touch behaviour: no grey tap flash, no accidental horizontal
+     scroll, no rubber-band chaining. Kept in @layer base so utilities win. */
+  html,
+  body {
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: contain;
+  }
+
+  /* Prefer the dynamic viewport unit on capable browsers so the layout doesn't
+     jump as the mobile URL bar shows/hides. */
+  @supports (min-height: 100dvh) {
+    body {
+      min-height: 100dvh;
+    }
+  }
+
+  /* Interactive elements: remove the legacy 300ms tap delay. */
+  a,
+  button,
+  [role="button"],
+  input[type="submit"],
+  label {
+    touch-action: manipulation;
+  }
+
+  /* iOS zooms the page when focusing an input under 16px. Enforce ≥16px on
+     small screens to stop the jarring zoom-on-focus. */
+  @media (max-width: 640px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
   }
 
   body {
@@ -168,6 +207,36 @@
   }
   .text-pretty {
     text-wrap: pretty;
+  }
+
+  /* Safe-area helpers for notch / home-indicator devices (need viewport-fit=cover). */
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .safe-x {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  /* Extra bottom room on mobile so content clears the bottom tab bar
+     (56px bar + the home-indicator inset). Removed at lg where the bar hides. */
+  .pb-mobilenav {
+    padding-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+  }
+  @media (min-width: 1024px) {
+    .pb-mobilenav {
+      padding-bottom: 0;
+    }
+  }
+}
+
+/* Slimmer, less intrusive scrollbar on touch/small screens. */
+@media (max-width: 1023px) {
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 }
 
