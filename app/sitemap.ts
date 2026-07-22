@@ -21,6 +21,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ]);
   const now = new Date();
 
+  // Newest member-venue date for a set (stable hub lastmod that doesn't churn
+  // on every request — F-18). Falls back to `now` when a set is empty.
+  const newestVenue = (venues: typeof restaurants): Date => {
+    let ms = 0;
+    for (const v of venues) {
+      const t = v.created_at ? new Date(v.created_at).getTime() : 0;
+      if (t > ms) ms = t;
+    }
+    return ms ? new Date(ms) : now;
+  };
+
   const staticEntries: MetadataRoute.Sitemap = [
     { url: abs("/"), lastModified: now, changeFrequency: "daily", priority: 1 },
     { url: abs("/map"), lastModified: now, changeFrequency: "daily", priority: 0.9 },
@@ -29,6 +40,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: abs("/news"), lastModified: now, changeFrequency: "daily", priority: 0.7 },
     { url: abs("/styles"), lastModified: now, changeFrequency: "weekly", priority: 0.7 },
     { url: abs("/events"), lastModified: now, changeFrequency: "daily", priority: 0.6 },
+    { url: abs("/gear"), lastModified: now, changeFrequency: "weekly", priority: 0.5 },
+    { url: abs("/about"), lastModified: now, changeFrequency: "monthly", priority: 0.4 },
+    { url: abs("/contact"), lastModified: now, changeFrequency: "yearly", priority: 0.3 },
+    { url: abs("/list"), lastModified: now, changeFrequency: "monthly", priority: 0.5 },
+    { url: abs("/premium"), lastModified: now, changeFrequency: "monthly", priority: 0.4 },
     { url: abs("/submit"), lastModified: now, changeFrequency: "monthly", priority: 0.5 },
     { url: abs("/privacy"), lastModified: now, changeFrequency: "yearly", priority: 0.2 },
     { url: abs("/terms"), lastModified: now, changeFrequency: "yearly", priority: 0.2 },
@@ -63,26 +79,34 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.6,
   }));
 
-  // Programmatic hub pages — grow automatically with the catalogue.
-  const styleEntries: MetadataRoute.Sitemap = BBQ_STYLES.map((s) => ({
-    url: abs(`/styles/${s}`),
-    lastModified: now,
-    changeFrequency: "weekly",
-    priority: 0.7,
-  }));
+  // Programmatic hub pages — grow with the catalogue. EXCLUDE styles with zero
+  // venues (thin/empty hubs shouldn't be indexed — F-18); lastmod comes from the
+  // newest member venue.
+  const styleEntries: MetadataRoute.Sitemap = BBQ_STYLES.flatMap((s) => {
+    const venues = restaurants.filter((r) => r.style === s);
+    if (venues.length === 0) return [];
+    return [
+      {
+        url: abs(`/styles/${s}`),
+        lastModified: newestVenue(venues),
+        changeFrequency: "weekly" as const,
+        priority: 0.7,
+      },
+    ];
+  });
 
   const locationEntries: MetadataRoute.Sitemap = [];
   for (const country of groupByCountry(restaurants).values()) {
     locationEntries.push({
       url: abs(`/directory/${country.slug}`),
-      lastModified: now,
+      lastModified: newestVenue(country.venues),
       changeFrequency: "weekly",
       priority: 0.7,
     });
     for (const city of groupByCity(country.venues).values()) {
       locationEntries.push({
         url: abs(`/directory/${country.slug}/${city.slug}`),
-        lastModified: now,
+        lastModified: newestVenue(city.venues),
         changeFrequency: "weekly",
         priority: 0.6,
       });

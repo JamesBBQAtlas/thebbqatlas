@@ -243,6 +243,20 @@ export async function runSelfHealSweep(
           status: "pending",
           created_by: "self-heal",
         });
+        // Provenance: mirror the single-venue route's audit trail (F-14).
+        try {
+          await db.from("enrichment_runs").insert({
+            restaurant_id: v.id,
+            entity_type: "selfheal",
+            lead: { name: v.name, city: v.city, country: v.country } as Record<string, unknown>,
+            result: s as unknown as Record<string, unknown>,
+            citations: s.sources.length ? s.sources : null,
+            model: s.models.join("+") || "grok",
+            created_by: null,
+          });
+        } catch {
+          /* provenance logging is secondary */
+        }
         return !error;
       } catch {
         return false;

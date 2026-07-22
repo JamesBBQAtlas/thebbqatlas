@@ -32,6 +32,21 @@ export async function POST(request: Request) {
 
   try {
     const chain = await discoverChain(lead);
+    // Provenance: mirror the venue route's audit trail (F-14). Best-effort.
+    try {
+      const c = chain as unknown as { citations?: unknown[] };
+      await ctx.db.from("enrichment_runs").insert({
+        restaurant_id: null,
+        entity_type: "chain",
+        lead: lead as unknown as Record<string, unknown>,
+        result: chain as unknown as Record<string, unknown>,
+        citations: Array.isArray(c.citations) && c.citations.length ? c.citations : null,
+        model: process.env.XAI_MODEL ?? "grok-4.5",
+        created_by: ctx.userId,
+      });
+    } catch {
+      /* provenance logging is secondary */
+    }
     return NextResponse.json({ chain });
   } catch (err) {
     const msg = err instanceof GrokError ? err.message : "Discovery failed.";

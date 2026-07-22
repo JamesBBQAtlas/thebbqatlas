@@ -37,6 +37,21 @@ export async function POST(request: Request) {
 
   try {
     const draft = await researchNews(topic, category);
+    // Provenance: mirror the venue route's audit trail (F-14). Best-effort.
+    try {
+      const d = draft as unknown as { citations?: unknown[] };
+      await ctx.db.from("enrichment_runs").insert({
+        restaurant_id: null,
+        entity_type: "news",
+        lead: { topic, category } as Record<string, unknown>,
+        result: draft as unknown as Record<string, unknown>,
+        citations: Array.isArray(d.citations) && d.citations.length ? d.citations : null,
+        model: process.env.XAI_MODEL ?? "grok-4.5",
+        created_by: ctx.userId,
+      });
+    } catch {
+      /* provenance logging is secondary */
+    }
     return NextResponse.json({ draft });
   } catch (err) {
     const msg = err instanceof GrokError ? err.message : "Research failed.";
