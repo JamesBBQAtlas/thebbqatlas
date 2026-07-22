@@ -223,18 +223,24 @@ export function MapExplorer({
   // Init map once
   useEffect(() => {
     if (mapRef.current || !containerRef.current) return;
-    const styleSpec = mapKey
-      ? `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${mapKey}`
-      : FALLBACK_STYLE;
 
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: styleSpec,
-      center: initialState.center ?? [8, 25],
-      zoom: initialState.zoom ?? 1.3,
-      attributionControl: false,
-    });
-    mapRef.current = map;
+    // Lazy-mount the GL canvas after first paint (F-23): let the page shell and
+    // controls paint before MapLibre's WebGL init runs, so it never blocks the
+    // first paint of the flagship map route.
+    const raf = requestAnimationFrame(() => {
+      if (mapRef.current || !containerRef.current) return;
+      const styleSpec = mapKey
+        ? `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${mapKey}`
+        : FALLBACK_STYLE;
+
+      const map = new maplibregl.Map({
+        container: containerRef.current,
+        style: styleSpec,
+        center: initialState.center ?? [8, 25],
+        zoom: initialState.zoom ?? 1.3,
+        attributionControl: false,
+      });
+      mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     map.addControl(new maplibregl.AttributionControl({ compact: true }));
 
@@ -369,9 +375,11 @@ export function MapExplorer({
 
       setReady(true);
     });
+    }); // end requestAnimationFrame — GL init deferred to after first paint
 
     return () => {
-      map.remove();
+      cancelAnimationFrame(raf);
+      mapRef.current?.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
