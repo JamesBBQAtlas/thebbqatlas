@@ -13,7 +13,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { AvatarUpload } from "@/components/account/AvatarUpload";
-import { avatarFor } from "@/lib/account/avatar";
+import { resolveAvatarUrl } from "@/lib/account/avatar-resolve";
 import { getPremiumStatus } from "@/lib/account/entitlements";
 import { getUserCheckIns } from "@/lib/queries/checkins";
 import { STYLE_LABELS } from "@/lib/constants/styles";
@@ -65,7 +65,7 @@ export default async function ProfilePage() {
 
   const accountType = (profile?.account_type ?? "consumer") as AccountType;
   const displayName = profile?.display_name ?? user.email?.split("@")[0] ?? "Member";
-  const avatar = avatarFor(profile?.avatar_url, accountType);
+  const avatar = await resolveAvatarUrl(supabase, profile?.avatar_url, accountType);
   const premium = await getPremiumStatus(supabase, user.id);
 
   const { data: savedRows } = await supabase

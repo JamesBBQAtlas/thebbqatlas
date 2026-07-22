@@ -42,17 +42,18 @@ export function AvatarUpload({ current }: { current: string }) {
         .upload(path, file, { upsert: true, cacheControl: "3600" });
       if (upErr) throw upErr;
 
-      const { data } = supabase.storage.from("avatars").getPublicUrl(path);
-      const url = `${data.publicUrl}?v=${Date.now()}`;
-
+      // The avatars bucket is private — store the PATH and sign for display.
       const res = await fetch("/api/account", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ avatarUrl: url }),
+        body: JSON.stringify({ avatarUrl: path }),
       });
       if (!res.ok) throw new Error("Could not save avatar");
 
-      setPreview(url);
+      const { data: signed } = await supabase.storage
+        .from("avatars")
+        .createSignedUrl(path, 60 * 60);
+      if (signed?.signedUrl) setPreview(signed.signedUrl);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");

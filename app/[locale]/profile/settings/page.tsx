@@ -6,7 +6,7 @@ import { AvatarUpload } from "@/components/account/AvatarUpload";
 import { DisplayNameForm } from "@/components/account/DisplayNameForm";
 import { UsernameForm } from "@/components/account/UsernameForm";
 import { SecuritySettings } from "@/components/account/SecuritySettings";
-import { avatarFor } from "@/lib/account/avatar";
+import { resolveAvatarUrl } from "@/lib/account/avatar-resolve";
 import type { AccountType } from "@/lib/types/database";
 
 export const metadata = { title: "Account settings" };
@@ -27,7 +27,7 @@ export default async function SettingsPage() {
 
   const accountType = (profile?.account_type ?? "consumer") as AccountType;
   const displayName = profile?.display_name ?? user.email?.split("@")[0] ?? "Member";
-  const avatar = avatarFor(profile?.avatar_url, accountType);
+  const avatar = await resolveAvatarUrl(supabase, profile?.avatar_url, accountType);
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-16 sm:px-10">
