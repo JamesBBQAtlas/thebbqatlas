@@ -43,7 +43,7 @@ export function MapPreviewCard({
 
   return (
     <div
-      className="atlas-card-enter pointer-events-auto absolute inset-x-3 bottom-3 z-20 mx-auto max-w-[420px] overflow-hidden rounded-xl border border-border-default bg-surface-0 shadow-2xl sm:inset-x-auto sm:bottom-auto sm:left-auto sm:right-3 sm:top-3 sm:mx-0 sm:w-[358px]"
+      className="atlas-card-enter pointer-events-auto absolute inset-x-3 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] z-20 mx-auto max-w-[420px] overflow-hidden rounded-xl border border-border-default bg-surface-0 shadow-2xl sm:inset-x-auto sm:bottom-auto sm:left-auto sm:right-3 sm:top-3 sm:mx-0 sm:w-[358px]"
       role="dialog"
       aria-label={`${r.name} preview`}
     >

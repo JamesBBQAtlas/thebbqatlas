@@ -734,12 +734,12 @@ export function MapExplorer({
 
         {/* Legend */}
         {personal ? (
-          <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">
+          <div className="absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] left-3 z-10 flex items-center gap-2 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur lg:bottom-3">
             <span className="h-2.5 w-2.5 rounded-full bg-[#F59E0B] ring-2 ring-[#E85D04]" />
             Your saved spots
           </div>
         ) : (
-          <div className="absolute bottom-3 left-3 z-10 flex items-center gap-4 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">
+          <div className="absolute bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] left-3 z-10 flex items-center gap-4 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur lg:bottom-3">
             <span className="flex items-center gap-1.5">
               <span className="h-2.5 w-2.5 rounded-full bg-brand-gold" /> Featured
             </span>
