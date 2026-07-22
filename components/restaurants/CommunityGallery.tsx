@@ -17,7 +17,7 @@ export function CommunityGallery({
   if (media.length === 0 && !canUpload) return null;
 
   return (
-    <section className="mb-12">
+    <section id="add-photos" className="mb-12 scroll-mt-28">
       <h2 className="mb-5 border-b border-border-subtle pb-3 font-heading text-xl font-bold text-text-primary">
         Community photos
       </h2>

@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Camera } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
@@ -24,7 +23,6 @@ import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { CheckInButton } from "@/components/restaurants/CheckInButton";
 import { InstagramEmbed } from "@/components/restaurants/InstagramEmbed";
 import { HeroPlaceholder } from "@/components/restaurants/HeroPlaceholder";
-import { safeVenueImage } from "@/lib/restaurants/image";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
@@ -133,6 +131,16 @@ export default async function RestaurantPage({ params }: Props) {
     { label: "YouTube", href: restaurant.youtube_url },
   ].filter((s): s is { label: string; href: string } => Boolean(s.href));
 
+  // Venue imagery hierarchy (copyright-safe): (1) an approved uploaded photo
+  // from our moderated media system; else (2) the official Instagram embed (its
+  // own section below); else (3) the branded "Add a photo" placeholder. We never
+  // scrape, hotlink, or self-host a third party's image as a hero.
+  const heroImage = media.find((m) => m.kind === "image")?.url ?? null;
+  const canUpload = Boolean(user);
+  const uploadHref = canUpload
+    ? "#add-photos"
+    : `/login?next=/restaurants/${restaurant.slug}`;
+
   // Nearby (by true distance). Miles for US/UK, kilometres elsewhere.
   const useMiles = code === "US" || code === "GB";
   const fmtDist = (km: number) => {
@@ -177,23 +185,43 @@ export default async function RestaurantPage({ params }: Props) {
 
       {/* Hero */}
       <section className="relative h-[52vh] min-h-[360px] w-full overflow-hidden">
-        {safeVenueImage(restaurant.hero_image_url) ? (
-          <Image
-            src={safeVenueImage(restaurant.hero_image_url)!}
+        {heroImage ? (
+          // Approved, moderated upload from our own media system — never scraped.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={heroImage}
             alt={`${restaurant.name} — ${STYLE_LABELS[restaurant.style]} barbecue in ${cityCountry}`}
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover"
+            className="absolute inset-0 h-full w-full object-cover"
           />
         ) : (
           <HeroPlaceholder
             variant="hero"
             styleColor={STYLE_PIN_COLORS[restaurant.style]}
-            claimHref={`/list?claim=${restaurant.slug}`}
           />
         )}
-        <div className="absolute inset-0 bg-gradient-to-b from-background/10 via-background/40 to-background" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/10 via-background/40 to-background" />
+
+        {/* Tier 3: branded invitation to contribute the first photo. */}
+        {!heroImage && (
+          <div className="absolute inset-x-0 top-[34%] z-[1] flex flex-col items-center px-6 text-center">
+            <p className="font-heading text-xs uppercase tracking-[0.22em] text-white/70">
+              No photos yet
+            </p>
+            <Link
+              href={uploadHref}
+              className="mt-3 inline-flex items-center gap-2 rounded-md bg-brand-gold px-5 py-2.5 text-sm font-bold uppercase tracking-[0.06em] text-text-inverse shadow-lg transition-colors hover:bg-brand-gold/90"
+            >
+              <Camera className="h-4 w-4" />
+              Add a photo
+            </Link>
+            <Link
+              href={`/list?claim=${restaurant.slug}`}
+              className="mt-2.5 text-xs font-semibold text-white/70 underline-offset-2 transition-colors hover:text-brand-gold hover:underline"
+            >
+              Own this venue?
+            </Link>
+          </div>
+        )}
 
         <div className="absolute inset-x-0 bottom-0">
           <div className="mx-auto max-w-[1200px] px-6 pb-10 sm:px-10">
