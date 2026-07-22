@@ -6,6 +6,7 @@ import ReactMarkdown from "react-markdown";
 import { Link } from "@/i18n/navigation";
 import { ChevronRight } from "lucide-react";
 import { getNews, getNewsBySlug } from "@/lib/queries/news";
+import { safeVenueImage } from "@/lib/restaurants/image";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { newsJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { TrackView } from "@/components/account/TrackView";
@@ -37,7 +38,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description: post.excerpt,
       type: "article",
       publishedTime: post.published_at || undefined,
-      images: post.hero_image_url ? [post.hero_image_url] : [],
+      images: safeVenueImage(post.hero_image_url)
+        ? [safeVenueImage(post.hero_image_url) as string]
+        : [],
     },
   };
 }

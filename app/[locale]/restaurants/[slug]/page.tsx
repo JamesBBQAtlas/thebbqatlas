@@ -8,6 +8,7 @@ import {
   getRestaurants,
   getSignatureDishes,
 } from "@/lib/queries/restaurants";
+import { safeVenueImage } from "@/lib/restaurants/image";
 import { STYLE_LABELS, STYLE_PIN_COLORS } from "@/lib/constants/styles";
 import {
   groupOfferings,
@@ -74,7 +75,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title: restaurant.name,
       description,
       type: "article",
-      images: restaurant.hero_image_url ? [restaurant.hero_image_url] : [],
+      images: safeVenueImage(restaurant.hero_image_url)
+        ? [safeVenueImage(restaurant.hero_image_url) as string]
+        : [],
     },
   };
 }

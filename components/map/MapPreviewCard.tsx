@@ -5,6 +5,7 @@ import Image from "next/image";
 import { ArrowRight, MapPin, Wine, X } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
+import { safeVenueImage } from "@/lib/restaurants/image";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import { OFFERINGS_BY_SLUG } from "@/lib/constants/offerings";
 import { resolveCountryCode } from "@/lib/constants/countries";
@@ -31,6 +32,8 @@ export function MapPreviewCard({
   onNavigate: () => void;
 }) {
   const [imgOk, setImgOk] = useState(true);
+  // Never present a raw/stock hero — only approved (Supabase-hosted) imagery.
+  const safeHero = safeVenueImage(r.hero_image_url);
   const code = resolveCountryCode(r.country_code, r.country);
   const firstMeat = (r.offerings ?? [])
     .map((slug) => OFFERINGS_BY_SLUG[slug])
@@ -49,9 +52,9 @@ export function MapPreviewCard({
     >
       {/* Cover */}
       <div className="relative h-40 w-full">
-        {r.hero_image_url && imgOk ? (
+        {safeHero && imgOk ? (
           <Image
-            src={r.hero_image_url}
+            src={safeHero}
             alt={`${r.name} — ${STYLE_LABELS[r.style]} barbecue`}
             fill
             sizes="420px"
@@ -73,7 +76,7 @@ export function MapPreviewCard({
           type="button"
           onClick={onClose}
           aria-label="Close preview"
-          className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/75"
+          className="absolute right-2 top-2 grid h-11 w-11 place-items-center rounded-full bg-black/55 text-white backdrop-blur-sm transition-colors hover:bg-black/75"
         >
           <X className="h-4 w-4" />
         </button>

@@ -126,7 +126,7 @@ export interface Restaurant {
   price_level: number;
   avg_rating: number;
   review_count: number;
-  hero_image_url: string;
+  hero_image_url: string | null;
   is_featured: boolean;
   status: ModerationStatus;
   created_at: string;

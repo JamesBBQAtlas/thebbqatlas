@@ -5,6 +5,7 @@ import {
   OFFERING_CATEGORY_LABELS,
 } from "@/lib/constants/offerings";
 import { resolveCountryCode } from "@/lib/constants/countries";
+import { safeVenueImage } from "@/lib/restaurants/image";
 import { SITE, absoluteUrl } from "./site";
 
 /**
@@ -72,7 +73,8 @@ export function restaurantJsonLd(r: Restaurant) {
     name: r.name,
     description: r.description || undefined,
     url,
-    image: r.hero_image_url || undefined,
+    // Copyright-safe: only approved (non-stock) media; else the branded default.
+    image: safeVenueImage(r.hero_image_url) || SITE.logo,
     servesCuisine: [`${STYLE_LABELS[r.style]} Barbecue`, "Barbecue"],
     priceRange: r.price_level ? "$".repeat(r.price_level) : undefined,
     address: {
@@ -114,7 +116,7 @@ export function eventJsonLd(r: Restaurant) {
     "@type": r.category === "festival" ? "Festival" : "Event",
     name: r.name,
     description: r.description || undefined,
-    image: r.hero_image_url || undefined,
+    image: safeVenueImage(r.hero_image_url) || SITE.logo,
     startDate: r.event_starts_at || undefined,
     endDate: r.event_ends_at || undefined,
     eventStatus: r.permanently_closed
@@ -147,7 +149,7 @@ export function articleJsonLd(guide: Guide) {
     "@id": `${url}#article`,
     headline: guide.title,
     description: guide.excerpt || undefined,
-    image: guide.hero_image_url || undefined,
+    image: safeVenueImage(guide.hero_image_url) || SITE.logo,
     datePublished: guide.published_at || guide.created_at || undefined,
     dateModified: guide.published_at || guide.created_at || undefined,
     author: { "@type": "Organization", name: SITE.name, url: SITE.url },
@@ -197,7 +199,7 @@ export function newsJsonLd(post: NewsPost) {
     "@id": `${url}#article`,
     headline: post.title,
     description: post.excerpt || undefined,
-    image: post.hero_image_url || undefined,
+    image: safeVenueImage(post.hero_image_url) || SITE.logo,
     datePublished: post.published_at || post.created_at || undefined,
     dateModified: post.published_at || post.created_at || undefined,
     author: post.author

@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import ReactMarkdown from "react-markdown";
 import { getGuideBySlug, getGuides } from "@/lib/queries/guides";
+import { safeVenueImage } from "@/lib/restaurants/image";
 import { AdSlot } from "@/components/monetization/AdSlot";
 import { AffiliateLink } from "@/components/monetization/AffiliateLink";
 import { JsonLd } from "@/components/seo/JsonLd";
@@ -37,7 +38,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description: guide.excerpt,
       type: "article",
       publishedTime: guide.published_at || undefined,
-      images: guide.hero_image_url ? [guide.hero_image_url] : [],
+      images: safeVenueImage(guide.hero_image_url)
+        ? [safeVenueImage(guide.hero_image_url) as string]
+        : [],
     },
   };
 }

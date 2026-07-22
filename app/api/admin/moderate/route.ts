@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { restaurantSlug } from "@/lib/utils/slug";
 import { resolveCountryCode } from "@/lib/constants/countries";
+import { safeVenueImage } from "@/lib/restaurants/image";
 import { sendModerationOutcome } from "@/lib/email/senders";
 
 type ModType = "submission" | "review" | "photo";
@@ -25,9 +26,6 @@ async function submitterEmail(
   }
   return null;
 }
-
-const FALLBACK_HERO =
-  "https://images.unsplash.com/photo-1544025162-d76694265947?w=800&q=80";
 
 /** Recompute a restaurant's review aggregates from its approved reviews. */
 async function recomputeReviewStats(admin: SupabaseClient, restaurantId: string) {
@@ -123,7 +121,9 @@ export async function POST(request: Request) {
           country: submission.country,
           country_code: resolveCountryCode(null, submission.country),
           website: submission.website,
-          hero_image_url: submission.hero_image_url ?? FALLBACK_HERO,
+          // Copyright-safe: never seed a stock hero. Approved venues start with
+          // no hero (branded placeholder) unless an approved photo exists.
+          hero_image_url: safeVenueImage(submission.hero_image_url),
           price_level: 2,
           avg_rating: 0,
           review_count: 0,

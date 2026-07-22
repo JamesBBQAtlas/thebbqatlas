@@ -16,7 +16,6 @@ export function SubmitForm() {
   const [styles, setStyles] = useState<BbqStyle[]>([]);
   const [location, setLocation] = useState<LocationData | null>(null);
   const [website, setWebsite] = useState("");
-  const [heroImageUrl, setHeroImageUrl] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [instagram, setInstagram] = useState("");
   const [consent, setConsent] = useState(false);
@@ -66,7 +65,6 @@ export function SubmitForm() {
       lat: location.lat,
       lng: location.lng,
       website: website || null,
-      hero_image_url: heroImageUrl || null,
       contact_email: contactEmail || null,
       instagram_handle: instagram || null,
       submitted_by: user?.id ?? null,
@@ -181,16 +179,10 @@ export function SubmitForm() {
             className="mt-1"
           />
         </div>
-        <div>
-          <Label htmlFor="hero">Photo URL</Label>
-          <Input
-            id="hero"
-            type="url"
-            value={heroImageUrl}
-            onChange={(e) => setHeroImageUrl(e.target.value)}
-            placeholder="Link to a photo of the spot"
-            className="mt-1"
-          />
+        <div className="rounded-lg border border-border-subtle bg-surface-1/50 px-3 py-2.5 text-xs text-text-muted">
+          Photos are added after a venue is approved, through our moderated
+          upload — so every image is either the venue&apos;s own or properly
+          credited. No need to paste a link here.
         </div>
         <div>
           <Label htmlFor="email">Your Email</Label>

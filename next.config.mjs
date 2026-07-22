@@ -5,9 +5,10 @@ const withNextIntl = createNextIntlPlugin("./i18n/request.ts");
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   images: {
+    // Copyright-safe imagery: only our own Supabase storage is an allowed remote
+    // source. Stock hosts (Unsplash/Pexels) are intentionally NOT allowed — we
+    // never present stock as a venue's own photo (see safeVenueImage()).
     remotePatterns: [
-      { protocol: "https", hostname: "images.unsplash.com" },
-      { protocol: "https", hostname: "images.pexels.com" },
       { protocol: "https", hostname: "jsbhgsfnxrgcxlxsbokp.supabase.co" },
     ],
     formats: ["image/avif", "image/webp"],

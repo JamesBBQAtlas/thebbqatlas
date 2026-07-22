@@ -13,7 +13,8 @@ export function safeVenueImage(url?: string | null): string | null {
   const u = url.trim();
   if (!u) return null;
   // Reject stock/placeholder sources we must not present as a venue's own photo.
-  if (/(^|\.)unsplash\.com/i.test(u) || u.includes("images.unsplash.com")) {
+  // (These hosts are also removed from next.config images.remotePatterns.)
+  if (/(^|\.)(unsplash|pexels)\.com/i.test(u)) {
     return null;
   }
   return u;
