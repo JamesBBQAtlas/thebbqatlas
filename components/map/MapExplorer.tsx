@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Search, SlidersHorizontal, X, MapPin, Navigation, Loader2 } from "lucide-react";
+import { Search, SlidersHorizontal, X, MapPin, Navigation, Loader2, LocateFixed } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
@@ -76,6 +76,38 @@ function tintWater(map: maplibregl.Map) {
   }
 }
 
+// Great-circle distance (metres) between two lat/lng points.
+function distanceMeters(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number }
+): number {
+  const R = 6371000;
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+  const la1 = (a.lat * Math.PI) / 180;
+  const la2 = (b.lat * Math.PI) / 180;
+  const x =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+}
+
+// US-heavy audience → miles for en-US, kilometres elsewhere. Trivial to change.
+const USE_MILES =
+  typeof navigator !== "undefined" && /US/i.test(navigator.language || "");
+
+function formatDistance(m: number): string {
+  if (USE_MILES) {
+    const mi = m / 1609.34;
+    return mi < 0.1 ? "0.1 mi" : mi < 10 ? `${mi.toFixed(1)} mi` : `${Math.round(mi)} mi`;
+  }
+  const km = m / 1000;
+  return km < 0.1 ? "0.1 km" : km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
+}
+
+const isMobileViewport = () =>
+  typeof window !== "undefined" && window.innerWidth < 640;
+
 // No-key fallback: a flat dark canvas so pins still render during development.
 const FALLBACK_STYLE: maplibregl.StyleSpecification = {
   version: 8,
@@ -99,13 +131,23 @@ export function MapExplorer({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const geoMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const autoLocatedRef = useRef(false);
   const router = useRouter();
 
   // Restore the last view once (client-only; the map is imported ssr:false).
   const [initialState] = useState<MapViewState>(() => readMapState() ?? {});
 
   const [ready, setReady] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(initialState.sidebarOpen ?? true);
+  // Default: list open on desktop, but CLOSED on phones so the map is what you
+  // see first (an open full-width list would otherwise cover the whole map).
+  const [sidebarOpen, setSidebarOpen] = useState(
+    initialState.sidebarOpen ?? !isMobileViewport()
+  );
+
+  // The visitor's own location (from the browser) — powers "near me" + sorting.
+  const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
+  const [locBusy, setLocBusy] = useState(false);
   const [style, setStyle] = useState<string>(initialState.style ?? "all");
   const [country, setCountry] = useState<string>(initialState.country ?? "all");
   const [category, setCategory] = useState<string>(initialState.category ?? "all");
@@ -145,6 +187,15 @@ export function MapExplorer({
       return Number.isFinite(r.lat) && Number.isFinite(r.lng);
     });
   }, [restaurants, style, category, country, query]);
+
+  // When we know where the visitor is, order the list nearest-first and keep
+  // each spot's distance for display. Without a location, keep the input order.
+  const listItems = useMemo(() => {
+    if (!userLoc) return filtered.map((r) => ({ r, dist: null as number | null }));
+    return filtered
+      .map((r) => ({ r, dist: distanceMeters(userLoc, { lat: r.lat, lng: r.lng }) }))
+      .sort((a, b) => (a.dist ?? 0) - (b.dist ?? 0));
+  }, [filtered, userLoc]);
 
   const presentCategories = useMemo(() => {
     const set = new Set<string>();
@@ -326,6 +377,52 @@ export function MapExplorer({
     saveMapState({ style, country, category, query, sidebarOpen });
   }, [style, country, category, query, sidebarOpen]);
 
+  // The map is a flex sibling of the list; when the list opens/closes its width
+  // changes, so tell MapLibre to re-measure once the transition settles.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    const t = setTimeout(() => m.resize(), 320);
+    return () => clearTimeout(t);
+  }, [sidebarOpen]);
+
+  // Centre the map on the visitor's own position and drop a "you are here"
+  // marker. Also enables nearest-first sorting of the list.
+  function locateMe(fly = true) {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) return;
+    setLocBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        setUserLoc({ lat, lng });
+        const map = mapRef.current;
+        if (map) {
+          userMarkerRef.current?.remove();
+          const el = document.createElement("div");
+          el.className = "atlas-user-marker";
+          userMarkerRef.current = new maplibregl.Marker({ element: el })
+            .setLngLat([lng, lat])
+            .addTo(map);
+          if (fly) map.flyTo({ center: [lng, lat], zoom: 9, speed: 1.4 });
+        }
+        setLocBusy(false);
+      },
+      () => setLocBusy(false),
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 60000 }
+    );
+  }
+
+  // On first load (when there's no remembered position), try to locate the
+  // visitor automatically so the map opens where they are.
+  useEffect(() => {
+    if (ready && !autoLocatedRef.current && !initialState.center) {
+      autoLocatedRef.current = true;
+      locateMe(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready]);
+
   function flyTo(r: Restaurant) {
     mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 12, speed: 1.4 });
   }
@@ -333,6 +430,8 @@ export function MapExplorer({
   function openPreview(r: Restaurant) {
     setSelected(r);
     flyTo(r);
+    // On phones the list covers the map, so reveal the map to show the pin.
+    if (isMobileViewport()) setSidebarOpen(false);
   }
 
   // Geocode the search box as a *place* (city, country, postcode) and move the
@@ -430,6 +529,19 @@ export function MapExplorer({
           sidebarOpen ? "w-full sm:w-[340px]" : "w-0 overflow-hidden sm:w-0"
         )}
       >
+        {/* Mobile-only header: get back to the map from the full-width list */}
+        <div className="flex items-center justify-between border-b border-border-subtle px-4 py-3 sm:hidden">
+          <span className="font-heading text-sm font-bold uppercase tracking-[0.08em] text-text-primary">
+            Spots
+          </span>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-border-strong hover:text-text-primary"
+          >
+            <MapPin className="h-3.5 w-3.5" /> View map
+          </button>
+        </div>
         <div className="border-b border-border-subtle p-4">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-muted" />
@@ -540,7 +652,7 @@ export function MapExplorer({
         </div>
 
         <ul className="flex-1 overflow-y-auto">
-          {filtered.map((r) => (
+          {listItems.map(({ r, dist }) => (
             <li key={r.id} className="border-b border-border-subtle/60">
               <button
                 type="button"
@@ -560,7 +672,7 @@ export function MapExplorer({
                     r.is_featured ? "bg-brand-gold" : "bg-brand-sienna"
                   )}
                 />
-                <span className="min-w-0">
+                <span className="min-w-0 flex-1">
                   <span className="block truncate font-semibold text-text-primary">
                     {r.name}
                   </span>
@@ -573,10 +685,15 @@ export function MapExplorer({
                     {STYLE_LABELS[r.style]}
                   </span>
                 </span>
+                {dist != null && (
+                  <span className="mt-1 shrink-0 whitespace-nowrap rounded-full border border-border-default bg-surface-1 px-2 py-0.5 text-[0.6875rem] font-semibold text-text-secondary">
+                    {formatDistance(dist)}
+                  </span>
+                )}
               </button>
             </li>
           ))}
-          {filtered.length === 0 && (
+          {listItems.length === 0 && (
             <li className="px-4 py-8 text-center text-sm text-text-muted">
               No spots match those filters.
             </li>
@@ -595,6 +712,26 @@ export function MapExplorer({
           {sidebarOpen ? <X className="h-4 w-4" /> : <SlidersHorizontal className="h-4 w-4" />}
           {sidebarOpen ? "Hide" : "Filters"}
         </button>
+
+        {/* Use my location */}
+        <button
+          type="button"
+          onClick={() => locateMe(true)}
+          disabled={locBusy}
+          aria-label="Use my location"
+          title="Use my location"
+          className={cn(
+            "absolute right-3 top-3 z-10 flex h-10 w-10 items-center justify-center rounded-md border bg-surface-0/90 backdrop-blur transition-colors hover:border-border-strong disabled:opacity-60",
+            userLoc ? "border-brand-gold/70 text-brand-gold" : "border-border-default text-text-primary"
+          )}
+        >
+          {locBusy ? (
+            <Loader2 className="h-4.5 w-4.5 animate-spin" />
+          ) : (
+            <LocateFixed className="h-[1.15rem] w-[1.15rem]" />
+          )}
+        </button>
+
         {/* Legend */}
         {personal ? (
           <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2 rounded-md border border-border-default bg-surface-0/90 px-3 py-2 text-xs text-text-secondary backdrop-blur">

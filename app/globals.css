@@ -335,6 +335,28 @@
     0 0 12px rgba(212, 175, 55, 0.55);
 }
 
+/* "You are here" — the visitor's own geolocated position (blue, distinct from
+   the gold/sienna venue pins and the gold place-search marker). */
+.atlas-user-marker {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: #3b82f6;
+  border: 2px solid #ffffff;
+  box-shadow:
+    0 0 0 5px rgba(59, 130, 246, 0.22),
+    0 0 12px rgba(59, 130, 246, 0.65);
+}
+
+/* On phones/tablets the fixed bottom tab bar overlaps map controls — lift the
+   MapLibre bottom controls (zoom, attribution) clear of it. */
+@media (max-width: 1023px) {
+  .maplibregl-ctrl-bottom-right,
+  .maplibregl-ctrl-bottom-left {
+    margin-bottom: calc(3.5rem + env(safe-area-inset-bottom));
+  }
+}
+
 /* In-map preview card entrance */
 @keyframes atlas-card-in {
   from {
