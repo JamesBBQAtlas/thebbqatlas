@@ -137,18 +137,21 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
             placeholder="Search address, city, or restaurant location..."
             className="pl-10"
+            autoComplete="off"
           />
         </div>
         {searching && <p className="text-xs text-white/40 mt-1">Searching...</p>}
         {showSuggestions && suggestions.length > 0 && (
-          <ul className="absolute z-50 mt-1 w-full rounded-md border border-white/20 bg-brand-black shadow-lg max-h-48 overflow-y-auto">
+          <ul className="absolute left-0 right-0 top-full z-[70] mt-1 max-h-56 overflow-y-auto rounded-md border border-border-default bg-surface-1 shadow-2xl">
             {suggestions.map((s, i) => (
-              <li key={i}>
+              <li key={i} className="border-b border-border-subtle/60 last:border-b-0">
                 <button
                   type="button"
-                  className="w-full text-left px-3 py-2 text-sm hover:bg-white/10"
+                  className="w-full px-3 py-2.5 text-left text-sm text-text-primary transition-colors hover:bg-surface-2"
+                  onMouseDown={(e) => e.preventDefault()}
                   onClick={() => selectSuggestion(s)}
                 >
                   {[s.address, s.city, s.country].filter(Boolean).join(", ")}
@@ -159,7 +162,7 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
         )}
       </div>
 
-      <div>
+      <div className="pt-1">
         <Label>Drop a Pin on the Map *</Label>
         <p className="text-xs text-white/50 mb-2">Click the map to set the exact location, or use search above.</p>
         <LocationMap

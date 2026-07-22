@@ -13,9 +13,11 @@ import { OFFERINGS_BY_SLUG } from "@/lib/constants/offerings";
 import { resolveCountryCode } from "@/lib/constants/countries";
 import { FlagIcon } from "@/components/ui/FlagIcon";
 import { HeroPlaceholder } from "@/components/restaurants/HeroPlaceholder";
+import { safeVenueImage } from "@/lib/restaurants/image";
 
 export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
   const code = resolveCountryCode(r.country_code, r.country);
+  const heroSrc = safeVenueImage(r.hero_image_url);
   const firstMeat = (r.offerings ?? [])
     .map((slug) => OFFERINGS_BY_SLUG[slug])
     .find((o) => o?.category === "meats");
@@ -26,9 +28,9 @@ export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
       className="group relative block overflow-hidden rounded-xl border border-border-subtle bg-surface-0 transition-all duration-300 hover:-translate-y-1 hover:border-border-default hover:shadow-lg"
     >
       <div className="relative aspect-[16/10] w-full overflow-hidden">
-        {r.hero_image_url ? (
+        {heroSrc ? (
           <Image
-            src={r.hero_image_url}
+            src={heroSrc}
             alt={`${r.name} — ${STYLE_LABELS[r.style]} barbecue`}
             fill
             sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"

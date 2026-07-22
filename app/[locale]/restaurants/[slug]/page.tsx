@@ -24,6 +24,7 @@ import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { CheckInButton } from "@/components/restaurants/CheckInButton";
 import { InstagramEmbed } from "@/components/restaurants/InstagramEmbed";
 import { HeroPlaceholder } from "@/components/restaurants/HeroPlaceholder";
+import { safeVenueImage } from "@/lib/restaurants/image";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
@@ -176,9 +177,9 @@ export default async function RestaurantPage({ params }: Props) {
 
       {/* Hero */}
       <section className="relative h-[52vh] min-h-[360px] w-full overflow-hidden">
-        {restaurant.hero_image_url ? (
+        {safeVenueImage(restaurant.hero_image_url) ? (
           <Image
-            src={restaurant.hero_image_url}
+            src={safeVenueImage(restaurant.hero_image_url)!}
             alt={`${restaurant.name} — ${STYLE_LABELS[restaurant.style]} barbecue in ${cityCountry}`}
             fill
             priority

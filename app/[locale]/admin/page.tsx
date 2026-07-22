@@ -22,13 +22,39 @@ async function count(
   }
 }
 
-function Stat({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
-  return (
-    <div className="rounded-xl border border-border-subtle bg-surface-0 p-5">
+function Stat({
+  label,
+  value,
+  hint,
+  href,
+}: {
+  label: string;
+  value: number | string;
+  hint?: string;
+  href?: string;
+}) {
+  const body = (
+    <>
       <div className="font-heading text-3xl font-bold text-text-primary">{value}</div>
       <div className="mt-1 text-sm text-text-secondary">{label}</div>
       {hint && <div className="mt-0.5 text-xs text-text-muted">{hint}</div>}
-    </div>
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="group flex flex-col rounded-xl border border-border-subtle bg-surface-0 p-5 transition-colors hover:border-brand-gold/60"
+      >
+        {body}
+        <span className="mt-2 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-text-muted transition-colors group-hover:text-brand-gold">
+          View →
+        </span>
+      </Link>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-border-subtle bg-surface-0 p-5">{body}</div>
   );
 }
 
@@ -76,8 +102,6 @@ export default async function AdminDashboard() {
     clicksAffiliate,
     checkInsTotal,
     savesTotal,
-    mediaPending,
-    suggestionsPending,
   ] = await Promise.all([
     count(db, "restaurants"),
     count(db, "restaurants", { col: "status", val: "approved" }),
@@ -93,11 +117,7 @@ export default async function AdminDashboard() {
     count(db, "click_events", { col: "event_type", val: "affiliate" }),
     count(db, "check_ins"),
     count(db, "saved_spots"),
-    count(db, "media", { col: "status", val: "pending" }),
-    count(db, "suggestions", { col: "status", val: "pending" }),
   ]);
-
-  const pendingTotal = subsPending + reviewsPending + photosPending;
 
   // Corrections/closures are submissions with a non-'new_venue' type.
   let correctionsPending = 0;
@@ -140,92 +160,19 @@ export default async function AdminDashboard() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-16 sm:px-10">
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="font-heading text-3xl font-bold text-text-primary">
-            Admin Overview
-          </h1>
-          <p className="mt-1 text-text-muted">Key numbers across the Atlas.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/admin/venues"
-            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-          >
-            Pending Venues
-          </Link>
-          <Link
-            href="/admin/media"
-            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-          >
-            Media
-            {mediaPending > 0 && (
-              <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
-                {mediaPending}
-              </span>
-            )}
-          </Link>
-          <Link
-            href="/admin/optimize"
-            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-          >
-            Self-Healing
-            {suggestionsPending > 0 && (
-              <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
-                {suggestionsPending}
-              </span>
-            )}
-          </Link>
-          <Link
-            href="/admin/health"
-            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-          >
-            SEO Health
-          </Link>
-          <Link
-            href="/admin/audit"
-            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-          >
-            Change Log
-          </Link>
-          <Link
-            href="/admin/email"
-            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-          >
-            Email Log
-          </Link>
-          <Link
-            href="/admin/listings"
-            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-          >
-            Listings
-          </Link>
-          <Link
-            href="/admin/enrich"
-            className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-          >
-            AI Enrichment
-          </Link>
-          <Link
-            href="/admin/moderation"
-            className="rounded-md border-[1.5px] border-brand-gold px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-brand-gold transition-colors hover:bg-brand-gold hover:text-text-inverse"
-          >
-            Moderation Queue
-            {pendingTotal > 0 && (
-              <span className="ml-2 rounded-full bg-brand-orange px-2 py-0.5 text-xs text-white">
-                {pendingTotal}
-              </span>
-            )}
-          </Link>
-        </div>
+      <div className="mb-8">
+        <h1 className="font-heading text-3xl font-bold text-text-primary">
+          Admin Overview
+        </h1>
+        <p className="mt-1 text-text-muted">Key numbers across the Atlas.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-        <Stat label="Restaurants" value={restaurantsTotal} hint={`${restaurantsApproved} approved`} />
-        <Stat label="Submissions pending" value={newVenuePending} hint={`${subsApproved} approved · ${subsRejected} rejected`} />
-        <Stat label="Corrections pending" value={correctionsPending} hint="edits & closures" />
-        <Stat label="Reviews pending" value={reviewsPending} hint={`${reviewsApproved} approved`} />
-        <Stat label="Photos pending" value={photosPending} hint={`${photos} total`} />
+        <Stat label="Restaurants" value={restaurantsTotal} hint={`${restaurantsApproved} approved`} href="/admin/listings" />
+        <Stat label="Submissions pending" value={newVenuePending} hint={`${subsApproved} approved · ${subsRejected} rejected`} href="/admin/venues" />
+        <Stat label="Corrections pending" value={correctionsPending} hint="edits & closures" href="/admin/moderation" />
+        <Stat label="Reviews pending" value={reviewsPending} hint={`${reviewsApproved} approved`} href="/admin/moderation" />
+        <Stat label="Photos pending" value={photosPending} hint={`${photos} total`} href="/admin/media" />
         <Stat label="Videos" value="—" hint="uploads phase" />
         <Stat label="Users" value={users} />
         <Stat label="Check-ins" value={checkInsTotal} hint="'I've been here' visits" />

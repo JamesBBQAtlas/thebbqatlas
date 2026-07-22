@@ -105,6 +105,28 @@
     text-rendering: optimizeLegibility;
   }
 
+  /* Warm the shell (Design System v1.0): a faint burnt-sienna/ember undertone
+     over the near-black base — warms without washing out; sits behind all
+     content so contrast is untouched. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        ellipse 100% 55% at 50% -8%,
+        rgba(196, 98, 45, 0.07),
+        transparent 58%
+      ),
+      radial-gradient(
+        ellipse 85% 50% at 92% 108%,
+        rgba(212, 175, 55, 0.04),
+        transparent 55%
+      );
+  }
+
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-heading), Georgia, "Times New Roman", serif;
     letter-spacing: -0.01em;
