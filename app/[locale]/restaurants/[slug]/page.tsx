@@ -175,7 +175,7 @@ export default async function RestaurantPage({ params }: Props) {
       />
 
       {/* Hero */}
-      <section className="relative h-[52vh] min-h-[360px] w-full overflow-hidden pt-18">
+      <section className="relative h-[52vh] min-h-[360px] w-full overflow-hidden">
         {restaurant.hero_image_url ? (
           <Image
             src={restaurant.hero_image_url}

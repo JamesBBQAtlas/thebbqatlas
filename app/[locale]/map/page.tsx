@@ -32,7 +32,7 @@ export default async function MapPage({ params }: Props) {
   const groups = [...byCountry.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
   return (
-    <div className="mt-18 h-[calc(100vh-4.5rem)]">
+    <div className="h-[calc(100vh-4.5rem)]">
       <MapCanvas
         restaurants={restaurants}
         mapKey={process.env.NEXT_PUBLIC_MAPTILER_KEY}

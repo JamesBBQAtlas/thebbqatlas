@@ -32,7 +32,7 @@ export default async function MyAtlasMapPage() {
   }
 
   return (
-    <div className="mt-18 h-[calc(100vh-4.5rem)]">
+    <div className="h-[calc(100vh-4.5rem)]">
       <div className="flex items-center justify-between border-b border-border-subtle px-6 py-3">
         <div>
           <h1 className="font-heading text-lg font-bold text-text-primary">
