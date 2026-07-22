@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { MARKETING_CONSENT_TEXT } from "@/lib/email/consent";
 
@@ -23,9 +24,16 @@ export function AuthForm({
       : `/auth/callback?next=${encodeURIComponent(next)}`;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  // When set, we've emailed the user (confirm signup or magic link) and show a
+  // prominent success panel instead of the form.
+  const [emailSent, setEmailSent] = useState<{
+    kind: "confirm" | "magic";
+    email: string;
+  } | null>(null);
   const supabase = createClient();
 
   const title =
@@ -42,6 +50,11 @@ export function AuthForm({
     setLoading(true);
     setMessage("");
     if (mode === "signup") {
+      if (password !== confirmPassword) {
+        setMessage("Those passwords don't match — please re-enter them.");
+        setLoading(false);
+        return;
+      }
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -60,14 +73,15 @@ export function AuthForm({
         await fetch("/api/account/post-signup", { method: "POST" }).catch(() => {});
         window.location.href = next;
       } else {
-        setMessage("Check your email to confirm your account.");
+        setEmailSent({ kind: "confirm", email });
       }
     } else if (mode === "magic") {
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: { emailRedirectTo: callbackUrl },
       });
-      setMessage(error ? error.message : "Magic link sent — check your email.");
+      if (error) setMessage(error.message);
+      else setEmailSent({ kind: "magic", email });
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
@@ -94,6 +108,43 @@ export function AuthForm({
       options: { redirectTo: callbackUrl },
     });
   };
+
+  if (emailSent) {
+    return (
+      <div className="rounded-2xl border border-border-subtle bg-surface-0 p-8 text-center shadow-xl">
+        <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full bg-brand-gold/15">
+          <MailCheck className="h-7 w-7 text-brand-gold" />
+        </div>
+        <h1 className="font-heading text-2xl font-bold text-text-primary">
+          {emailSent.kind === "confirm" ? "Confirm your email" : "Check your inbox"}
+        </h1>
+        <p className="mt-2 text-sm text-text-secondary">
+          {emailSent.kind === "confirm"
+            ? "We've sent a confirmation link to"
+            : "We've sent a one-tap sign-in link to"}
+        </p>
+        <p className="mt-1 font-semibold text-text-primary">{emailSent.email}</p>
+        <p className="mt-4 text-xs text-text-muted">
+          Click the link in that email to
+          {emailSent.kind === "confirm"
+            ? " finish creating your account."
+            : " sign in."}{" "}
+          It can take a minute to arrive — check your spam folder if you don&apos;t
+          see it.
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            setEmailSent(null);
+            setMessage("");
+          }}
+          className="mt-6 text-sm font-semibold text-brand-gold hover:underline"
+        >
+          ← Back
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-border-subtle bg-surface-0 p-8 shadow-xl">
@@ -139,6 +190,36 @@ export function AuthForm({
           </div>
         )}
         {mode === "signup" && (
+          <div>
+            <label
+              htmlFor="confirm-password"
+              className="u-eyebrow mb-1.5 block text-[0.6875rem] text-text-muted"
+            >
+              Confirm password
+            </label>
+            <input
+              id="confirm-password"
+              name="confirm-password"
+              type="password"
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={6}
+              placeholder="••••••••"
+              className={inputCls}
+              aria-invalid={
+                confirmPassword.length > 0 && confirmPassword !== password
+              }
+            />
+            {confirmPassword.length > 0 && confirmPassword !== password && (
+              <p className="mt-1 text-xs text-destructive">
+                Passwords don&apos;t match yet.
+              </p>
+            )}
+          </div>
+        )}
+        {mode === "signup" && (
           <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border-subtle bg-surface-1 p-3">
             <input
               type="checkbox"
@@ -164,6 +245,14 @@ export function AuthForm({
                 ? "Send magic link"
                 : "Sign in"}
         </button>
+        {message && (
+          <p
+            role="alert"
+            className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-center text-sm text-destructive"
+          >
+            {message}
+          </p>
+        )}
       </form>
 
       <div className="relative my-5">
@@ -206,12 +295,6 @@ export function AuthForm({
           </button>
         )}
       </div>
-
-      {message && (
-        <p className="mt-4 rounded-md border border-border-subtle bg-surface-1 px-3 py-2 text-center text-sm text-text-secondary">
-          {message}
-        </p>
-      )}
     </div>
   );
 }
