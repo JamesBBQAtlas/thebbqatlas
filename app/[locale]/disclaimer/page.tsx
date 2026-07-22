@@ -5,8 +5,8 @@ export default function DisclaimerPage() {
     <div className="mx-auto max-w-3xl px-4 py-10 prose prose-invert">
       <h1>Disclaimer</h1>
       <p>
-        The BBQ Atlas is a discovery and community platform. Restaurant listings, ratings, and reviews are provided
-        for informational purposes only and represent the opinions of individual contributors.
+        The BBQ Atlas is a discovery and community platform. Restaurant listings and editorial content are provided
+        for informational purposes only and represent the opinions of individual contributors and our editors.
       </p>
       <p>
         We do not guarantee the accuracy, completeness, or safety of any establishment listed.

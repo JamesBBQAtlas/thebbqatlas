@@ -1,12 +1,21 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 /**
  * Public contact form. Stores the message (server-side, via the service-role
  * client so no public insert policy is needed). Basic validation + honeypot.
  */
 export async function POST(request: Request) {
+  // Rate limit: 5 messages per IP per hour (backstops Vercel Firewall).
+  if (!(await rateLimit(`contact:${clientIp(request)}`, 5, 3600))) {
+    return NextResponse.json(
+      { error: "Too many messages — please try again later." },
+      { status: 429 }
+    );
+  }
+
   const body = await request.json().catch(() => ({}));
 
   // Honeypot: bots fill hidden fields.

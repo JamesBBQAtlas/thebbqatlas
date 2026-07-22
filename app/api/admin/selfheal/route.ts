@@ -37,3 +37,31 @@ export async function POST(request: Request) {
   const result = await runSelfHealSweep(db, limit);
   return NextResponse.json(result);
 }
+
+/**
+ * Scheduled entrypoint. Vercel Cron issues a GET with
+ * `Authorization: Bearer $CRON_SECRET`, so we accept GET for the cron path only
+ * (no admin-session fallback here — the UI's "run now" uses POST).
+ */
+export async function GET(request: Request) {
+  const auth = request.headers.get("authorization");
+  const cronOk =
+    Boolean(process.env.CRON_SECRET) && auth === `Bearer ${process.env.CRON_SECRET}`;
+  if (!cronOk) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (!GROK_ENABLED) {
+    return NextResponse.json(
+      { error: "AI is off — set XAI_API_KEY to enable self-healing." },
+      { status: 503 }
+    );
+  }
+
+  const db = createAdminClient();
+  const limit = Math.min(
+    Math.max(parseInt(new URL(request.url).searchParams.get("limit") ?? "4", 10) || 4, 1),
+    12
+  );
+  const result = await runSelfHealSweep(db, limit);
+  return NextResponse.json(result);
+}

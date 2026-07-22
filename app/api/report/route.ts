@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendCorrectionAck } from "@/lib/email/senders";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 /**
  * Public "report a correction / closure" endpoint. Creates a pending
@@ -11,6 +12,14 @@ import { sendCorrectionAck } from "@/lib/email/senders";
  * message lives in `description`.
  */
 export async function POST(request: Request) {
+  // Rate limit: 10 reports per IP per hour.
+  if (!(await rateLimit(`report:${clientIp(request)}`, 10, 3600))) {
+    return NextResponse.json(
+      { error: "Too many reports — please try again later." },
+      { status: 429 }
+    );
+  }
+
   let payload: {
     restaurantId?: string;
     submissionType?: "correction" | "closure";

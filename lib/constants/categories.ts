@@ -80,9 +80,14 @@ export function eventStatus(
   endsAt?: string | null
 ): EventStatus | null {
   if (!startsAt && !endsAt) return null;
+  const DAY = 24 * 60 * 60 * 1000;
   const now = Date.now();
   const start = startsAt ? new Date(startsAt).getTime() : null;
-  const end = endsAt ? new Date(endsAt).getTime() : start;
+  const rawEnd = endsAt ? new Date(endsAt).getTime() : start;
+  // Event dates are typically date-only (parsed as midnight). Treat the end as
+  // end-of-day (+24h) so an event stays "ongoing" through its final day rather
+  // than flipping to "past" at 00:00 that morning (F-10 off-by-one).
+  const end = rawEnd !== null ? rawEnd + DAY : null;
   if (start && now < start) return "upcoming";
   if (end && now > end) return "past";
   return "ongoing";

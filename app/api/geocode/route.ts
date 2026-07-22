@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 const HEADERS = {
@@ -16,6 +17,14 @@ async function nominatim(path: string) {
 }
 
 export async function GET(request: Request) {
+  // Rate limit: 30 lookups per IP per minute (proxies external Nominatim).
+  if (!(await rateLimit(`geocode:${clientIp(request)}`, 30, 60))) {
+    return NextResponse.json(
+      { error: "Too many lookups — please slow down." },
+      { status: 429 }
+    );
+  }
+
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q");
   const lat = searchParams.get("lat");

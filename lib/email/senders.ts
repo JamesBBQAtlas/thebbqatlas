@@ -44,7 +44,7 @@ export function sendWelcome(opts: { to: string; name?: string; userId?: string }
     }),
     featureRow({
       img: `${u}/email/feature-save.png`,
-      alt: "Save your favourite spots",
+      alt: "Save your favorite spots",
       title: "Build your own atlas",
       body: "Bookmark any spot to keep the places you love — and the ones you're dying to try — together in one place, ready for the next trip.",
       href: `${u}/directory`,

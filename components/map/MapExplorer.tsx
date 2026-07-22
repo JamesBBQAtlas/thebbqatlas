@@ -334,6 +334,22 @@ export function MapExplorer({
         if (!f) return;
         const p = f.properties as Record<string, string>;
         popupRef.current?.remove();
+        // Build the popup with textContent (never HTML interpolation) so a venue
+        // name/location can't inject markup/script into the map popup (F-12).
+        const pop = document.createElement("div");
+        pop.className = "apop";
+        const rows: [string, string][] = [
+          ["apop-name", p.name ?? ""],
+          ["apop-loc", p.location ?? ""],
+          ["apop-style", p.styleLabel ?? ""],
+          ["apop-hint", "Click for details"],
+        ];
+        for (const [cls, text] of rows) {
+          const row = document.createElement("div");
+          row.className = cls;
+          row.textContent = text;
+          pop.appendChild(row);
+        }
         popupRef.current = new maplibregl.Popup({
           closeButton: false,
           closeOnClick: false,
@@ -341,9 +357,7 @@ export function MapExplorer({
           className: "atlas-popup",
         })
           .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
-          .setHTML(
-            `<div class="apop"><div class="apop-name">${p.name}</div><div class="apop-loc">${p.location}</div><div class="apop-style">${p.styleLabel}</div><div class="apop-hint">Click for details</div></div>`
-          )
+          .setDOMContent(pop)
           .addTo(map);
       });
       map.on("mouseleave", "points", () => {

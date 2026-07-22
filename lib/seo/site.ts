@@ -5,7 +5,7 @@ import { BRAND } from "@/lib/constants/styles";
  * environment; the fallback only matters for local dev. No trailing slash.
  */
 export const SITE_URL = (
-  process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.thebbqatlas.com"
+  process.env.NEXT_PUBLIC_SITE_URL ?? "https://thebbqatlas.com"
 ).replace(/\/+$/, "");
 
 export const SITE = {

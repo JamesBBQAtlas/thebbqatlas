@@ -20,7 +20,7 @@ export const PREMIUM = {
     "Ad-free browsing across the whole Atlas",
     "Your saved spots as a personal map",
     "Early access to new guides and features",
-    "The Pitmaster's Secret — your nearest non-BBQ favourites, wherever you are",
+    "The Pitmaster's Secret — your nearest non-BBQ favorites, wherever you are",
   ],
 } as const;
 

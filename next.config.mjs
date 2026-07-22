@@ -13,6 +13,18 @@ const nextConfig = {
     ],
     formats: ["image/avif", "image/webp"],
   },
+  // Canonical host is the apex (F-20): 301 www → apex so it's code-owned, not
+  // only a DNS/hosting concern.
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "www.thebbqatlas.com" }],
+        destination: "https://thebbqatlas.com/:path*",
+        permanent: true,
+      },
+    ];
+  },
 };
 
 export default withNextIntl(nextConfig);
