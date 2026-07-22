@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import { EditorialImage } from "@/components/ui/EditorialImage";
 import { notFound } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import ReactMarkdown from "react-markdown";
@@ -66,7 +66,7 @@ export default async function GuidePage({ params }: Props) {
         slug={guide.slug}
       />
       <div className="relative aspect-[21/9] rounded-xl overflow-hidden mb-8">
-        <Image src={guide.hero_image_url} alt={guide.title} fill className="object-cover" priority />
+        <EditorialImage src={guide.hero_image_url} alt={guide.title} priority />
       </div>
       <div className="flex items-start justify-between gap-4">
         <h1 className="text-3xl md:text-4xl font-bold">{guide.title}</h1>

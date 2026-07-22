@@ -1,5 +1,5 @@
-import Image from "next/image";
 import Link from "next/link";
+import { EditorialImage } from "@/components/ui/EditorialImage";
 import { getGuides } from "@/lib/queries/guides";
 import { AdSlot } from "@/components/monetization/AdSlot";
 
@@ -17,7 +17,7 @@ export default async function GuidesPage() {
           <Link key={guide.id} href={`/guides/${guide.slug}`}>
             <article className="rounded-xl border border-white/10 bg-black/60 overflow-hidden hover:border-brand-gold/40 transition-colors h-full">
               <div className="relative aspect-[16/9]">
-                <Image src={guide.hero_image_url} alt={guide.title} fill className="object-cover" />
+                <EditorialImage src={guide.hero_image_url} alt={guide.title} />
               </div>
               <div className="p-6">
                 <h2 className="text-xl font-bold">{guide.title}</h2>

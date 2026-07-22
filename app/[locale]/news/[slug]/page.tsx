@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import { EditorialImage } from "@/components/ui/EditorialImage";
 import { notFound } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import ReactMarkdown from "react-markdown";
@@ -117,12 +117,10 @@ export default async function NewsPostPage({ params }: Props) {
       <p className="mt-3 text-lg text-text-secondary">{post.excerpt}</p>
 
       <div className="relative mt-8 aspect-[21/9] overflow-hidden rounded-xl">
-        <Image
+        <EditorialImage
           src={post.hero_image_url}
           alt={post.title}
-          fill
           sizes="(max-width: 768px) 100vw, 768px"
-          className="object-cover"
           priority
         />
       </div>

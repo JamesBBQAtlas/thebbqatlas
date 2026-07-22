@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
+import { EditorialImage } from "@/components/ui/EditorialImage";
 import { setRequestLocale } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { getNews } from "@/lib/queries/news";
@@ -65,12 +65,10 @@ export default async function NewsPage({ params }: Props) {
               className="group grid grid-cols-1 gap-8 overflow-hidden rounded-2xl border border-border-subtle bg-surface-0 transition-colors hover:border-brand-gold/50 md:grid-cols-2"
             >
               <div className="relative aspect-[16/10] md:aspect-auto">
-                <Image
+                <EditorialImage
                   src={lead.hero_image_url}
                   alt={lead.title}
-                  fill
                   sizes="(max-width: 768px) 100vw, 50vw"
-                  className="object-cover"
                   priority
                 />
               </div>
@@ -104,12 +102,10 @@ export default async function NewsPage({ params }: Props) {
                   className="group flex h-full flex-col overflow-hidden rounded-xl border border-border-subtle bg-surface-0 transition-colors hover:border-brand-gold/50"
                 >
                   <div className="relative aspect-[16/9]">
-                    <Image
+                    <EditorialImage
                       src={post.hero_image_url}
                       alt={post.title}
-                      fill
                       sizes="(max-width: 640px) 100vw, 33vw"
-                      className="object-cover"
                     />
                   </div>
                   <div className="flex flex-1 flex-col p-6">
