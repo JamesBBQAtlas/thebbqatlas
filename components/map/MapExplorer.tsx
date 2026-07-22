@@ -132,7 +132,6 @@ export function MapExplorer({
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const geoMarkerRef = useRef<maplibregl.Marker | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
-  const autoLocatedRef = useRef(false);
   const router = useRouter();
 
   // Restore the last view once (client-only; the map is imported ssr:false).
@@ -427,15 +426,9 @@ export function MapExplorer({
     );
   }
 
-  // On first load (when there's no remembered position), try to locate the
-  // visitor automatically so the map opens where they are.
-  useEffect(() => {
-    if (ready && !autoLocatedRef.current && !initialState.center) {
-      autoLocatedRef.current = true;
-      locateMe(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  // F-30: we do NOT auto-fire the geolocation prompt on load — that pops a
+  // permission dialog with no user gesture. The visitor taps "Locate me" (which
+  // calls locateMe()) when they want the map centered on them.
 
   function flyTo(r: Restaurant) {
     mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 12, speed: 1.4 });
