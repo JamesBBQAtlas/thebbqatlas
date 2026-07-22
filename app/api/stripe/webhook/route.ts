@@ -50,17 +50,38 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "not configured" }, { status: 503 });
   }
 
+  // Fail CLOSED: once Stripe is switched on (STRIPE_SECRET_KEY set → `stripe`
+  // truthy), every event MUST carry a valid signature verified against the
+  // webhook secret. We never trust (JSON.parse) an unverified body as an event —
+  // doing so would let anyone forge a `checkout.session.completed` and grant a
+  // paid subscription for free.
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) {
+    console.error(
+      "[stripe/webhook] STRIPE_WEBHOOK_SECRET is not configured while Stripe is enabled — refusing to process unverified events."
+    );
+    return NextResponse.json(
+      { error: "Webhook secret not configured" },
+      { status: 503 }
+    );
+  }
+
   const sig = request.headers.get("stripe-signature");
+  if (!sig) {
+    console.error("[stripe/webhook] Missing stripe-signature header — rejecting.");
+    return NextResponse.json({ error: "Missing signature" }, { status: 400 });
+  }
+
   const body = await request.text();
 
   let event: Stripe.Event;
   try {
-    event =
-      secret && sig
-        ? stripe.webhooks.constructEvent(body, sig, secret)
-        : (JSON.parse(body) as Stripe.Event);
-  } catch {
+    event = stripe.webhooks.constructEvent(body, sig, secret);
+  } catch (err) {
+    console.error(
+      "[stripe/webhook] Signature verification failed:",
+      (err as Error).message
+    );
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
