@@ -16,15 +16,20 @@ export function ContactForm() {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const res = await fetch("/api/contact", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
-    });
-    const data = await res.json().catch(() => ({}));
-    setBusy(false);
-    if (res.ok) setDone(true);
-    else setError(data.error || "Something went wrong.");
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setDone(true);
+      else setError(data.error || "Something went wrong.");
+    } catch {
+      setError("Network error — please try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (done) {
@@ -39,36 +44,62 @@ export function ContactForm() {
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <label htmlFor="contact-name" className="sr-only">
+            Your name
+          </label>
+          <input
+            id="contact-name"
+            required
+            autoComplete="name"
+            value={form.name}
+            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+            placeholder="Your name"
+            className={inputClass}
+          />
+        </div>
+        <div>
+          <label htmlFor="contact-email" className="sr-only">
+            Your email
+          </label>
+          <input
+            id="contact-email"
+            required
+            type="email"
+            autoComplete="email"
+            value={form.email}
+            onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+            placeholder="Your email"
+            className={inputClass}
+          />
+        </div>
+      </div>
+      <div>
+        <label htmlFor="contact-subject" className="sr-only">
+          Subject (optional)
+        </label>
         <input
-          required
-          value={form.name}
-          onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          placeholder="Your name"
-          className={inputClass}
-        />
-        <input
-          required
-          type="email"
-          value={form.email}
-          onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-          placeholder="Your email"
+          id="contact-subject"
+          value={form.subject}
+          onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
+          placeholder="Subject (optional)"
           className={inputClass}
         />
       </div>
-      <input
-        value={form.subject}
-        onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
-        placeholder="Subject (optional)"
-        className={inputClass}
-      />
-      <textarea
-        required
-        rows={6}
-        value={form.message}
-        onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
-        placeholder="How can we help? Suggest a venue, report a fix, or just say hello."
-        className={inputClass + " resize-none"}
-      />
+      <div>
+        <label htmlFor="contact-message" className="sr-only">
+          Message
+        </label>
+        <textarea
+          id="contact-message"
+          required
+          rows={6}
+          value={form.message}
+          onChange={(e) => setForm((f) => ({ ...f, message: e.target.value }))}
+          placeholder="How can we help? Suggest a venue, report a fix, or just say hello."
+          className={inputClass + " resize-none"}
+        />
+      </div>
       {/* Honeypot */}
       <input
         type="text"
