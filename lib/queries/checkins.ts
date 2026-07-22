@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+import { createAnonClient } from "@/lib/supabase/anon";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { CheckIn, CheckInVisibility } from "@/lib/types/database";
 
@@ -12,7 +12,9 @@ import type { CheckIn, CheckInVisibility } from "@/lib/types/database";
  */
 async function reader(base?: SupabaseClient): Promise<SupabaseClient> {
   if (process.env.SUPABASE_SERVICE_ROLE_KEY) return createAdminClient();
-  return base ?? (await createClient());
+  // Cookie-less anon fallback keeps public metric reads ISR-safe (F-06). It only
+  // sees public rows, so counts under-report rather than inventing numbers.
+  return base ?? createAnonClient();
 }
 
 export interface VenueMetrics {

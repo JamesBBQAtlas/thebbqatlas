@@ -1,11 +1,11 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAnonClient } from "@/lib/supabase/anon";
 import type { NewsPost } from "@/lib/types/database";
 import { FALLBACK_NEWS } from "@/lib/data/fallback-news";
 
 /** All published News & Missives, newest first. Falls back to seed content. */
 export async function getNews(): Promise<NewsPost[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("news")
       .select("*")
@@ -21,7 +21,7 @@ export async function getNews(): Promise<NewsPost[]> {
 /** A single published post by slug. Falls back to seed content. */
 export async function getNewsBySlug(slug: string): Promise<NewsPost | null> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("news")
       .select("*")

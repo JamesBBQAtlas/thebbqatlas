@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAnonClient } from "@/lib/supabase/anon";
 
 export interface MediaItem {
   id: string;
@@ -11,7 +11,7 @@ export interface MediaItem {
 /** Approved community media for a venue, newest first. */
 export async function getApprovedMedia(restaurantId: string): Promise<MediaItem[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("media")
       .select("id, kind, url, caption, created_at")

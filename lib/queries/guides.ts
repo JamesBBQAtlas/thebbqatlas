@@ -1,10 +1,10 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAnonClient } from "@/lib/supabase/anon";
 import type { Guide } from "@/lib/types/database";
 import { FALLBACK_GUIDES } from "@/lib/data/fallback-guides";
 
 export async function getGuides(): Promise<Guide[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("guides")
       .select("*")
@@ -19,7 +19,7 @@ export async function getGuides(): Promise<Guide[]> {
 
 export async function getGuideBySlug(slug: string): Promise<Guide | null> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("guides")
       .select("*")

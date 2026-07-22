@@ -1,19 +1,24 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAnonClient } from "@/lib/supabase/anon";
 import type { Restaurant, SignatureDish, GearItem, Review } from "@/lib/types/database";
 import { FALLBACK_RESTAURANTS } from "@/lib/data/fallback-restaurants";
 
 async function getSupabaseRestaurants(): Promise<Restaurant[] | null> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data, error } = await supabase
       .from("restaurants")
       .select("*")
       .eq("status", "approved")
       .order("avg_rating", { ascending: false });
 
-    if (error || !data?.length) return null;
+    if (error) {
+      console.error("[queries.restaurants] DB read failed — serving seed fallback:", error.message);
+      return null;
+    }
+    if (!data?.length) return null;
     return data as Restaurant[];
-  } catch {
+  } catch (e) {
+    console.error("[queries.restaurants] unexpected read error — serving seed fallback:", e);
     return null;
   }
 }
@@ -30,7 +35,7 @@ export async function getFeaturedRestaurants(limit = 3): Promise<Restaurant[]> {
 
 export async function getRestaurantBySlug(slug: string): Promise<Restaurant | null> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("restaurants")
       .select("*")
@@ -44,7 +49,7 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
 
   // Prefix match: "franklin-barbecue" → "franklin-barbecue-austin"
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("restaurants")
       .select("*")
@@ -67,7 +72,7 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
 
 export async function getSignatureDishes(restaurantId: string): Promise<SignatureDish[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("signature_dishes")
       .select("*")
@@ -82,7 +87,7 @@ export async function getSignatureDishes(restaurantId: string): Promise<Signatur
 
 export async function getGearItems(restaurantId: string): Promise<GearItem[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("gear_items")
       .select("*")
@@ -97,7 +102,7 @@ export async function getGearItems(restaurantId: string): Promise<GearItem[]> {
 
 export async function getReviews(restaurantId: string): Promise<Review[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("reviews")
       .select("*, profiles(display_name, avatar_url)")

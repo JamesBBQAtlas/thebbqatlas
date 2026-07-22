@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAnonClient } from "@/lib/supabase/anon";
 import type { Brand, Restaurant } from "@/lib/types/database";
 
 /** A published brand plus its approved locations, for the brand page. */
@@ -6,7 +6,7 @@ export async function getBrandBySlug(
   slug: string
 ): Promise<{ brand: Brand; locations: Restaurant[] } | null> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data: brand } = await supabase
       .from("brands")
       .select("*")
@@ -33,7 +33,7 @@ export async function getSiblingLocations(
   excludeId: string
 ): Promise<Restaurant[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase
       .from("restaurants")
       .select("*")
@@ -50,7 +50,7 @@ export async function getSiblingLocations(
 /** All brands, for sitemap/listing. */
 export async function getBrands(): Promise<Brand[]> {
   try {
-    const supabase = await createClient();
+    const supabase = createAnonClient();
     const { data } = await supabase.from("brands").select("*");
     return (data ?? []) as Brand[];
   } catch {
