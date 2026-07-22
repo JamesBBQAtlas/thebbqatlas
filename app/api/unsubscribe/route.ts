@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { SITE_URL } from "@/lib/seo/site";
+import { MARKETING_CONSENT_TEXT } from "@/lib/email/consent";
 
 /**
  * One-click unsubscribe from marketing. Works without login via a per-profile
@@ -12,7 +13,11 @@ async function setOptIn(token: string | null, optIn: boolean): Promise<boolean> 
   try {
     const admin = createAdminClient();
     const patch: Record<string, unknown> = { marketing_opt_in: optIn };
-    if (optIn) patch.marketing_opt_in_at = new Date().toISOString();
+    if (optIn) {
+      // Resubscribe records fresh, versioned consent (time + exact wording).
+      patch.marketing_opt_in_at = new Date().toISOString();
+      patch.marketing_opt_in_text = MARKETING_CONSENT_TEXT;
+    }
     const { data } = await admin
       .from("profiles")
       .update(patch)

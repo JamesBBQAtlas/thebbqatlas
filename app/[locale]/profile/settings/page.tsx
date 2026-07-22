@@ -6,6 +6,7 @@ import { AvatarUpload } from "@/components/account/AvatarUpload";
 import { DisplayNameForm } from "@/components/account/DisplayNameForm";
 import { UsernameForm } from "@/components/account/UsernameForm";
 import { SecuritySettings } from "@/components/account/SecuritySettings";
+import { MarketingPrefToggle } from "@/components/email/MarketingPrefToggle";
 import { resolveAvatarUrl } from "@/lib/account/avatar-resolve";
 import type { AccountType } from "@/lib/types/database";
 
@@ -59,6 +60,19 @@ export default async function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* Email preferences */}
+        {profile?.unsubscribe_token && (
+          <div>
+            <h2 className="mb-3 font-heading font-bold text-text-primary">
+              Email preferences
+            </h2>
+            <MarketingPrefToggle
+              token={profile.unsubscribe_token}
+              initialOptIn={Boolean(profile.marketing_opt_in)}
+            />
+          </div>
+        )}
 
         {/* Security */}
         <SecuritySettings />
