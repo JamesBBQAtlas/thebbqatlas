@@ -357,6 +357,18 @@
   }
 }
 
+/* Full-height map viewport. Uses the DYNAMIC viewport unit where supported so
+   the map matches what's actually visible on mobile (100vh over-reports on iOS,
+   pushing the bottom of the map — and its floating card — behind the toolbar). */
+.h-mapview {
+  height: calc(100vh - 4.5rem);
+}
+@supports (height: 100dvh) {
+  .h-mapview {
+    height: calc(100dvh - 4.5rem);
+  }
+}
+
 /* In-map preview card entrance */
 @keyframes atlas-card-in {
   from {

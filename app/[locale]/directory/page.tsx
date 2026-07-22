@@ -1,5 +1,5 @@
 import { Link } from "@/i18n/navigation";
-import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
+import { DirectoryGrid } from "@/components/restaurants/DirectoryGrid";
 import { getRestaurants } from "@/lib/queries/restaurants";
 import { DirectoryFilters } from "@/components/restaurants/DirectoryFilters";
 import { groupByCountry } from "@/lib/seo/hubs";
@@ -113,11 +113,7 @@ export default async function DirectoryPage({ searchParams }: DirectoryPageProps
       </div>
 
       <DirectoryFilters />
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mt-8">
-        {restaurants.map((r) => (
-          <RestaurantCard key={r.id} restaurant={r} />
-        ))}
-      </div>
+      <DirectoryGrid restaurants={restaurants} />
     </div>
   );
 }

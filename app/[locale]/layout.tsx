@@ -16,6 +16,7 @@ import { notFound } from "next/navigation";
 import { routing } from "@/i18n/routing";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
+import { FooterGate } from "@/components/layout/FooterGate";
 import { MobileTabBar } from "@/components/layout/MobileTabBar";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { Analytics } from "@/components/analytics/Analytics";
@@ -94,7 +95,9 @@ export default async function LocaleLayout({
         <NextIntlClientProvider messages={messages}>
           <Header />
           <main className="flex-1">{children}</main>
-          <Footer />
+          <FooterGate>
+            <Footer />
+          </FooterGate>
           <MobileTabBar />
           <CookieConsent />
         </NextIntlClientProvider>
