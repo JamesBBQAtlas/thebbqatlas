@@ -1,5 +1,6 @@
 import { ShieldCheck } from "lucide-react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { redirect } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -51,6 +52,35 @@ export default async function AdminLayout({
   // Non-admins: let the page render its own Access Denied / redirect, without
   // exposing the admin chrome + nav.
   if (!isAdmin) return <>{children}</>;
+
+  // Admin requires a stepped-up (aal2) session. If the admin has a verified
+  // factor but is still at aal1, challenge for the TOTP code first; if they have
+  // no factor at all, they must enrol 2FA before using the back office.
+  const { data: aal } =
+    await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal?.currentLevel !== "aal2") {
+    if (aal?.nextLevel === "aal2") {
+      redirect("/login/mfa?next=/admin");
+    }
+    return (
+      <div className="mx-auto max-w-2xl px-6 py-24 text-center">
+        <ShieldCheck className="mx-auto mb-3 h-8 w-8 text-brand-gold" />
+        <h1 className="font-heading text-2xl font-bold text-text-primary">
+          Two-factor required
+        </h1>
+        <p className="mx-auto mt-2 max-w-md text-text-muted">
+          Admin access requires two-factor authentication. Set it up in your
+          account security settings, then come back.
+        </p>
+        <Link
+          href="/profile/settings"
+          className="mt-6 inline-flex rounded-lg bg-brand-gold px-5 py-2.5 font-semibold text-brand-black transition-opacity hover:opacity-90"
+        >
+          Go to security settings
+        </Link>
+      </div>
+    );
+  }
 
   const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createAdminClient()

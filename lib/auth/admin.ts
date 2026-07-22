@@ -28,6 +28,12 @@ export async function requireAdmin(): Promise<AdminContext | null> {
     .single();
   if (profile?.role !== "admin") return null;
 
+  // Admin actions require a stepped-up (aal2) session — a first-factor-only
+  // (aal1) session, even for an admin, is rejected. The UI challenges for TOTP
+  // at login; this protects the /api/admin/* routes directly too.
+  const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+  if (aal?.currentLevel !== "aal2") return null;
+
   const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createAdminClient()
     : supabase;

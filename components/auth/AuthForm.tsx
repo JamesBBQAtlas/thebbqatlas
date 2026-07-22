@@ -70,8 +70,20 @@ export function AuthForm({
       setMessage(error ? error.message : "Magic link sent — check your email.");
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setMessage(error.message);
-      else window.location.href = next;
+      if (error) {
+        setMessage(error.message);
+      } else {
+        // Step up to 2FA if this account has a verified factor. Fail closed:
+        // only skip the challenge when we can confirm it isn't needed.
+        const { data: aal } =
+          await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+        const noStepUpNeeded =
+          aal?.currentLevel === "aal2" ||
+          (aal?.currentLevel === "aal1" && aal?.nextLevel === "aal1");
+        window.location.href = noStepUpNeeded
+          ? next
+          : `/login/mfa?next=${encodeURIComponent(next)}`;
+      }
     }
     setLoading(false);
   };

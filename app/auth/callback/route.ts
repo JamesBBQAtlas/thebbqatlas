@@ -18,6 +18,22 @@ export async function GET(request: Request) {
         data: { user },
       } = await supabase.auth.getUser();
       if (user) await syncSignup(supabase, user);
+
+      // Enforce 2FA step-up: the OAuth / magic-link session lands at aal1, so if
+      // the account has a verified factor we send them to the TOTP challenge
+      // before granting access. Fail CLOSED — only skip the challenge when we can
+      // confirm no step-up is needed (already aal2, or no factor at all). On any
+      // ambiguity we route through /login/mfa, which forwards those users on.
+      const { data: aal } =
+        await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+      const noStepUpNeeded =
+        aal?.currentLevel === "aal2" ||
+        (aal?.currentLevel === "aal1" && aal?.nextLevel === "aal1");
+      if (!noStepUpNeeded) {
+        return NextResponse.redirect(
+          `${origin}/login/mfa?next=${encodeURIComponent(next)}`
+        );
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
   }
