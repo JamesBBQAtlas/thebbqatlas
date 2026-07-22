@@ -80,7 +80,7 @@ export function Header() {
           </Link>
           <button
             type="button"
-            className="p-2 text-text-primary lg:hidden"
+            className="grid h-11 w-11 place-items-center text-text-primary lg:hidden"
             onClick={() => setOpen(!open)}
             aria-label={open ? t("close") : t("menu")}
             aria-expanded={open}

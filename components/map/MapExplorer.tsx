@@ -417,7 +417,7 @@ export function MapExplorer({
           userMarkerRef.current = new maplibregl.Marker({ element: el })
             .setLngLat([lng, lat])
             .addTo(map);
-          if (fly) map.flyTo({ center: [lng, lat], zoom: 9, speed: 1.4 });
+          if (fly) map.flyTo(animate({ center: [lng, lat], zoom: 9, speed: 1.4 }));
         }
         setLocBusy(false);
       },
@@ -430,8 +430,19 @@ export function MapExplorer({
   // permission dialog with no user gesture. The visitor taps "Locate me" (which
   // calls locateMe()) when they want the map centered on them.
 
+  // Respect prefers-reduced-motion: jump instantly instead of animating (F-22).
+  function animate<T extends Record<string, unknown>>(opts: T): T {
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return { ...opts, duration: 0 };
+    }
+    return opts;
+  }
+
   function flyTo(r: Restaurant) {
-    mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 12, speed: 1.4 });
+    mapRef.current?.flyTo(animate({ center: [r.lng, r.lat], zoom: 12, speed: 1.4 }));
   }
 
   function openPreview(r: Restaurant) {
@@ -480,13 +491,13 @@ export function MapExplorer({
             [w, s],
             [e, n],
           ],
-          { padding: 70, maxZoom: 13, duration: 900 }
+          animate({ padding: 70, maxZoom: 13, duration: 900 })
         );
         inArea = restaurants.filter(
           (r) => r.lat >= s && r.lat <= n && r.lng >= w && r.lng <= e
         ).length;
       } else {
-        map.flyTo({ center: [lon, lat], zoom: 11, speed: 1.4 });
+        map.flyTo(animate({ center: [lon, lat], zoom: 11, speed: 1.4 }));
         inArea = restaurants.filter(
           (r) => Math.abs(r.lat - lat) < 0.6 && Math.abs(r.lng - lon) < 0.6
         ).length;
