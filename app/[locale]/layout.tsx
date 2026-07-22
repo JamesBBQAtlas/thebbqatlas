@@ -99,6 +99,8 @@ export default async function LocaleLayout({
   return (
     <html lang={locale} suppressHydrationWarning>
       <body className="flex min-h-screen flex-col bg-background font-body text-text-primary antialiased">
+        {/* Warm up the map tile host so the flagship map paints sooner (F-23). */}
+        <link rel="preconnect" href="https://api.maptiler.com" crossOrigin="" />
         <JsonLd data={[organizationJsonLd(), websiteJsonLd()]} />
         <Analytics />
         <NextIntlClientProvider messages={messages}>

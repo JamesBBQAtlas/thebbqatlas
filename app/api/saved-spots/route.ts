@@ -11,7 +11,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { restaurantId, action } = await request.json();
+  const body = await request.json().catch(() => null);
+  if (!body) {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const { restaurantId, action } = body;
 
   if (!restaurantId || !["save", "unsave"].includes(action)) {
     return NextResponse.json({ error: "Invalid request" }, { status: 400 });

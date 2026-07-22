@@ -61,7 +61,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = await request.json();
+  const body = await request.json().catch(() => null);
+  if (!body) {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
   // Back-compat: older client sent { submissionId, action }.
   const type: ModType = body.type ?? (body.submissionId ? "submission" : "submission");
   const id: string = body.id ?? body.submissionId;

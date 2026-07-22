@@ -46,7 +46,8 @@ export async function sendEmail(p: SendParams): Promise<{
   error?: string;
 }> {
   if (!EMAIL_ENABLED) {
-    console.log(`[email:skipped] ${p.type} → ${p.to} (RESEND_API_KEY not set)`);
+    // Log the email TYPE only — never the recipient address (PII) to stdout.
+    console.log(`[email:skipped] ${p.type} (RESEND_API_KEY not set)`);
     await logEmail({
       to_email: p.to,
       type: p.type,
