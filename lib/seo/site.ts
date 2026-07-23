@@ -14,9 +14,13 @@ export const SITE = {
   description:
     "A curated global atlas of the world's great barbecue — smokehouses, asados, Korean grills, churrasco and more. Explore the map, read the guides, celebrate the craft.",
   logo: `${SITE_URL}/logos/crest-emblem.png`,
-  // Kept empty until official profiles are confirmed — never assert unverified
-  // social links in structured data.
-  sameAs: [] as string[],
+  // Official social profiles — kept in sync with the footer's social links so
+  // the Organization sameAs and the visible footer agree (F-34). Update both
+  // together if a handle changes.
+  sameAs: [
+    "https://instagram.com/thebbqatlas",
+    "https://threads.net/@thebbqatlas",
+  ] as string[],
 } as const;
 
 /** Turn a site-relative path into an absolute canonical URL. */

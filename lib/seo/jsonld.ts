@@ -114,6 +114,8 @@ export function eventJsonLd(r: Restaurant) {
   return {
     "@context": "https://schema.org",
     "@type": r.category === "festival" ? "Festival" : "Event",
+    // Stable @id so the same event de-dupes across /events and the venue page.
+    "@id": `${url}#event`,
     name: r.name,
     description: r.description || undefined,
     image: safeVenueImage(r.hero_image_url) || SITE.logo,

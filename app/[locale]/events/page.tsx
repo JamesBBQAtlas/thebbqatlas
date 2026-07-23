@@ -53,7 +53,9 @@ export default async function EventsPage({
             { name: "Atlas", path: "/" },
             { name: "Events", path: "/events" },
           ]),
-          ...events.map((r) => eventJsonLd(r)),
+          // Only events with a real start date get Event schema — startDate is
+          // required, and the @id in eventJsonLd de-dupes against the venue page.
+          ...events.filter((r) => Boolean(r.event_starts_at)).map((r) => eventJsonLd(r)),
         ]}
       />
 

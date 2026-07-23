@@ -169,7 +169,7 @@ export default async function RestaurantPage({ params }: Props) {
     <>
       <JsonLd
         data={[
-          isTimeBased(restaurant.category)
+          isTimeBased(restaurant.category) && restaurant.event_starts_at
             ? eventJsonLd(restaurant)
             : restaurantJsonLd(restaurant),
           breadcrumbJsonLd([
