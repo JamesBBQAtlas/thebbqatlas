@@ -1,10 +1,11 @@
 import { redirect } from "next/navigation";
 import { Link } from "@/i18n/navigation";
-import { ArrowLeft, Mail } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { AvatarUpload } from "@/components/account/AvatarUpload";
 import { DisplayNameForm } from "@/components/account/DisplayNameForm";
 import { UsernameForm } from "@/components/account/UsernameForm";
+import { AccountManagement } from "@/components/account/AccountManagement";
 import { SecuritySettings } from "@/components/account/SecuritySettings";
 import { MarketingPrefToggle } from "@/components/email/MarketingPrefToggle";
 import { resolveAvatarUrl } from "@/lib/account/avatar-resolve";
@@ -61,6 +62,12 @@ export default async function SettingsPage() {
           </div>
         </div>
 
+        {/* Account: sign-in methods, change email, change/set password */}
+        <AccountManagement currentEmail={user.email ?? ""} />
+
+        {/* Security (2FA) */}
+        <SecuritySettings />
+
         {/* Email preferences */}
         {profile?.unsubscribe_token && (
           <div>
@@ -73,23 +80,6 @@ export default async function SettingsPage() {
             />
           </div>
         )}
-
-        {/* Security */}
-        <SecuritySettings />
-
-        {/* Sign-in methods */}
-        <div className="rounded-xl border border-border-subtle bg-surface-0 p-6">
-          <h2 className="mb-2 font-heading font-bold text-text-primary">
-            Sign-in
-          </h2>
-          <p className="flex items-center gap-2 text-sm text-text-secondary">
-            <Mail className="h-4 w-4 text-text-muted" />
-            {user.email}
-          </p>
-          <p className="mt-2 text-xs text-text-muted">
-            You can also sign in with Google. Apple and Facebook are coming soon.
-          </p>
-        </div>
       </div>
     </div>
   );

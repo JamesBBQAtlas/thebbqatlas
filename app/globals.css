@@ -60,11 +60,18 @@
   }
 
   /* App-like touch behaviour: no grey tap flash, no accidental horizontal
-     scroll, no rubber-band chaining. Kept in @layer base so utilities win. */
-  html,
+     scroll, no rubber-band chaining. Kept in @layer base so utilities win.
+     IMPORTANT: overflow-x lives on <body> ONLY — never on <html>. Setting
+     overflow-x on the root turns <html> into a second scroll container that
+     competes with the document, which breaks mouse-wheel + keyboard scrolling
+     (the scrollbar still drags, but wheel/arrow keys do nothing). With <html>
+     left as the natural scroller, body's overflow-x propagates to the viewport,
+     clipping horizontal overflow without any nested scroller. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
   body {
     overflow-x: hidden;
-    -webkit-tap-highlight-color: transparent;
     overscroll-behavior-y: contain;
   }
 
