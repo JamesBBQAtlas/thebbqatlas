@@ -5,7 +5,7 @@ import { MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { MARKETING_CONSENT_TEXT, MARKETING_CONSENT_RECORD } from "@/lib/email/consent";
 
-type AuthMode = "login" | "signup" | "magic";
+type AuthMode = "login" | "signup" | "magic" | "reset";
 
 const inputCls =
   "w-full rounded-md border border-border-default bg-surface-1 px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-brand-gold/20";
@@ -32,19 +32,27 @@ export function AuthForm({
   // When set, we've emailed the user (confirm signup or magic link) and show a
   // prominent success panel instead of the form.
   const [emailSent, setEmailSent] = useState<{
-    kind: "confirm" | "magic";
+    kind: "confirm" | "magic" | "reset";
     email: string;
   } | null>(null);
   const supabase = createClient();
 
   const title =
-    mode === "signup" ? "Create your account" : mode === "magic" ? "Magic link" : "Welcome back";
+    mode === "signup"
+      ? "Create your account"
+      : mode === "magic"
+        ? "Magic link"
+        : mode === "reset"
+          ? "Reset your password"
+          : "Welcome back";
   const subtitle =
     mode === "signup"
       ? "Save spots, submit venues, and make the Atlas yours."
       : mode === "magic"
         ? "We'll email you a one-tap sign-in link."
-        : "Sign in to your BBQ Atlas.";
+        : mode === "reset"
+          ? "We'll email you a link to set a new password."
+          : "Sign in to your BBQ Atlas.";
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +96,16 @@ export function AuthForm({
       });
       if (error) setMessage(error.message);
       else setEmailSent({ kind: "magic", email });
+    } else if (mode === "reset") {
+      const resetRedirect =
+        typeof window !== "undefined"
+          ? `${window.location.origin}/auth/callback?next=/reset-password`
+          : `/auth/callback?next=/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: resetRedirect,
+      });
+      if (error) setMessage(error.message);
+      else setEmailSent({ kind: "reset", email });
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
@@ -127,14 +145,18 @@ export function AuthForm({
         <p className="mt-2 text-sm text-text-secondary">
           {emailSent.kind === "confirm"
             ? "We've sent a confirmation link to"
-            : "We've sent a one-tap sign-in link to"}
+            : emailSent.kind === "reset"
+              ? "We've sent a password-reset link to"
+              : "We've sent a one-tap sign-in link to"}
         </p>
         <p className="mt-1 font-semibold text-text-primary">{emailSent.email}</p>
         <p className="mt-4 text-xs text-text-muted">
           Click the link in that email to
           {emailSent.kind === "confirm"
             ? " finish creating your account."
-            : " sign in."}{" "}
+            : emailSent.kind === "reset"
+              ? " set a new password."
+              : " sign in."}{" "}
           It can take a minute to arrive — check your spam folder if you don&apos;t
           see it.
         </p>
@@ -176,11 +198,25 @@ export function AuthForm({
             className={inputCls}
           />
         </div>
-        {mode !== "magic" && (
+        {mode !== "magic" && mode !== "reset" && (
           <div>
-            <label htmlFor="password" className="u-eyebrow mb-1.5 block text-[0.6875rem] text-text-muted">
-              Password
-            </label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label htmlFor="password" className="u-eyebrow text-[0.6875rem] text-text-muted">
+                Password
+              </label>
+              {mode === "login" && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode("reset");
+                    setMessage("");
+                  }}
+                  className="text-[0.6875rem] font-semibold text-brand-gold hover:underline"
+                >
+                  Forgot password?
+                </button>
+              )}
+            </div>
             <input
               id="password"
               name="password"
@@ -288,7 +324,9 @@ export function AuthForm({
               ? "Sign up"
               : mode === "magic"
                 ? "Send magic link"
-                : "Sign in"}
+                : mode === "reset"
+                  ? "Send reset link"
+                  : "Sign in"}
         </button>
         {message && (
           <p
