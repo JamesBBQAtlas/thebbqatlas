@@ -30,7 +30,7 @@ export const metadata: Metadata = {
     process.env.NEXT_PUBLIC_SITE_URL ?? "https://thebbqatlas.com"
   ),
   title: {
-    default: `${BRAND.name} — The Michelin Guide for Barbecue`,
+    default: `${BRAND.name} — The World's Great Barbecue, Mapped`,
     template: `%s | ${BRAND.name}`,
   },
   description:
@@ -43,7 +43,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: `${BRAND.name} — The Michelin Guide for Barbecue`,
+    title: `${BRAND.name} — The World's Great Barbecue, Mapped`,
     description:
       "A curated global atlas of the world's great barbecue. Explore the map, read the guides, celebrate the craft.",
     images: ["/logos/crest-gold.jpg"],

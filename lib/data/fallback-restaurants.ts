@@ -1288,7 +1288,7 @@ export const FALLBACK_RESTAURANTS: Restaurant[] = [
     "id": "00000000-0000-4000-8000-000000000065",
     "slug": "burnt-ends-singapore",
     "name": "Burnt Ends",
-    "description": "Michelin-starred modern BBQ with smoked quail, brisket, and open-kitchen theatre.",
+    "description": "Acclaimed modern BBQ with smoked quail, brisket, and open-kitchen theatre.",
     "style": "modern",
     "lat": 1.28,
     "lng": 103.85,
