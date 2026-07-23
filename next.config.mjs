@@ -13,18 +13,12 @@ const nextConfig = {
     ],
     formats: ["image/avif", "image/webp"],
   },
-  // Canonical host is the apex (F-20): 301 www → apex so it's code-owned, not
-  // only a DNS/hosting concern.
-  async redirects() {
-    return [
-      {
-        source: "/:path*",
-        has: [{ type: "host", value: "www.thebbqatlas.com" }],
-        destination: "https://thebbqatlas.com/:path*",
-        permanent: true,
-      },
-    ];
-  },
+  // NOTE (F-20): host canonicalization (www ↔ apex) is handled at the Vercel /
+  // DNS layer, NOT here. A code-level www→apex redirect fights Vercel's own
+  // apex→www redirect and creates an infinite loop, so it must not live here.
+  // To make the apex canonical, set thebbqatlas.com as the primary domain in
+  // Vercel (so Vercel redirects www→apex). The canonical <link> tags already
+  // point at the apex via metadataBase.
 };
 
 export default withNextIntl(nextConfig);
