@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { MARKETING_CONSENT_TEXT } from "@/lib/email/consent";
+import { MARKETING_CONSENT_TEXT, MARKETING_CONSENT_RECORD } from "@/lib/email/consent";
 
 type AuthMode = "login" | "signup" | "magic";
 
@@ -25,6 +25,7 @@ export function AuthForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -50,6 +51,11 @@ export function AuthForm({
     setLoading(true);
     setMessage("");
     if (mode === "signup") {
+      if (!agreedToTerms) {
+        setMessage("Please agree to the Terms & Privacy Policy to continue.");
+        setLoading(false);
+        return;
+      }
       if (password !== confirmPassword) {
         setMessage("Those passwords don't match — please re-enter them.");
         setLoading(false);
@@ -62,7 +68,7 @@ export function AuthForm({
           emailRedirectTo: callbackUrl,
           data: {
             marketing_opt_in: marketingOptIn,
-            marketing_opt_in_text: MARKETING_CONSENT_TEXT,
+            marketing_opt_in_text: MARKETING_CONSENT_RECORD,
           },
         },
       });
@@ -220,21 +226,60 @@ export function AuthForm({
           </div>
         )}
         {mode === "signup" && (
-          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border-subtle bg-surface-1 p-3">
-            <input
-              type="checkbox"
-              checked={marketingOptIn}
-              onChange={(e) => setMarketingOptIn(e.target.checked)}
-              className="mt-0.5 h-4 w-4 shrink-0 accent-brand-gold"
-            />
-            <span className="text-xs leading-relaxed text-text-secondary">
-              {MARKETING_CONSENT_TEXT}
-            </span>
-          </label>
+          <>
+            {/* Required agreement — gates Sign up. Kept SEPARATE from marketing. */}
+            <div className="flex items-start gap-2.5 rounded-md border border-border-subtle bg-surface-1 p-3">
+              <input
+                id="agree-terms"
+                type="checkbox"
+                checked={agreedToTerms}
+                onChange={(e) => setAgreedToTerms(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-brand-gold"
+              />
+              <label
+                htmlFor="agree-terms"
+                className="cursor-pointer text-xs leading-relaxed text-text-secondary"
+              >
+                I agree to the{" "}
+                <a
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-brand-gold hover:underline"
+                >
+                  Terms of Use
+                </a>{" "}
+                &amp;{" "}
+                <a
+                  href="/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-brand-gold hover:underline"
+                >
+                  Privacy Policy
+                </a>{" "}
+                — be kind, respect the pitmasters, and we&apos;ll look after your
+                data (we never sell it).
+              </label>
+            </div>
+
+            {/* Marketing opt-in — SEPARATE, unticked, never auto-enrolled. */}
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border-subtle bg-surface-1 p-3">
+              <input
+                type="checkbox"
+                checked={marketingOptIn}
+                onChange={(e) => setMarketingOptIn(e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-brand-gold"
+              />
+              <span className="text-xs leading-relaxed text-text-secondary">
+                {MARKETING_CONSENT_TEXT}
+              </span>
+            </label>
+          </>
         )}
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || (mode === "signup" && !agreedToTerms)}
           className="w-full rounded-md bg-brand-gold px-4 py-2.5 text-sm font-bold uppercase tracking-[0.06em] text-text-inverse transition-colors hover:bg-brand-gold/90 disabled:opacity-40"
         >
           {loading
