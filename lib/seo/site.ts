@@ -20,6 +20,7 @@ export const SITE = {
   sameAs: [
     "https://instagram.com/thebbqatlas",
     "https://threads.net/@thebbqatlas",
+    "https://x.com/TheBBQAtlas",
   ] as string[],
 } as const;
 
