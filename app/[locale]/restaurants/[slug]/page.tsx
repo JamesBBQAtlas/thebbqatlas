@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Camera, Clock } from "lucide-react";
@@ -39,6 +40,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
 import { getRecentVisitors } from "@/lib/queries/profiles";
+import { getPublicAvatarSignedUrls, avatarBadge } from "@/lib/account/public-avatar";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { getGearForStyle } from "@/lib/queries/gear";
@@ -209,6 +211,11 @@ export default async function RestaurantPage({ params }: Props) {
       return "";
     }
   };
+
+  // Sign uploaded photos for the visitor list (initials badge is the fallback).
+  const visitorAvatars = await getPublicAvatarSignedUrls(
+    visitors.map((v) => v.userId)
+  );
 
   return (
     <>
@@ -434,15 +441,28 @@ export default async function RestaurantPage({ params }: Props) {
                   const label = v.username
                     ? `@${v.username}`
                     : "A BBQ Atlas member";
-                  const initial = (v.username?.[0] ?? "?").toUpperCase();
+                  const photo = visitorAvatars.get(v.userId);
+                  const badge = avatarBadge(v.username ?? v.userId);
                   return (
                     <li
                       key={`${v.userId}-${i}`}
                       className="flex items-start gap-3 rounded-lg border border-border-subtle bg-surface-0 p-4"
                     >
-                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-sienna/15 font-heading text-sm font-bold text-brand-sienna">
-                        {initial}
-                      </span>
+                      {photo ? (
+                        <Image
+                          src={photo}
+                          alt={label}
+                          width={36}
+                          height={36}
+                          className="h-9 w-9 shrink-0 rounded-full object-cover"
+                        />
+                      ) : (
+                        <span
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-heading text-sm font-bold ${badge.className}`}
+                        >
+                          {badge.initial}
+                        </span>
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                           {v.username ? (

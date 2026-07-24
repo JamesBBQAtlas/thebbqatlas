@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Image from "next/image";
 import { notFound } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { MapPin, MapPinCheckInside } from "lucide-react";
@@ -7,6 +8,7 @@ import {
   getPublicProfileByUsername,
   getPublicCheckInsForUser,
 } from "@/lib/queries/profiles";
+import { getPublicAvatarSignedUrl, avatarBadge } from "@/lib/account/public-avatar";
 import { SITE, absoluteUrl } from "@/lib/seo/site";
 
 interface Props {
@@ -64,20 +66,35 @@ export default async function PublicProfilePage({ params }: Props) {
   const profile = await getPublicProfileByUsername(params.username);
   if (!profile) notFound();
 
-  const checkIns = await getPublicCheckInsForUser(profile.id, 60);
+  const [avatarUrl, checkIns] = await Promise.all([
+    getPublicAvatarSignedUrl(profile.id),
+    getPublicCheckInsForUser(profile.id, 60),
+  ]);
 
   // Only surface check-ins whose venue is publicly visible (approved).
   const visits = checkIns.filter((c) => c.restaurants?.slug);
   const handle = `@${profile.username}`;
-  const initial = (profile.username?.[0] ?? "?").toUpperCase();
+  const badge = avatarBadge(profile.username ?? "?");
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-16 sm:px-10">
       {/* Header — public identity is the username only. */}
       <div className="mb-12 flex items-center gap-5">
-        <span className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-brand-sienna/15 font-heading text-3xl font-bold text-brand-sienna ring-2 ring-border-subtle">
-          {initial}
-        </span>
+        {avatarUrl ? (
+          <Image
+            src={avatarUrl}
+            alt={handle}
+            width={96}
+            height={96}
+            className="h-24 w-24 shrink-0 rounded-full object-cover ring-2 ring-border-subtle"
+          />
+        ) : (
+          <span
+            className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-full font-heading text-3xl font-bold ring-2 ring-border-subtle ${badge.className}`}
+          >
+            {badge.initial}
+          </span>
+        )}
         <div className="min-w-0">
           <h1 className="truncate font-heading text-3xl font-bold text-text-primary">
             {handle}
