@@ -431,17 +431,10 @@ export default async function RestaurantPage({ params }: Props) {
               </h2>
               <ul className="space-y-3">
                 {visitors.map((v, i) => {
-                  const hasName = Boolean(v.displayName?.trim());
-                  const label = hasName
-                    ? v.displayName!.trim()
-                    : v.username
-                      ? `@${v.username}`
-                      : "A BBQ Atlas member";
-                  const initial = (
-                    v.displayName?.trim()?.[0] ||
-                    v.username?.[0] ||
-                    "?"
-                  ).toUpperCase();
+                  const label = v.username
+                    ? `@${v.username}`
+                    : "A BBQ Atlas member";
+                  const initial = (v.username?.[0] ?? "?").toUpperCase();
                   return (
                     <li
                       key={`${v.userId}-${i}`}
@@ -462,11 +455,6 @@ export default async function RestaurantPage({ params }: Props) {
                           ) : (
                             <span className="font-semibold text-text-primary">
                               {label}
-                            </span>
-                          )}
-                          {hasName && v.username && (
-                            <span className="text-xs text-text-muted">
-                              @{v.username}
                             </span>
                           )}
                           <span className="text-xs text-text-muted">

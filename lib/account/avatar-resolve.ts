@@ -1,6 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AccountType } from "@/lib/types/database";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { avatarFor } from "./avatar";
 
 /**
@@ -27,30 +26,4 @@ export async function resolveAvatarUrl(
     return avatarFor(null, accountType);
   }
   return avatarFor(avatarValue, accountType);
-}
-
-/**
- * Resolve a PUBLIC-facing avatar URL for ANOTHER user (public profiles, "who's
- * been here"). The `avatars` bucket is private (F-08), and the anon role can't
- * sign its objects, so we mint a short-lived signed URL with the service-role
- * client when it's configured; otherwise (or on any failure) we fall back to the
- * branded placeholder. Never throws. Safe to call from ISR/statically-generated
- * public pages.
- */
-export async function resolvePublicAvatarUrl(
-  avatarValue: string | null | undefined,
-  accountType: AccountType = "consumer"
-): Promise<string> {
-  if (!avatarValue) return avatarFor(null, accountType);
-  if (/^https?:\/\//i.test(avatarValue)) return avatarFor(avatarValue, accountType);
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return avatarFor(null, accountType);
-  try {
-    const admin = createAdminClient();
-    const { data } = await admin.storage
-      .from("avatars")
-      .createSignedUrl(avatarValue, 60 * 60);
-    return data?.signedUrl ?? avatarFor(null, accountType);
-  } catch {
-    return avatarFor(null, accountType);
-  }
 }

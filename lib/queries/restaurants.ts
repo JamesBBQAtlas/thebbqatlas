@@ -105,7 +105,7 @@ export async function getReviews(restaurantId: string): Promise<Review[]> {
     const supabase = createAnonClient();
     const { data } = await supabase
       .from("reviews")
-      .select("*, profiles(display_name, avatar_url)")
+      .select("*, profiles(username)")
       .eq("restaurant_id", restaurantId)
       .eq("status", "approved")
       .order("created_at", { ascending: false });

@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import { notFound } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { MapPin, MapPinCheckInside } from "lucide-react";
@@ -8,21 +7,16 @@ import {
   getPublicProfileByUsername,
   getPublicCheckInsForUser,
 } from "@/lib/queries/profiles";
-import { resolvePublicAvatarUrl } from "@/lib/account/avatar-resolve";
 import { SITE, absoluteUrl } from "@/lib/seo/site";
 
 interface Props {
   params: { locale: string; username: string };
 }
 
-// Public profiles are cacheable — read only public-safe data via the anon client
-// (no cookies), so ISR applies. Refresh every 10 min so new check-ins surface.
+// Public profiles are cacheable — read only the public identity (username) via
+// the anon client (no cookies), so ISR applies. Refresh every 10 min so new
+// check-ins surface.
 export const revalidate = 600;
-
-function firstName(displayName: string | null, username: string | null): string {
-  if (displayName && displayName.trim()) return displayName.trim().split(/\s+/)[0];
-  return username ? `@${username}` : "they";
-}
 
 function formatDate(iso: string): string {
   try {
@@ -41,15 +35,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!profile) {
     return { title: "Profile not found", robots: { index: false, follow: false } };
   }
-  const name = profile.display_name?.trim() || `@${profile.username}`;
+  const handle = `@${profile.username}`;
   const canonical = `/u/${profile.username}`;
-  const description = `${name} on The BBQ Atlas — the barbecue spots they've checked into around the world.`;
+  const description = `${handle} on The BBQ Atlas — the barbecue spots they've checked into around the world.`;
   return {
-    title: `${name} (@${profile.username})`,
+    title: `${handle} · The BBQ Atlas`,
     description,
     alternates: { canonical },
     openGraph: {
-      title: `${name} on The BBQ Atlas`,
+      title: `${handle} on The BBQ Atlas`,
       description,
       type: "profile",
       url: absoluteUrl(canonical),
@@ -58,7 +52,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
     twitter: {
       card: "summary",
-      title: `${name} on The BBQ Atlas`,
+      title: `${handle} on The BBQ Atlas`,
       description,
     },
   };
@@ -70,31 +64,24 @@ export default async function PublicProfilePage({ params }: Props) {
   const profile = await getPublicProfileByUsername(params.username);
   if (!profile) notFound();
 
-  const [avatar, checkIns] = await Promise.all([
-    resolvePublicAvatarUrl(profile.avatar_url),
-    getPublicCheckInsForUser(profile.id, 60),
-  ]);
+  const checkIns = await getPublicCheckInsForUser(profile.id, 60);
 
   // Only surface check-ins whose venue is publicly visible (approved).
   const visits = checkIns.filter((c) => c.restaurants?.slug);
-  const name = profile.display_name?.trim() || `@${profile.username}`;
+  const handle = `@${profile.username}`;
+  const initial = (profile.username?.[0] ?? "?").toUpperCase();
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-16 sm:px-10">
-      {/* Header */}
+      {/* Header — public identity is the username only. */}
       <div className="mb-12 flex items-center gap-5">
-        <Image
-          src={avatar}
-          alt={name}
-          width={96}
-          height={96}
-          className="h-24 w-24 shrink-0 rounded-full object-cover ring-2 ring-border-subtle"
-        />
+        <span className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-brand-sienna/15 font-heading text-3xl font-bold text-brand-sienna ring-2 ring-border-subtle">
+          {initial}
+        </span>
         <div className="min-w-0">
           <h1 className="truncate font-heading text-3xl font-bold text-text-primary">
-            {name}
+            {handle}
           </h1>
-          <p className="mt-1 font-semibold text-brand-gold">@{profile.username}</p>
           <p className="mt-2 text-sm text-text-muted">
             {visits.length === 0
               ? "No public check-ins yet"
@@ -107,14 +94,14 @@ export default async function PublicProfilePage({ params }: Props) {
       <section>
         <h2 className="mb-4 flex items-center gap-2 font-heading text-xl font-bold text-text-primary">
           <MapPinCheckInside className="h-5 w-5 text-brand-sienna" />
-          Places {firstName(profile.display_name, profile.username)} has been
+          Places {handle} has been
         </h2>
 
         {visits.length === 0 ? (
           <div className="rounded-xl border border-border-subtle bg-surface-0 p-8 text-center">
             <p className="text-text-muted">
-              No public check-ins yet. When {firstName(profile.display_name, profile.username)}{" "}
-              checks into a venue and shares it, it&apos;ll show up here.
+              No public check-ins yet. When {handle} checks into a venue and
+              shares it, it&apos;ll show up here.
             </p>
             <Link
               href="/map"

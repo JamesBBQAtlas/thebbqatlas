@@ -229,7 +229,7 @@ export interface Review {
   body: string;
   status: ModerationStatus;
   created_at: string;
-  profiles?: Pick<Profile, "display_name" | "avatar_url">;
+  profiles?: Pick<Profile, "username">;
 }
 
 export interface Submission {
