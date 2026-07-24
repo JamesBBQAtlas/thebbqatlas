@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Camera } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Camera, Clock } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
@@ -41,6 +41,7 @@ import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { getGearForStyle } from "@/lib/queries/gear";
+import { hoursRows } from "@/lib/restaurants/hours";
 import { GearProductCard } from "@/components/gear/GearProductCard";
 import { AffiliateDisclosure } from "@/components/monetization/AffiliateDisclosure";
 import { getSiblingLocations } from "@/lib/queries/brands";
@@ -144,6 +145,7 @@ export default async function RestaurantPage({ params }: Props) {
         ).data
       )
     : false;
+  const hours = hoursRows(restaurant.hours);
 
   const code = resolveCountryCode(restaurant.country_code, restaurant.country);
   const cityCountry = [restaurant.city, restaurant.country].filter(Boolean).join(", ");
@@ -556,6 +558,29 @@ export default async function RestaurantPage({ params }: Props) {
                     </dt>
                     <dd className="text-[0.9375rem] text-text-primary">
                       {restaurant.phone}
+                    </dd>
+                  </div>
+                </div>
+              )}
+              {hours.length > 0 && (
+                <div className="flex items-start gap-3">
+                  <Clock className="mt-0.5 h-4 w-4 shrink-0 text-brand-sienna" />
+                  <div className="min-w-0 flex-1">
+                    <dt className="u-eyebrow text-[0.6875rem] text-text-muted">
+                      Hours
+                    </dt>
+                    <dd className="mt-1 space-y-0.5">
+                      {hours.map((h) => (
+                        <div
+                          key={h.day}
+                          className="flex justify-between gap-4 text-[0.8125rem]"
+                        >
+                          <span className="text-text-muted">{h.day}</span>
+                          <span className="text-right text-text-primary">
+                            {h.value}
+                          </span>
+                        </div>
+                      ))}
                     </dd>
                   </div>
                 </div>

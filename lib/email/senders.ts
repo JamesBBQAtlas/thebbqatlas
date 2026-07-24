@@ -5,86 +5,58 @@ import { EMAIL_FROM, EMAIL_SITE_URL } from "./config";
 const T = EMAIL_FROM.transactional;
 const M = EMAIL_FROM.marketing;
 
-/** A single email-safe feature block: on-brand banner image, heading, benefit. */
-function featureRow(opts: {
-  img: string;
-  alt: string;
-  title: string;
-  body: string;
-  href: string;
-  link: string;
+/**
+ * 1. Welcome on signup — approved house-voice copy (WELCOME-EMAIL.md, verbatim).
+ * Transactional/functional: sent once on signup. Keeps the "what we'll never do"
+ * block. Real one-click unsubscribe when a token is provided.
+ */
+export function sendWelcome(opts: {
+  to: string;
+  name?: string;
+  userId?: string;
+  unsubscribeToken?: string;
 }) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:26px 0 0;">
-    <tr><td>
-      <a href="${opts.href}" style="text-decoration:none;">
-        <img src="${opts.img}" width="536" alt="${opts.alt}" style="display:block;width:100%;max-width:536px;height:auto;border-radius:12px;border:1px solid #e7ddca;">
-      </a>
-    </td></tr>
-    <tr><td style="padding:12px 2px 0;">
-      <div style="font-family:Georgia,'Times New Roman',Times,serif;font-size:19px;font-weight:bold;color:#2b2118;">${opts.title}</div>
-      <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#2b2118;margin:5px 0 8px;">${opts.body}</div>
-      <a href="${opts.href}" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:13px;font-weight:bold;letter-spacing:0.04em;text-transform:uppercase;color:#C4622D;text-decoration:none;">${opts.link} →</a>
-    </td></tr>
-  </table>`;
-}
-
-/** 1. Welcome on signup — the flagship email: warm intro + a short feature tour. */
-export function sendWelcome(opts: { to: string; name?: string; userId?: string }) {
-  const name = opts.name?.trim() || "there";
   const u = EMAIL_SITE_URL;
+  const first = opts.name?.trim().split(/\s+/)[0];
+  const opener = first ? `Welcome, ${first}.` : "Welcome to The BBQ Atlas.";
 
-  const features = [
-    featureRow({
-      img: `${u}/email/feature-map.png`,
-      alt: "The interactive BBQ Atlas map",
-      title: "Explore the map",
-      body: "Every spot on one interactive map — Central Texas smokehouses, Argentine asados, Korean grills. Filter by style, drop into a city, and find what's worth the drive.",
-      href: `${u}/map`,
-      link: "Open the map",
-    }),
-    featureRow({
-      img: `${u}/email/feature-save.png`,
-      alt: "Save your favorite spots",
-      title: "Build your own atlas",
-      body: "Bookmark any spot to keep the places you love — and the ones you're dying to try — together in one place, ready for the next trip.",
-      href: `${u}/directory`,
-      link: "Start saving spots",
-    }),
-    featureRow({
-      img: `${u}/email/feature-guides.png`,
-      alt: "Read the guides",
-      title: "Read the guides",
-      body: "Deep dives into the styles, regions and pitmasters behind the craft. Come for a recommendation, stay for the story.",
-      href: `${u}/guides`,
-      link: "Browse the guides",
-    }),
-    featureRow({
-      img: `${u}/email/feature-submit.png`,
-      alt: "Add a spot to the Atlas",
-      title: "Put a spot on the map",
-      body: "Know somewhere great we're missing? Add it. Every submission is reviewed by hand — because good barbecue deserves the care.",
-      href: `${u}/submit`,
-      link: "Submit a spot",
-    }),
-  ].join("");
+  const bodyHtml = `<p style="margin:0 0 14px;">${opener}</p>
+    <p style="margin:0 0 14px;">We'll keep this short. Your time is better spent eating barbecue than reading email.</p>
+    <p style="margin:0 0 14px;">Here's what this is: a map of the world's great barbecue — smokehouses, asados, roadside pits, the lot — plus guides worth reading and gear worth owning. We find it, we plot it, you go. We don't rank it. Ranking barbecue is like ranking your children: technically possible, deeply unwise.</p>
+    <p style="margin:0 0 10px;">And here's what we will <strong>never</strong> do:</p>
+    <ul style="margin:0 0 14px;padding-left:20px;color:#2b2118;">
+      <li style="margin:0 0 7px;">Email you to ask <em>"how did we do?"</em> You'll know how we did. You'll be looking at brisket.</li>
+      <li style="margin:0 0 7px;">Ask you to rate us out of five. We are not a scale.</li>
+      <li style="margin:0 0 7px;">Sell your details. They're yours. Keep them.</li>
+      <li style="margin:0 0 7px;">Waste your time. When we write, it'll be because there's barbecue worth driving for.</li>
+    </ul>
+    <p style="margin:0 0 14px;">That's the arrangement. One click unsubscribes you — no hard feelings, and no exit survey asking why.</p>
+    <p style="margin:0 0 18px;">Now go find something with a bark on it.</p>
+    <p style="margin:0;color:#6f6152;">— The BBQ Atlas<br><em>We map barbecue. That's the whole website.</em></p>`;
 
-  const bodyHtml = `<p style="margin:0 0 14px;">Hi ${name}, and welcome — you're in.</p>
-    <p style="margin:0 0 14px;">The BBQ Atlas is a living map of the world's great barbecue: <em>celebrated, not ranked</em>. Whether you're chasing brisket in Texas, chorizo at an asado, or the best smoke in your own city, this is your table. Here are a few things to try first:</p>
-    ${features}
-    <p style="margin:30px 0 0;">Pull up a chair — the fire's already going.</p>
-    <p style="margin:6px 0 0;color:#6f6152;">— The BBQ Atlas</p>`;
+  const bodyText = `${opener}
 
-  const bodyText = `Hi ${name}, and welcome — you're in.
+We'll keep this short. Your time is better spent eating barbecue than reading email.
 
-The BBQ Atlas is a living map of the world's great barbecue: celebrated, not ranked. Whether you're chasing brisket in Texas, chorizo at an asado, or the best smoke in your own city, this is your table. A few things to try first:
+Here's what this is: a map of the world's great barbecue — smokehouses, asados, roadside pits, the lot — plus guides worth reading and gear worth owning. We find it, we plot it, you go. We don't rank it. Ranking barbecue is like ranking your children: technically possible, deeply unwise.
 
-• Explore the map — every spot on one interactive map; filter by style and drop into a city: ${u}/map
-• Build your own atlas — bookmark the spots you love and the ones you want to try: ${u}/directory
-• Read the guides — the styles, regions and pitmasters behind the craft: ${u}/guides
-• Put a spot on the map — add somewhere great we're missing (reviewed by hand): ${u}/submit
+And here's what we will never do:
+- Email you to ask "how did we do?" You'll know how we did. You'll be looking at brisket.
+- Ask you to rate us out of five. We are not a scale.
+- Sell your details. They're yours. Keep them.
+- Waste your time. When we write, it'll be because there's barbecue worth driving for.
 
-Pull up a chair — the fire's already going.
-— The BBQ Atlas`;
+That's the arrangement. One click unsubscribes you — no hard feelings, and no exit survey asking why.
+
+Now go find something with a bark on it.
+
+— The BBQ Atlas
+We map barbecue. That's the whole website.`;
+
+  const token = opts.unsubscribeToken;
+  const pageUrl = `${u}/unsubscribe${token ? `?token=${token}` : ""}`;
+  const footerHtml = `<p style="margin:10px 0 0;"><a href="${pageUrl}" style="color:#C4622D;">Unsubscribe</a> — one click, no exit survey.</p>`;
+  const footerText = `Unsubscribe (one click, no exit survey): ${pageUrl}`;
 
   return sendEmail({
     to: opts.to,
@@ -92,18 +64,22 @@ Pull up a chair — the fire's already going.
     stream: "transactional",
     type: "welcome",
     userId: opts.userId,
-    subject: "Welcome to The BBQ Atlas 🔥",
+    subject: "You're in. Here's what that means.",
     html: emailShell({
-      title: "Welcome to The BBQ Atlas",
-      preheader: "You're in — here's how to make the most of your Atlas.",
+      title: "You're in.",
+      preheader: "No surveys. No stars. Just barbecue, mapped.",
       bodyHtml,
-      cta: { label: "Explore the map", url: `${u}/map` },
+      footerHtml,
     }),
-    text: emailText({
-      title: "Welcome to The BBQ Atlas",
-      bodyText,
-      cta: { label: "Explore the map", url: `${u}/map` },
-    }),
+    text: emailText({ title: "You're in.", bodyText, footerText }),
+    ...(token
+      ? {
+          headers: {
+            "List-Unsubscribe": `<${u}/api/unsubscribe?token=${token}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
+        }
+      : {}),
   });
 }
 

@@ -39,13 +39,19 @@ export async function syncSignup(db: SupabaseClient, user: User): Promise<void> 
       .update({ welcome_email_sent: true })
       .eq("id", user.id)
       .eq("welcome_email_sent", false)
-      .select("display_name");
+      .select("display_name, unsubscribe_token");
 
     if (flipped && flipped.length > 0 && user.email) {
-      const name =
-        (flipped[0] as { display_name?: string }).display_name ??
-        user.email.split("@")[0];
-      await sendWelcome({ to: user.email, name, userId: user.id });
+      const row = flipped[0] as {
+        display_name?: string;
+        unsubscribe_token?: string;
+      };
+      await sendWelcome({
+        to: user.email,
+        name: row.display_name ?? user.email.split("@")[0],
+        userId: user.id,
+        unsubscribeToken: row.unsubscribe_token,
+      });
     }
   } catch {
     // never let signup email/consent sync break auth

@@ -6,6 +6,7 @@ import {
 } from "@/lib/constants/offerings";
 import { resolveCountryCode } from "@/lib/constants/countries";
 import { safeVenueImage } from "@/lib/restaurants/image";
+import { openingHoursSpec } from "@/lib/restaurants/hours";
 import { SITE, absoluteUrl } from "./site";
 
 /**
@@ -45,6 +46,14 @@ export function websiteJsonLd() {
     description: SITE.description,
     inLanguage: "en-US",
     publisher: { "@id": ORG_ID },
+    potentialAction: {
+      "@type": "SearchAction",
+      target: {
+        "@type": "EntryPoint",
+        urlTemplate: `${SITE.url}/directory?q={search_term_string}`,
+      },
+      "query-input": "required name=search_term_string",
+    },
   };
 }
 
@@ -65,6 +74,7 @@ export function restaurantJsonLd(r: Restaurant) {
   const url = absoluteUrl(`/restaurants/${r.slug}`);
   const code = resolveCountryCode(r.country_code, r.country);
   const menu = groupOfferings(r.offerings);
+  const ohs = openingHoursSpec(r.hours);
 
   return {
     "@context": "https://schema.org",
@@ -78,6 +88,7 @@ export function restaurantJsonLd(r: Restaurant) {
     servesCuisine: [`${STYLE_LABELS[r.style]} Barbecue`, "Barbecue"],
     priceRange: r.price_level ? "$".repeat(r.price_level) : undefined,
     telephone: r.phone || undefined,
+    ...(r.website ? { sameAs: [r.website] } : {}),
     address: {
       "@type": "PostalAddress",
       streetAddress: r.address || undefined,
@@ -105,6 +116,7 @@ export function restaurantJsonLd(r: Restaurant) {
           })),
         }
       : undefined,
+    ...(ohs.length ? { openingHoursSpecification: ohs } : {}),
     isPartOf: { "@id": WEBSITE_ID },
   };
 }

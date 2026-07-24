@@ -7,6 +7,7 @@ import {
   buildSubtag,
   decorateAffiliateUrl,
   detectPartner,
+  AMAZON_ONELINK_TAG,
 } from "@/lib/affiliate";
 import { logClick } from "@/lib/analytics/track";
 
@@ -35,7 +36,7 @@ export function AffiliateLink({
 }) {
   const pathname = usePathname();
   const subtag = buildSubtag({ restaurantSlug, pagePath: pathname, product: product ?? label });
-  const amazonTag = process.env.NEXT_PUBLIC_AMAZON_ASSOC_TAG;
+  const amazonTag = AMAZON_ONELINK_TAG;
   const finalHref = decorateAffiliateUrl(href, subtag, amazonTag);
   const resolvedPartner = partner ?? detectPartner(href);
 
