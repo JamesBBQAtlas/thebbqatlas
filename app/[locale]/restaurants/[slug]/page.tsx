@@ -29,6 +29,7 @@ import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd, eventJsonLd } from "@/lib/seo/jsonld";
+import { SITE, absoluteUrl } from "@/lib/seo/site";
 import {
   CATEGORY_LABELS,
   isTimeBased,
@@ -67,17 +68,28 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     restaurant.description?.slice(0, 160) ??
     `${restaurant.name} — ${STYLE_LABELS[restaurant.style]} barbecue in ${location}.`;
 
+  const canonical = `/restaurants/${restaurant.slug}`;
+  // Fall back to the branded crest when there's no copyright-safe hero, so the
+  // card never renders imageless in social/search previews.
+  const ogImage = safeVenueImage(restaurant.hero_image_url) || SITE.logo;
+
   return {
     title: restaurant.name,
     description,
-    alternates: { canonical: `/restaurants/${restaurant.slug}` },
+    alternates: { canonical },
     openGraph: {
       title: restaurant.name,
       description,
       type: "article",
-      images: safeVenueImage(restaurant.hero_image_url)
-        ? [safeVenueImage(restaurant.hero_image_url) as string]
-        : [],
+      url: absoluteUrl(canonical),
+      siteName: SITE.name,
+      images: [ogImage],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: restaurant.name,
+      description,
+      images: [ogImage],
     },
   };
 }

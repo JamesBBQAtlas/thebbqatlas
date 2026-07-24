@@ -23,7 +23,16 @@ async function setOptIn(token: string | null, optIn: boolean): Promise<boolean> 
       .update(patch)
       .eq("unsubscribe_token", token)
       .select("id");
-    return Boolean(data && data.length);
+
+    // The same token space also covers anonymous newsletter subscribers
+    // (email_subscribers). One-click unsubscribe must work for both lists.
+    const { data: subs } = await admin
+      .from("email_subscribers")
+      .update({ unsubscribed_at: optIn ? null : new Date().toISOString() })
+      .eq("unsubscribe_token", token)
+      .select("id");
+
+    return Boolean((data && data.length) || (subs && subs.length));
   } catch {
     return false;
   }

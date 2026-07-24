@@ -8,6 +8,20 @@ import { resolveCountryCode } from "@/lib/constants/countries";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { HomeMapVisual } from "@/components/home/HomeMapVisual";
 import { HeroVideo } from "@/components/home/HeroVideo";
+import type { Metadata } from "next";
+import { SITE } from "@/lib/seo/site";
+
+// Homepage self-canonical + og:url (the layout supplies title/description/twitter
+// defaults, which are correct for the site root).
+export const metadata: Metadata = {
+  alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    siteName: SITE.name,
+    url: SITE.url,
+    images: [{ url: "/logos/crest-gold.jpg", width: 1200, height: 1200 }],
+  },
+};
 
 const MAP_FEATURES = [
   { strong: "Filter by style", rest: "— Central Texas, Carolina, Korean, Argentine, and more" },

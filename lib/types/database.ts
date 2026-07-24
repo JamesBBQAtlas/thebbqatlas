@@ -174,6 +174,32 @@ export interface GearItem {
   sort_order: number;
 }
 
+export type GearCategory =
+  | "thermometers"
+  | "smokers_grills"
+  | "fuel_wood"
+  | "tools"
+  | "cleaning";
+
+/** Global, admin-managed affiliate catalogue product (see /gear). */
+export interface GearProduct {
+  id: string;
+  name: string;
+  brand: string | null;
+  category: GearCategory;
+  description: string | null;
+  image_url: string | null;
+  affiliate_url: string;
+  partner: string | null;
+  price_note: string | null;
+  style_tags: string[];
+  is_featured: boolean;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Review {
   id: string;
   restaurant_id: string;

@@ -2,6 +2,7 @@ import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { Instagram } from "lucide-react";
 import { Link } from "@/i18n/navigation";
+import { EmailCapture } from "@/components/email/EmailCapture";
 
 /** Threads logo (not in lucide) — inline so it inherits currentColor. */
 function ThreadsIcon({ className }: { className?: string }) {
@@ -59,6 +60,22 @@ export function Footer() {
   return (
     <footer className="mt-auto border-t border-border-subtle bg-surface-0">
       <div className="pb-mobilenav mx-auto max-w-7xl px-4 py-14 sm:px-6">
+        {/* Newsletter capture (P7 consent — see EmailCapture) */}
+        <div className="mb-12 flex flex-col gap-5 border-b border-border-subtle pb-10 md:flex-row md:items-start md:justify-between">
+          <div className="max-w-sm">
+            <h3 className="font-heading text-lg font-bold text-text-primary">
+              Join the Atlas
+            </h3>
+            <p className="mt-1.5 text-sm text-text-secondary">
+              The world&apos;s great barbecue in your inbox — no spam, unsubscribe
+              in one click.
+            </p>
+          </div>
+          <div className="w-full md:max-w-md">
+            <EmailCapture source="footer" />
+          </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-10 md:grid-cols-4">
           {/* Brand */}
           <div className="col-span-2 md:col-span-1">

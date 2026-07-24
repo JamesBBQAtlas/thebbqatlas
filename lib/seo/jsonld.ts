@@ -77,6 +77,7 @@ export function restaurantJsonLd(r: Restaurant) {
     image: safeVenueImage(r.hero_image_url) || SITE.logo,
     servesCuisine: [`${STYLE_LABELS[r.style]} Barbecue`, "Barbecue"],
     priceRange: r.price_level ? "$".repeat(r.price_level) : undefined,
+    telephone: r.phone || undefined,
     address: {
       "@type": "PostalAddress",
       streetAddress: r.address || undefined,
