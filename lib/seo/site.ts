@@ -18,8 +18,8 @@ export const SITE = {
   // the Organization sameAs and the visible footer agree (F-34). Update both
   // together if a handle changes.
   sameAs: [
-    "https://instagram.com/thebbqatlas",
-    "https://threads.net/@thebbqatlas",
+    "https://instagram.com/bbqatlas",
+    "https://threads.net/@bbqatlas",
     "https://x.com/TheBBQAtlas",
   ] as string[],
 } as const;

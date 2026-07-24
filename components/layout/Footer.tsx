@@ -48,8 +48,8 @@ const COMPANY = [
 ] as const;
 
 const SOCIALS = [
-  { href: "https://instagram.com/thebbqatlas", name: "Instagram", Icon: Instagram },
-  { href: "https://threads.net/@thebbqatlas", name: "Threads", Icon: ThreadsIcon },
+  { href: "https://instagram.com/bbqatlas", name: "Instagram", Icon: Instagram },
+  { href: "https://threads.net/@bbqatlas", name: "Threads", Icon: ThreadsIcon },
   { href: "https://x.com/TheBBQAtlas", name: "X", Icon: XIcon },
 ] as const;
 
