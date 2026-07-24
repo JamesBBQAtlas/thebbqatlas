@@ -14,31 +14,36 @@ import { cn } from "@/lib/utils/cn";
 export function SaveShareActions({
   restaurantId,
   name,
+  initialSaved = false,
 }: {
   restaurantId: string;
   name: string;
+  initialSaved?: boolean;
 }) {
   const t = useTranslations("Restaurant");
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(initialSaved);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function handleSave() {
-    if (busy || saved) return;
+    if (busy) return;
     setBusy(true);
+    // Toggle: the API expects { restaurantId, action } — sending the wrong shape
+    // (restaurant_id, no action) was silently 400ing, so nothing ever saved.
+    const action = saved ? "unsave" : "save";
     try {
       const res = await fetch("/api/saved-spots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restaurant_id: restaurantId }),
+        body: JSON.stringify({ restaurantId, action }),
       });
       if (res.status === 401) {
         window.location.href = "/login";
         return;
       }
-      if (res.ok) setSaved(true);
+      if (res.ok) setSaved(action === "save");
     } catch {
-      /* best-effort; surfaced properly in the accounts phase */
+      /* best-effort */
     } finally {
       setBusy(false);
     }

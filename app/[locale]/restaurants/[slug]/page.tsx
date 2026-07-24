@@ -132,6 +132,19 @@ export default async function RestaurantPage({ params }: Props) {
       getGearForStyle(restaurant.style),
     ]);
 
+  const isSaved = user
+    ? Boolean(
+        (
+          await supabase
+            .from("saved_spots")
+            .select("restaurant_id")
+            .eq("user_id", user.id)
+            .eq("restaurant_id", restaurant.id)
+            .maybeSingle()
+        ).data
+      )
+    : false;
+
   const code = resolveCountryCode(restaurant.country_code, restaurant.country);
   const cityCountry = [restaurant.city, restaurant.country].filter(Boolean).join(", ");
   const paragraphs = (restaurant.description ?? "")
@@ -470,7 +483,11 @@ export default async function RestaurantPage({ params }: Props) {
               </div>
             )}
             <div className="border-t border-border-subtle pt-4">
-              <SaveShareActions restaurantId={restaurant.id} name={restaurant.name} />
+              <SaveShareActions
+                restaurantId={restaurant.id}
+                name={restaurant.name}
+                initialSaved={isSaved}
+              />
             </div>
           </div>
 
