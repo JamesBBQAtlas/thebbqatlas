@@ -40,11 +40,16 @@ export function VenueVisitors({
   visitors: VenueVisitorRow[];
 }) {
   const [open, setOpen] = useState(false);
-  if (total <= 0) return null;
 
+  // `total` (all check-ins incl. private) can under-report if the metrics count
+  // is unavailable, so never show fewer than the public visitors we actually
+  // have. Both zero → nothing to show.
   const publicCount = visitors.length;
-  const remainder = Math.max(0, total - publicCount);
-  const label = `${total.toLocaleString()} ${total === 1 ? "member has" : "members have"} been here`;
+  const shown = Math.max(total, publicCount);
+  if (shown <= 0) return null;
+
+  const remainder = Math.max(0, shown - publicCount);
+  const label = `${shown.toLocaleString()} ${shown === 1 ? "member has" : "members have"} been here`;
 
   return (
     <section className="mb-12">

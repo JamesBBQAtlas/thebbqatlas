@@ -41,4 +41,4 @@ deploy-token.txt
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts
+next-env.d.ts.github/workflows/db-guardrail.yml
