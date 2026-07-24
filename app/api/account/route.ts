@@ -1,7 +1,5 @@
 import { NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 /** Update the signed-in user's own profile (display name / account type). */
 export async function PATCH(request: Request) {
@@ -39,13 +37,11 @@ export async function PATCH(request: Request) {
   }
 
   // The profile row always exists (created at signup), so a plain UPDATE is all
-  // we need — and it avoids requiring INSERT on profiles, which F-01 correctly
-  // revoked. Runs as the user's own session so RLS + column grants apply.
-  const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? createAdminClient()
-    : supabase;
-
-  const { error } = await db
+  // we need — avoiding INSERT (F-01 correctly revoked it). We deliberately use
+  // the user's OWN session (not the service role), so RLS + the safe-column
+  // grants govern the write — the correct model for a self-edit, and it works
+  // regardless of whether SUPABASE_SERVICE_ROLE_KEY is present at runtime.
+  const { error } = await supabase
     .from("profiles")
     .update(updates)
     .eq("id", user.id);
