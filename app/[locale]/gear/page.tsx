@@ -1,65 +1,33 @@
 import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
-import { Flame, Thermometer, Wrench, Trees, BookOpen } from "lucide-react";
-import { AffiliateLink } from "@/components/monetization/AffiliateLink";
+import { getGearProducts, groupGearByCategory } from "@/lib/queries/gear";
+import { GEAR_CATEGORIES } from "@/lib/constants/gear";
+import { GearProductCard } from "@/components/gear/GearProductCard";
+import { AffiliateDisclosure } from "@/components/monetization/AffiliateDisclosure";
 import { AdSlot } from "@/components/monetization/AdSlot";
 
 export const metadata: Metadata = {
   title: "Gear",
   description:
-    "The pitmaster's kit — smokers, thermometers, tools, fuel and reading, curated by The BBQ Atlas.",
+    "The pitmaster's kit — smokers, thermometers, tools, fuel and cleaning, curated by The BBQ Atlas.",
   alternates: { canonical: "/gear" },
 };
 
-const SECTIONS = [
-  {
-    icon: Flame,
-    title: "Smokers & Grills",
-    blurb: "Where the magic happens. From backyard bullets to offset workhorses.",
-    items: [
-      "Weber Smokey Mountain Cooker",
-      "Offset stick-burner (22\"+)",
-      "Kamado-style ceramic grill",
-      "Pellet smoker with Wi-Fi",
-    ],
-  },
-  {
-    icon: Thermometer,
-    title: "Thermometers",
-    blurb: "The single biggest upgrade to your barbecue. Cook to temp, not to time.",
-    items: [
-      "Instant-read thermapen",
-      "Dual-probe wireless pit monitor",
-      "Leave-in ambient + meat probes",
-    ],
-  },
-  {
-    icon: Wrench,
-    title: "Tools & Prep",
-    blurb: "The unglamorous kit that makes long cooks easy.",
-    items: [
-      "Heat-resistant nitrile gloves",
-      "Boning & slicing knives",
-      "Butcher paper (unwaxed)",
-      "Heavy-duty cutting board",
-    ],
-  },
-  {
-    icon: Trees,
-    title: "Fuel & Wood",
-    blurb: "Post oak, hickory, fruit woods — the flavour starts here.",
-    items: ["Lump charcoal", "Post-oak splits", "Wood chunks variety pack"],
-  },
-  {
-    icon: BookOpen,
-    title: "Reading",
-    blurb: "The books that made pitmasters.",
-    items: ["Franklin Barbecue: A Meat-Smoking Manifesto", "Legends of Texas Barbecue"],
-  },
-];
+// Catalogue is admin-managed; refresh hourly.
+export const revalidate = 3600;
 
-export default function GearPage({ params }: { params: { locale: string } }) {
+export default async function GearPage({
+  params,
+}: {
+  params: { locale: string };
+}) {
   setRequestLocale(params.locale);
+  const products = await getGearProducts();
+  const grouped = groupGearByCategory(products);
+  const activeCategories = GEAR_CATEGORIES.filter(
+    (c) => (grouped[c.key]?.length ?? 0) > 0
+  );
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-16 sm:px-10">
       <p className="u-eyebrow mb-3 text-brand-gold">The pitmaster&apos;s kit</p>
@@ -72,36 +40,44 @@ export default function GearPage({ params }: { params: { locale: string } }) {
         Atlas.
       </p>
 
-      <div className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-2">
-        {SECTIONS.map((s) => (
-          <div
-            key={s.title}
-            className="rounded-2xl border border-border-subtle bg-surface-0 p-6"
-          >
-            <div className="mb-3 flex items-center gap-3">
-              <s.icon className="h-6 w-6 text-brand-gold" />
-              <h2 className="font-heading text-xl font-bold text-text-primary">
-                {s.title}
-              </h2>
-            </div>
-            <p className="mb-4 text-sm text-text-muted">{s.blurb}</p>
-            <ul className="space-y-2">
-              {s.items.map((item) => (
-                <li key={item} className="text-[0.9375rem] text-text-secondary">
-                  <AffiliateLink href="#" label={item} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+      {/* Disclosure at the top of the page (FTC/ASA). */}
+      <AffiliateDisclosure className="mt-6" />
 
-      <p className="mt-8 text-xs text-text-muted">
-        Some links are affiliate links — if you buy through them, the Atlas may
-        earn a small commission at no cost to you. It helps keep the map free.
-        Product links are placeholders until affiliate tags are activated.
-      </p>
-      <AdSlot slot="in-content" className="mt-8 h-0" />
+      {activeCategories.length === 0 ? (
+        <div className="mt-12 rounded-2xl border border-border-subtle bg-surface-0 p-10 text-center">
+          <p className="text-text-secondary">
+            Our curated picks are being seasoned — check back soon.
+          </p>
+        </div>
+      ) : (
+        activeCategories.map((cat, i) => {
+          const items = grouped[cat.key] ?? [];
+          return (
+            <section key={cat.key} className="mt-12">
+              <div className="mb-4 flex items-center gap-3">
+                <cat.icon className="h-6 w-6 text-brand-gold" />
+                <div>
+                  <h2 className="font-heading text-xl font-bold text-text-primary">
+                    {cat.label}
+                  </h2>
+                  <p className="text-sm text-text-muted">{cat.blurb}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                {items.map((p) => (
+                  <GearProductCard key={p.id} product={p} />
+                ))}
+              </div>
+              {/* Second disclosure, right next to the first set of links. */}
+              {i === 0 && (
+                <AffiliateDisclosure variant="inline" className="mt-4" />
+              )}
+            </section>
+          );
+        })
+      )}
+
+      <AdSlot slot="in-content" className="mt-12 h-0" />
     </div>
   );
 }

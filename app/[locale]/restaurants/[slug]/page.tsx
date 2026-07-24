@@ -40,6 +40,9 @@ import { createClient } from "@/lib/supabase/server";
 import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
+import { getGearForStyle } from "@/lib/queries/gear";
+import { GearProductCard } from "@/components/gear/GearProductCard";
+import { AffiliateDisclosure } from "@/components/monetization/AffiliateDisclosure";
 import { getSiblingLocations } from "@/lib/queries/brands";
 import { slugify } from "@/lib/seo/hubs";
 import type { Brand } from "@/lib/types/database";
@@ -110,7 +113,7 @@ export default async function RestaurantPage({ params }: Props) {
   } = await supabase.auth.getUser();
 
   const brandId = restaurant.brand_id ?? null;
-  const [dishes, allRestaurants, metrics, myCheckIn, media, siblings, brand] =
+  const [dishes, allRestaurants, metrics, myCheckIn, media, siblings, brand, gear] =
     await Promise.all([
       getSignatureDishes(restaurant.id),
       getRestaurants(),
@@ -126,6 +129,7 @@ export default async function RestaurantPage({ params }: Props) {
             .single()
             .then((r) => r.data as Pick<Brand, "name" | "slug"> | null)
         : Promise.resolve(null),
+      getGearForStyle(restaurant.style),
     ]);
 
   const code = resolveCountryCode(restaurant.country_code, restaurant.country);
@@ -413,6 +417,25 @@ export default async function RestaurantPage({ params }: Props) {
                   </li>
                 ))}
               </ul>
+            </section>
+          )}
+
+          {gear.length > 0 && (
+            <section className="mb-12">
+              <h2 className="mb-5 border-b border-border-subtle pb-3 font-heading text-xl font-bold text-text-primary">
+                Recommended Gear
+              </h2>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {gear.map((p) => (
+                  <GearProductCard
+                    key={p.id}
+                    product={p}
+                    restaurantId={restaurant.id}
+                    restaurantSlug={restaurant.slug}
+                  />
+                ))}
+              </div>
+              <AffiliateDisclosure variant="inline" className="mt-4" />
             </section>
           )}
         </div>
