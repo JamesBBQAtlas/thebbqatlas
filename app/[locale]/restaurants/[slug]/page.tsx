@@ -38,6 +38,7 @@ import {
 } from "@/lib/constants/categories";
 import { createClient } from "@/lib/supabase/server";
 import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
+import { getRecentVisitors } from "@/lib/queries/profiles";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { getGearForStyle } from "@/lib/queries/gear";
@@ -114,7 +115,7 @@ export default async function RestaurantPage({ params }: Props) {
   } = await supabase.auth.getUser();
 
   const brandId = restaurant.brand_id ?? null;
-  const [dishes, allRestaurants, metrics, myCheckIn, media, siblings, brand, gear] =
+  const [dishes, allRestaurants, metrics, myCheckIn, media, siblings, brand, gear, visitors] =
     await Promise.all([
       getSignatureDishes(restaurant.id),
       getRestaurants(),
@@ -131,6 +132,7 @@ export default async function RestaurantPage({ params }: Props) {
             .then((r) => r.data as Pick<Brand, "name" | "slug"> | null)
         : Promise.resolve(null),
       getGearForStyle(restaurant.style),
+      getRecentVisitors(restaurant.id, 12),
     ]);
 
   const isSaved = user
@@ -195,6 +197,18 @@ export default async function RestaurantPage({ params }: Props) {
     .sort((a, b) => a.km - b.km)
     .filter((x) => x.km <= 320) // ~200 mi
     .slice(0, 6);
+
+  const fmtVisitDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    } catch {
+      return "";
+    }
+  };
 
   return (
     <>
@@ -408,6 +422,69 @@ export default async function RestaurantPage({ params }: Props) {
             media={media}
             canUpload={Boolean(user)}
           />
+
+          {/* Who's been here — public check-ins, credited by @username */}
+          {visitors.length > 0 && (
+            <section className="mb-12">
+              <h2 className="mb-5 border-b border-border-subtle pb-3 font-heading text-xl font-bold text-text-primary">
+                Who&apos;s been here
+              </h2>
+              <ul className="space-y-3">
+                {visitors.map((v, i) => {
+                  const hasName = Boolean(v.displayName?.trim());
+                  const label = hasName
+                    ? v.displayName!.trim()
+                    : v.username
+                      ? `@${v.username}`
+                      : "A BBQ Atlas member";
+                  const initial = (
+                    v.displayName?.trim()?.[0] ||
+                    v.username?.[0] ||
+                    "?"
+                  ).toUpperCase();
+                  return (
+                    <li
+                      key={`${v.userId}-${i}`}
+                      className="flex items-start gap-3 rounded-lg border border-border-subtle bg-surface-0 p-4"
+                    >
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-sienna/15 font-heading text-sm font-bold text-brand-sienna">
+                        {initial}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          {v.username ? (
+                            <Link
+                              href={`/u/${v.username}`}
+                              className="font-semibold text-text-primary transition-colors hover:text-brand-gold"
+                            >
+                              {label}
+                            </Link>
+                          ) : (
+                            <span className="font-semibold text-text-primary">
+                              {label}
+                            </span>
+                          )}
+                          {hasName && v.username && (
+                            <span className="text-xs text-text-muted">
+                              @{v.username}
+                            </span>
+                          )}
+                          <span className="text-xs text-text-muted">
+                            · {fmtVisitDate(v.created_at)}
+                          </span>
+                        </div>
+                        {v.note && (
+                          <p className="mt-1 text-sm italic text-text-secondary">
+                            &ldquo;{v.note}&rdquo;
+                          </p>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          )}
 
           {dishes.length > 0 && (
             <section className="mb-12">

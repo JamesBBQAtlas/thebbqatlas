@@ -58,6 +58,15 @@ export default async function SettingsPage() {
                 <DisplayNameForm initial={displayName} />
               </div>
               <UsernameForm initial={profile?.username ?? ""} />
+              {profile?.username && (
+                <Link
+                  href={`/u/${profile.username}`}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-gold hover:underline"
+                >
+                  View your public profile
+                  <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
+                </Link>
+              )}
             </div>
           </div>
         </div>

@@ -137,7 +137,12 @@ export default async function ProfilePage() {
             <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
               <span className="text-text-secondary">{displayName}</span>
               {profile?.username && (
-                <span className="text-text-muted">@{profile.username}</span>
+                <Link
+                  href={`/u/${profile.username}`}
+                  className="text-text-muted transition-colors hover:text-brand-gold"
+                >
+                  @{profile.username}
+                </Link>
               )}
               <span className="rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-brand-sienna">
                 {ACCOUNT_LABELS[accountType]}
