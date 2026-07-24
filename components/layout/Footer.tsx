@@ -3,6 +3,8 @@ import { useTranslations } from "next-intl";
 import { Instagram } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import { EmailCapture } from "@/components/email/EmailCapture";
+import { FooterTagline } from "@/components/voice/FooterTagline";
+import { ThePromise } from "@/components/voice/ThePromise";
 
 /** Threads logo (not in lucide) — inline so it inherits currentColor. */
 function ThreadsIcon({ className }: { className?: string }) {
@@ -53,7 +55,11 @@ const SOCIALS = [
   { href: "https://x.com/TheBBQAtlas", name: "X", Icon: XIcon },
 ] as const;
 
-export function Footer() {
+export function Footer({
+  footerLines = [],
+}: {
+  footerLines?: { id: string; text: string; tag: string | null }[];
+}) {
   const t = useTranslations("Footer");
   const year = 2026;
 
@@ -91,9 +97,7 @@ export function Footer() {
                 The BBQ Atlas
               </span>
             </Link>
-            <p className="mt-4 font-heading text-base italic text-brand-gold">
-              {t("strapline")}
-            </p>
+            <FooterTagline lines={footerLines} fallback={t("strapline")} />
             <div className="mt-5 flex items-center gap-3">
               <span className="u-eyebrow text-text-muted">{t("followUs")}</span>
               {SOCIALS.map((s) => (
@@ -164,6 +168,7 @@ export function Footer() {
         </div>
 
         <div className="mt-12 border-t border-border-subtle pt-6">
+          <ThePromise className="mb-4 max-w-xl font-heading text-[0.9375rem] italic text-text-secondary" />
           <p className="text-xs text-text-muted">{t("amazonDisclosure")}</p>
           <p className="mt-2 text-xs text-text-muted">
             © {year} {t("rights")}

@@ -174,6 +174,27 @@ export interface GearItem {
   sort_order: number;
 }
 
+export type VoiceSlot =
+  | "homepage_subline"
+  | "footer"
+  | "empty_state"
+  | "loading"
+  | "not_found"
+  | "newsletter_confirm"
+  | "success_toast";
+
+/** Admin-managed house-voice microcopy line (see /admin/voice). */
+export interface VoiceLine {
+  id: string;
+  slot: VoiceSlot;
+  text: string;
+  tag: string | null;
+  is_active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export type GearCategory =
   | "thermometers"
   | "smokers_grills"

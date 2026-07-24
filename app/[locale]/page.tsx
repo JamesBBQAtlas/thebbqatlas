@@ -10,6 +10,8 @@ import { HomeMapVisual } from "@/components/home/HomeMapVisual";
 import { HeroVideo } from "@/components/home/HeroVideo";
 import type { Metadata } from "next";
 import { SITE } from "@/lib/seo/site";
+import { getVoiceLines, linesForSlot } from "@/lib/queries/voice";
+import { HomepageSubline } from "@/components/voice/HomepageSubline";
 
 // Homepage self-canonical + og:url (the layout supplies title/description/twitter
 // defaults, which are correct for the site root).
@@ -36,11 +38,16 @@ export default async function HomePage({
 }) {
   setRequestLocale(params.locale);
 
-  const [featured, all, guides] = await Promise.all([
+  const [featured, all, guides, voice] = await Promise.all([
     getFeaturedRestaurants(3),
     getRestaurants(),
     getGuides(),
+    getVoiceLines(),
   ]);
+  const subLines = linesForSlot(voice, "homepage_subline").map((l) => ({
+    id: l.id,
+    text: l.text,
+  }));
 
   const count = all.length;
   const countries = new Set(
@@ -86,6 +93,7 @@ export default async function HomePage({
             of the world&apos;s finest barbecue, built by people who&apos;ve
             eaten their way across it.
           </p>
+          <HomepageSubline lines={subLines} />
           <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
             <Link
               href="/map"

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Search, SlidersHorizontal, X, MapPin, Navigation, Loader2, LocateFixed } from "lucide-react";
+import { Search, SlidersHorizontal, X, MapPin, Navigation, Loader2, LocateFixed, Flame } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
@@ -16,6 +16,11 @@ import { cn } from "@/lib/utils/cn";
 const GOLD = "#D4AF37";
 const SIENNA = "#C4622D";
 const INK = "#0C0907";
+
+// Pit Zero (easter egg) — a single UNLABELLED pin at a founder-meaningful
+// coordinate. Injected client-side only: never in the dataset, sitemap or JSON-LD.
+const PIT_ZERO = { lat: 51.511191, lng: -0.136537 };
+const PIT_ZERO_PHRASES = new Set(["pit zero", "lowandslow"]);
 
 // Deep ocean blue applied ONLY to water polygons (sea, lakes, rivers). The dark
 // base layer and land are left untouched, so land keeps its original colour and
@@ -132,6 +137,7 @@ export function MapExplorer({
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const geoMarkerRef = useRef<maplibregl.Marker | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const pitMarkerRef = useRef<maplibregl.Marker | null>(null);
   const router = useRouter();
 
   // Restore the last view once (client-only; the map is imported ssr:false).
@@ -152,6 +158,7 @@ export function MapExplorer({
   const [category, setCategory] = useState<string>(initialState.category ?? "all");
   const [query, setQuery] = useState(initialState.query ?? "");
   const [selected, setSelected] = useState<Restaurant | null>(null);
+  const [pitZero, setPitZero] = useState(false);
 
   // Location (place) search — geocode a city/country/postcode and fly there.
   const [geoBusy, setGeoBusy] = useState(false);
@@ -467,6 +474,11 @@ export function MapExplorer({
     const q = query.trim();
     const map = mapRef.current;
     if (!q || !map || geoBusy) return;
+    if (PIT_ZERO_PHRASES.has(q.toLowerCase())) {
+      triggerPitZero();
+      return;
+    }
+    clearPitZero();
     setGeoBusy(true);
     setGeoMiss(false);
     try {
@@ -526,6 +538,40 @@ export function MapExplorer({
     } finally {
       setGeoBusy(false);
     }
+  }
+
+  // Pit Zero: cinematic fly-in + a single ember pin + the card. Ephemeral —
+  // clearing the search or dismissing removes it; it never enters filters.
+  function triggerPitZero() {
+    const map = mapRef.current;
+    if (!map) return;
+    clearPlace();
+    pitMarkerRef.current?.remove();
+    const el = document.createElement("div");
+    el.className = "atlas-pit-zero-marker";
+    el.setAttribute("role", "button");
+    el.setAttribute("aria-label", "Pit Zero");
+    el.addEventListener("click", () => setPitZero(true));
+    pitMarkerRef.current = new maplibregl.Marker({ element: el })
+      .setLngLat([PIT_ZERO.lng, PIT_ZERO.lat])
+      .addTo(map);
+    setSelected(null);
+    setQuery("");
+    setPitZero(true);
+    map.flyTo(
+      animate({
+        center: [PIT_ZERO.lng, PIT_ZERO.lat],
+        zoom: 15.5,
+        speed: 0.5,
+        curve: 1.6,
+      })
+    );
+  }
+
+  function clearPitZero() {
+    pitMarkerRef.current?.remove();
+    pitMarkerRef.current = null;
+    setPitZero(false);
   }
 
   function clearPlace() {
@@ -781,6 +827,29 @@ export function MapExplorer({
             onClose={() => setSelected(null)}
             onNavigate={persistView}
           />
+        )}
+
+        {pitZero && (
+          <div className="absolute inset-x-4 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] z-20 mx-auto max-w-sm rounded-xl border border-brand-gold/40 bg-surface-0/95 p-5 shadow-xl backdrop-blur lg:bottom-6 lg:left-6 lg:right-auto lg:mx-0">
+            <div className="flex items-start justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2.5 py-0.5 text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-brand-gold">
+                <Flame className="h-3 w-3" /> Pit Zero
+              </span>
+              <button
+                type="button"
+                onClick={clearPitZero}
+                aria-label="Close"
+                className="shrink-0 text-text-muted transition-colors hover:text-text-primary"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-text-secondary">
+              Pit Zero. Where every atlas begins — a fire, some patience, and
+              someone who refused to rush it. You found it because you went
+              looking. That&apos;s the whole idea.
+            </p>
+          </div>
         )}
       </div>
     </div>

@@ -364,6 +364,33 @@
     0 0 12px rgba(212, 175, 55, 0.55);
 }
 
+/* Pit Zero (easter egg) — a single ember-glowing gold pin, softly pulsing. */
+.atlas-pit-zero-marker {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  cursor: pointer;
+  background: radial-gradient(circle, #f5d169 0%, #d4af37 55%, rgba(212, 175, 55, 0.25) 100%);
+  box-shadow: 0 0 14px rgba(212, 175, 55, 0.7);
+  animation: pit-zero-pulse 2.4s ease-in-out infinite;
+}
+@keyframes pit-zero-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.55), 0 0 14px rgba(212, 175, 55, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 16px rgba(212, 175, 55, 0), 0 0 14px rgba(212, 175, 55, 0.7);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(212, 175, 55, 0), 0 0 14px rgba(212, 175, 55, 0.7);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .atlas-pit-zero-marker {
+    animation: none;
+  }
+}
+
 /* "You are here" — the visitor's own geolocated position (blue, distinct from
    the gold/sienna venue pins and the gold place-search marker). */
 .atlas-user-marker {

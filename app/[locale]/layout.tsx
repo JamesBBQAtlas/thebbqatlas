@@ -22,6 +22,7 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { Analytics } from "@/components/analytics/Analytics";
 import { CookieConsent } from "@/components/analytics/CookieConsent";
 import { organizationJsonLd, websiteJsonLd } from "@/lib/seo/jsonld";
+import { getVoiceLines, linesForSlot } from "@/lib/queries/voice";
 import { BRAND } from "@/lib/constants/styles";
 import "../globals.css";
 
@@ -95,6 +96,11 @@ export default async function LocaleLayout({
 
   setRequestLocale(locale);
   const messages = await getMessages();
+  const footerLines = linesForSlot(await getVoiceLines(), "footer").map((l) => ({
+    id: l.id,
+    text: l.text,
+    tag: l.tag,
+  }));
 
   return (
     <html lang={locale} suppressHydrationWarning>
@@ -115,7 +121,7 @@ export default async function LocaleLayout({
             {children}
           </main>
           <FooterGate>
-            <Footer />
+            <Footer footerLines={footerLines} />
           </FooterGate>
           <MobileTabBar />
           <CookieConsent />
