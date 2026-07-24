@@ -38,13 +38,17 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
   }
 
+  // The profile row always exists (created at signup), so a plain UPDATE is all
+  // we need — and it avoids requiring INSERT on profiles, which F-01 correctly
+  // revoked. Runs as the user's own session so RLS + column grants apply.
   const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createAdminClient()
     : supabase;
 
   const { error } = await db
     .from("profiles")
-    .upsert({ id: user.id, ...updates }, { onConflict: "id" });
+    .update(updates)
+    .eq("id", user.id);
 
   if (error) {
     // 23505 = unique_violation (username already taken)
