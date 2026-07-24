@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Camera, Clock } from "lucide-react";
@@ -41,6 +40,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
 import { getRecentVisitors } from "@/lib/queries/profiles";
 import { getPublicAvatarSignedUrls, avatarBadge } from "@/lib/account/public-avatar";
+import { VenueVisitors } from "@/components/restaurants/VenueVisitors";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { getGearForStyle } from "@/lib/queries/gear";
@@ -134,7 +134,7 @@ export default async function RestaurantPage({ params }: Props) {
             .then((r) => r.data as Pick<Brand, "name" | "slug"> | null)
         : Promise.resolve(null),
       getGearForStyle(restaurant.style),
-      getRecentVisitors(restaurant.id, 12),
+      getRecentVisitors(restaurant.id, 50),
     ]);
 
   const isSaved = user
@@ -200,22 +200,21 @@ export default async function RestaurantPage({ params }: Props) {
     .filter((x) => x.km <= 320) // ~200 mi
     .slice(0, 6);
 
-  const fmtVisitDate = (iso: string) => {
-    try {
-      return new Date(iso).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      });
-    } catch {
-      return "";
-    }
-  };
-
-  // Sign uploaded photos for the visitor list (initials badge is the fallback).
+  // Sign uploaded photos, then flatten to plain rows for the client roster.
   const visitorAvatars = await getPublicAvatarSignedUrls(
     visitors.map((v) => v.userId)
   );
+  const visitorRows = visitors.map((v) => {
+    const badge = avatarBadge(v.username ?? v.userId);
+    return {
+      username: v.username,
+      note: v.note,
+      createdAt: v.created_at,
+      avatarUrl: visitorAvatars.get(v.userId) ?? null,
+      initial: badge.initial,
+      badgeClass: badge.className,
+    };
+  });
 
   return (
     <>
@@ -430,69 +429,8 @@ export default async function RestaurantPage({ params }: Props) {
             canUpload={Boolean(user)}
           />
 
-          {/* Who's been here — public check-ins, credited by @username */}
-          {visitors.length > 0 && (
-            <section className="mb-12">
-              <h2 className="mb-5 border-b border-border-subtle pb-3 font-heading text-xl font-bold text-text-primary">
-                Who&apos;s been here
-              </h2>
-              <ul className="space-y-3">
-                {visitors.map((v, i) => {
-                  const label = v.username
-                    ? `@${v.username}`
-                    : "A BBQ Atlas member";
-                  const photo = visitorAvatars.get(v.userId);
-                  const badge = avatarBadge(v.username ?? v.userId);
-                  return (
-                    <li
-                      key={`${v.userId}-${i}`}
-                      className="flex items-start gap-3 rounded-lg border border-border-subtle bg-surface-0 p-4"
-                    >
-                      {photo ? (
-                        <Image
-                          src={photo}
-                          alt={label}
-                          width={36}
-                          height={36}
-                          className="h-9 w-9 shrink-0 rounded-full object-cover"
-                        />
-                      ) : (
-                        <span
-                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full font-heading text-sm font-bold ${badge.className}`}
-                        >
-                          {badge.initial}
-                        </span>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                          {v.username ? (
-                            <Link
-                              href={`/u/${v.username}`}
-                              className="font-semibold text-text-primary transition-colors hover:text-brand-gold"
-                            >
-                              {label}
-                            </Link>
-                          ) : (
-                            <span className="font-semibold text-text-primary">
-                              {label}
-                            </span>
-                          )}
-                          <span className="text-xs text-text-muted">
-                            · {fmtVisitDate(v.created_at)}
-                          </span>
-                        </div>
-                        {v.note && (
-                          <p className="mt-1 text-sm italic text-text-secondary">
-                            &ldquo;{v.note}&rdquo;
-                          </p>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          )}
+          {/* "X members have been here" — the count expands the public roster */}
+          <VenueVisitors total={metrics.visited} visitors={visitorRows} />
 
           {dishes.length > 0 && (
             <section className="mb-12">

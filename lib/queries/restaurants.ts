@@ -1,5 +1,5 @@
 import { createAnonClient } from "@/lib/supabase/anon";
-import type { Restaurant, SignatureDish, GearItem, Review } from "@/lib/types/database";
+import type { Restaurant, SignatureDish, Review } from "@/lib/types/database";
 import { FALLBACK_RESTAURANTS } from "@/lib/data/fallback-restaurants";
 
 async function getSupabaseRestaurants(): Promise<Restaurant[] | null> {
@@ -79,21 +79,6 @@ export async function getSignatureDishes(restaurantId: string): Promise<Signatur
       .eq("restaurant_id", restaurantId)
       .order("sort_order");
     if (data?.length) return data as SignatureDish[];
-  } catch {
-    // fallback
-  }
-  return [];
-}
-
-export async function getGearItems(restaurantId: string): Promise<GearItem[]> {
-  try {
-    const supabase = createAnonClient();
-    const { data } = await supabase
-      .from("gear_items")
-      .select("*")
-      .eq("restaurant_id", restaurantId)
-      .order("sort_order");
-    if (data?.length) return data as GearItem[];
   } catch {
     // fallback
   }

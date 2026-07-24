@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { MapPinCheckInside, Check, Lock, Globe2, X, Loader2 } from "lucide-react";
@@ -101,13 +102,14 @@ export function CheckInButton({
         </button>
       )}
 
-      {open && (
+      {open &&
+        createPortal(
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
           onClick={() => !busy && setOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-border-default bg-surface-0 p-6 shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-border-strong bg-surface-2 p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="mb-4 flex items-start justify-between gap-3">
@@ -203,7 +205,8 @@ export function CheckInButton({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
