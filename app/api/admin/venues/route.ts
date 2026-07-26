@@ -182,6 +182,22 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Bad request." }, { status: 400 });
   }
 
+  // Guard: never publish an un-geocoded seed draft (it would pin at 0,0 in the
+  // ocean). Enrich it first — that researches + geocodes the record.
+  if (status === "approved") {
+    const { data: row } = await ctx.db
+      .from("restaurants")
+      .select("lat, lng")
+      .eq("id", restaurantId)
+      .single();
+    if (row && row.lat === 0 && row.lng === 0) {
+      return NextResponse.json(
+        { error: "Enrich this venue first — it has no map location yet." },
+        { status: 422 }
+      );
+    }
+  }
+
   const { error } = await ctx.db
     .from("restaurants")
     .update({ status })

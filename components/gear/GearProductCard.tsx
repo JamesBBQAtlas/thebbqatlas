@@ -1,11 +1,24 @@
+"use client";
+
+import { ExternalLink } from "lucide-react";
 import type { GearProduct } from "@/lib/types/database";
-import { AffiliateLink } from "@/components/monetization/AffiliateLink";
 import { GearImage } from "@/components/gear/GearImage";
 import { partnerLabel } from "@/lib/constants/gear";
+import { usePathname } from "@/i18n/navigation";
+import {
+  buildSubtag,
+  decorateAffiliateUrl,
+  detectPartner,
+  AMAZON_ONELINK_TAG,
+} from "@/lib/affiliate";
+import { logClick } from "@/lib/analytics/track";
 
 /**
- * A single catalogue product. Shows the official manufacturer photo when one is
- * set (on a light tile), else a tasteful category-icon placeholder.
+ * A single catalogue product. The WHOLE card is one affiliate link (image
+ * included), so a click anywhere goes to the retailer — while keeping the
+ * per-page attribution, click logging, and rel="sponsored nofollow" that every
+ * affiliate link on the site carries. Shows the official manufacturer photo when
+ * one is set (on a light tile), else a tasteful category-icon placeholder.
  */
 export function GearProductCard({
   product,
@@ -16,8 +29,38 @@ export function GearProductCard({
   restaurantId?: string | null;
   restaurantSlug?: string;
 }) {
+  const pathname = usePathname();
+  const label = `View on ${partnerLabel(product.partner)}`;
+  const subtag = buildSubtag({
+    restaurantSlug,
+    pagePath: pathname,
+    product: product.name,
+  });
+  const finalHref = decorateAffiliateUrl(
+    product.affiliate_url,
+    subtag,
+    AMAZON_ONELINK_TAG
+  );
+  const resolvedPartner = product.partner ?? detectPartner(product.affiliate_url);
+
   return (
-    <div className="flex gap-4 rounded-xl border border-border-subtle bg-surface-0 p-4 transition-all hover:border-border-default hover:shadow-lg">
+    <a
+      href={finalHref}
+      target="_blank"
+      rel="sponsored nofollow noopener noreferrer"
+      data-affiliate={resolvedPartner}
+      onClick={() =>
+        logClick({
+          event_type: "affiliate",
+          restaurant_id: restaurantId ?? null,
+          partner: resolvedPartner,
+          target_url: finalHref,
+          page_path: pathname,
+          subtag,
+        })
+      }
+      className="group flex gap-4 rounded-xl border border-border-subtle bg-surface-0 p-4 transition-all hover:border-border-default hover:shadow-lg"
+    >
       <GearImage
         src={product.image_url}
         alt={product.name}
@@ -38,19 +81,15 @@ export function GearProductCard({
           </p>
         )}
         <div className="mt-auto flex items-center gap-3 pt-2">
-          <AffiliateLink
-            href={product.affiliate_url}
-            label={`View on ${partnerLabel(product.partner)}`}
-            partner={product.partner ?? undefined}
-            product={product.name}
-            restaurantId={restaurantId}
-            restaurantSlug={restaurantSlug}
-          />
+          <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-brand-gold transition-colors group-hover:text-brand-gold-light">
+            {label}
+            <ExternalLink className="h-3 w-3" />
+          </span>
           {product.price_note && (
             <span className="text-xs text-text-muted">{product.price_note}</span>
           )}
         </div>
       </div>
-    </div>
+    </a>
   );
 }

@@ -145,6 +145,9 @@ export interface Restaurant {
   instagram_posts?: string[] | null;
   enrichment_sources?: string[] | null;
   enriched_at?: string | null;
+  // Seed-import fields: normalised IG handle (idempotency key) + one hero post.
+  instagram_handle?: string | null;
+  hero_post_url?: string | null;
 }
 
 export interface ReviewPhoto {

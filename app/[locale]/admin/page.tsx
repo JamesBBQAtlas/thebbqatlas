@@ -102,6 +102,7 @@ export default async function AdminDashboard() {
     clicksAffiliate,
     checkInsTotal,
     savesTotal,
+    draftsPending,
   ] = await Promise.all([
     count(db, "restaurants"),
     count(db, "restaurants", { col: "status", val: "approved" }),
@@ -117,6 +118,7 @@ export default async function AdminDashboard() {
     count(db, "click_events", { col: "event_type", val: "affiliate" }),
     count(db, "check_ins"),
     count(db, "saved_spots"),
+    count(db, "restaurants", { col: "status", val: "pending" }),
   ]);
 
   // Corrections/closures are submissions with a non-'new_venue' type.
@@ -169,6 +171,7 @@ export default async function AdminDashboard() {
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         <Stat label="Restaurants" value={restaurantsTotal} hint={`${restaurantsApproved} approved`} href="/admin/listings" />
+        <Stat label="Drafts awaiting approval" value={draftsPending} hint="imported / enriched venues" href="/admin/venues" />
         <Stat label="Submissions pending" value={newVenuePending} hint={`${subsApproved} approved · ${subsRejected} rejected`} href="/admin/venues" />
         <Stat label="Corrections pending" value={correctionsPending} hint="edits & closures" href="/admin/moderation" />
         <Stat label="Reviews pending" value={reviewsPending} hint={`${reviewsApproved} approved`} href="/admin/moderation" />

@@ -174,6 +174,13 @@ export default async function RestaurantPage({ params }: Props) {
   // own section below); else (3) the branded "Add a photo" placeholder. We never
   // scrape, hotlink, or self-host a third party's image as a hero.
   const heroImage = media.find((m) => m.kind === "image")?.url ?? null;
+  // Tier 2 hero (when there's no uploaded photo): the venue's own Instagram post,
+  // shown via Instagram's official embed — credited, links back, never scraped.
+  const heroPost =
+    typeof restaurant.hero_post_url === "string" &&
+    /instagram\.com\/(p|reel)\//.test(restaurant.hero_post_url)
+      ? restaurant.hero_post_url
+      : null;
   const canUpload = Boolean(user);
   const uploadHref = canUpload
     ? "#add-photos"
@@ -247,6 +254,20 @@ export default async function RestaurantPage({ params }: Props) {
             alt={`${restaurant.name} — ${STYLE_LABELS[restaurant.style]} barbecue in ${cityCountry}`}
             className="absolute inset-0 h-full w-full object-cover"
           />
+        ) : heroPost ? (
+          // Tier 2: the venue's own Instagram post as the hero, on the branded
+          // backdrop. Official embed (cookie-gated facade) — credited + links back.
+          <>
+            <HeroPlaceholder
+              variant="hero"
+              styleColor={STYLE_PIN_COLORS[restaurant.style]}
+            />
+            <div className="absolute inset-0 z-[2] flex items-center justify-center p-5">
+              <div className="w-full max-w-sm">
+                <InstagramEmbed posts={[heroPost]} />
+              </div>
+            </div>
+          </>
         ) : (
           <HeroPlaceholder
             variant="hero"
@@ -256,7 +277,7 @@ export default async function RestaurantPage({ params }: Props) {
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/10 via-background/40 to-background" />
 
         {/* Tier 3: branded invitation to contribute the first photo. */}
-        {!heroImage && (
+        {!heroImage && !heroPost && (
           <div className="absolute inset-x-0 top-[34%] z-[1] flex flex-col items-center px-6 text-center">
             <p className="font-heading text-xs uppercase tracking-[0.22em] text-white/70">
               No photos yet
@@ -413,15 +434,24 @@ export default async function RestaurantPage({ params }: Props) {
             </section>
           )}
 
-          {Array.isArray(restaurant.instagram_posts) &&
-            restaurant.instagram_posts.length > 0 && (
+          {(() => {
+            // Gallery = the enrichment's IG posts, minus whatever is already the
+            // hero, so we never show the same post twice.
+            const galleryPosts = (
+              Array.isArray(restaurant.instagram_posts)
+                ? restaurant.instagram_posts
+                : []
+            ).filter((p) => p !== heroPost);
+            if (galleryPosts.length === 0) return null;
+            return (
               <section className="mb-12">
                 <h2 className="mb-5 border-b border-border-subtle pb-3 font-heading text-xl font-bold text-text-primary">
                   From their Instagram
                 </h2>
-                <InstagramEmbed posts={restaurant.instagram_posts} />
+                <InstagramEmbed posts={galleryPosts} />
               </section>
-            )}
+            );
+          })()}
 
           <CommunityGallery
             restaurantId={restaurant.id}

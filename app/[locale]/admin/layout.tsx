@@ -86,14 +86,21 @@ export default async function AdminLayout({
     ? createAdminClient()
     : supabase;
 
-  const [mediaPending, suggestionsPending, subsPending, reviewsPending, photosPending] =
-    await Promise.all([
-      count(db, "media", { col: "status", val: "pending" }),
-      count(db, "suggestions", { col: "status", val: "pending" }),
-      count(db, "submissions", { col: "moderation_status", val: "pending" }),
-      count(db, "reviews", { col: "status", val: "pending" }),
-      count(db, "review_photos", { col: "status", val: "pending" }),
-    ]);
+  const [
+    mediaPending,
+    suggestionsPending,
+    subsPending,
+    reviewsPending,
+    photosPending,
+    draftsPending,
+  ] = await Promise.all([
+    count(db, "media", { col: "status", val: "pending" }),
+    count(db, "suggestions", { col: "status", val: "pending" }),
+    count(db, "submissions", { col: "moderation_status", val: "pending" }),
+    count(db, "reviews", { col: "status", val: "pending" }),
+    count(db, "review_photos", { col: "status", val: "pending" }),
+    count(db, "restaurants", { col: "status", val: "pending" }),
+  ]);
   const pendingTotal = subsPending + reviewsPending + photosPending;
 
   return (
@@ -112,7 +119,12 @@ export default async function AdminLayout({
             Admin
           </Link>
           <AdminNav
-            counts={{ media: mediaPending, suggestions: suggestionsPending, pending: pendingTotal }}
+            counts={{
+              media: mediaPending,
+              suggestions: suggestionsPending,
+              pending: pendingTotal,
+              drafts: draftsPending,
+            }}
           />
           </div>
         </div>

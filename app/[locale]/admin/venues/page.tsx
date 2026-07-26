@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
 import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
 import { PendingVenueActions } from "@/components/admin/PendingVenueActions";
+import { VenueImportPanel } from "@/components/admin/VenueImportPanel";
 import type { Restaurant } from "@/lib/types/database";
 
 export const metadata = { title: "Pending Venues" };
@@ -63,6 +64,10 @@ export default async function PendingVenuesPage() {
         </Link>
       </div>
 
+      <div className="mb-8">
+        <VenueImportPanel />
+      </div>
+
       {rows.length === 0 ? (
         <p className="rounded-xl border border-border-subtle bg-surface-0 p-8 text-text-muted">
           Nothing in the queue. New venues added via enrichment appear here for
@@ -90,7 +95,14 @@ export default async function PendingVenuesPage() {
                     {STYLE_LABELS[r.style as BbqStyle] ?? r.style} ·{" "}
                     {r.address || "no address"}
                   </p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-text-muted">
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                    {r.lat === 0 && r.lng === 0 && (
+                      <span className="rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2 py-0.5 font-semibold uppercase tracking-[0.05em] text-brand-gold">
+                        Seed draft — enrich to publish
+                      </span>
+                    )}
+                    {r.instagram_handle && <span>@{r.instagram_handle}</span>}
+                    {r.hero_post_url && <span>hero post ✓</span>}
                     {r.phone && <span>{r.phone}</span>}
                     {r.website && <span className="text-brand-gold">website</span>}
                     {r.instagram_url && <span>Instagram</span>}
@@ -104,7 +116,10 @@ export default async function PendingVenuesPage() {
                       )}
                   </div>
                 </div>
-                <PendingVenueActions restaurantId={r.id} />
+                <PendingVenueActions
+                  restaurantId={r.id}
+                  needsEnrich={r.lat === 0 && r.lng === 0}
+                />
               </div>
             </div>
           ))}
