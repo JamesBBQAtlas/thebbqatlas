@@ -199,6 +199,7 @@ export type GearCategory =
   | "thermometers"
   | "smokers_grills"
   | "fuel_wood"
+  | "rubs_spices"
   | "tools"
   | "cleaning";
 

@@ -1,4 +1,4 @@
-import { Thermometer, Flame, Trees, Wrench, Sparkles } from "lucide-react";
+import { Thermometer, Flame, Trees, UtensilsCrossed, Wrench, Sparkles } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { GearCategory } from "@/lib/types/database";
 
@@ -27,6 +27,12 @@ export const GEAR_CATEGORIES: {
     label: "Fuel & Wood",
     blurb: "Post oak, hickory, fruit woods — the flavour starts here.",
     icon: Trees,
+  },
+  {
+    key: "rubs_spices",
+    label: "Rubs & Spices",
+    blurb: "Bark, colour, crust — the seasoning that turns meat into barbecue.",
+    icon: UtensilsCrossed,
   },
   {
     key: "tools",
