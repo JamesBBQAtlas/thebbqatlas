@@ -1,17 +1,31 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { GROK_ENABLED } from "@/lib/ai/grok";
-import { enrichVenue, type VenueLead } from "@/lib/ai/enrich";
+import {
+  researchDossier,
+  writeVenueCopy,
+  priceBandToLevel,
+  mapSocials,
+  type VenueLead,
+} from "@/lib/ai/enrich";
 import { geocodeAddress } from "@/lib/geo/geocode";
+import { normalizeHandle } from "@/lib/admin/seed-import";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Enrich a bulk-imported DRAFT venue in place (P-enrich). Runs the existing
- * Grok → house-voice research on the draft's seed fields, geocodes the result,
- * and writes the full record back — but keeps status='pending' so nothing
- * publishes without a human clicking Publish afterwards.
+ * Enrich ONE venue (enrichment v3). Grok researches a strict facts-only dossier;
+ * Claude writes the house-voice copy; we geocode and write the record back —
+ * status stays 'pending' so nothing publishes without a human Publish.
+ *
+ * mode="full"  (default): full research + house-voice copy. For seed drafts.
+ * mode="light" (Phase B): gap-fill only — backfill a missing Instagram handle,
+ *   hero post and socials on an already-live venue WITHOUT touching its curated
+ *   name / description / style / status. Skips the Claude copy leg.
+ *
+ * A dossier too thin to write honestly sets needs_attention instead of a padded
+ * page.
  */
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
@@ -25,6 +39,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "");
+  const mode: "full" | "light" = body.mode === "light" ? "light" : "full";
   if (!restaurantId) {
     return NextResponse.json({ error: "restaurantId required." }, { status: 400 });
   }
@@ -32,7 +47,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, instagram_url, instagram_handle, website, address, city, country, status"
+      "id, name, instagram_url, instagram_handle, hero_post_url, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, status"
     )
     .eq("id", restaurantId)
     .single();
@@ -53,54 +68,120 @@ export async function POST(request: Request) {
     country: row.country || undefined,
   };
 
-  let e;
+  let dossier;
+  let citations: string[];
   try {
-    e = await enrichVenue(lead);
+    const res = await researchDossier(lead);
+    dossier = res.dossier;
+    citations = res.citations;
   } catch (err) {
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Enrichment failed." },
+      { error: err instanceof Error ? err.message : "Research failed." },
       { status: 502 }
     );
   }
 
-  // Build the patch from ONLY the fields enrichment actually returned, so we
-  // never overwrite good data with null.
-  const patch: Record<string, unknown> = {
-    enriched_at: new Date().toISOString(),
-  };
-  if (e.name) patch.name = e.name;
-  if (e.description) patch.description = e.description;
-  if (e.style) patch.style = e.style;
-  if (e.address) patch.address = e.address;
-  if (e.phone) patch.phone = e.phone;
-  if (typeof e.price_level === "number") patch.price_level = e.price_level;
-  if (e.offerings.length) patch.offerings = e.offerings;
-  if (e.hours) patch.hours = e.hours;
-  if (typeof e.permanently_closed === "boolean")
-    patch.permanently_closed = e.permanently_closed;
-  if (e.instagram_url) patch.instagram_url = e.instagram_url;
-  if (e.x_url) patch.x_url = e.x_url;
-  if (e.facebook_url) patch.facebook_url = e.facebook_url;
-  if (e.tiktok_url) patch.tiktok_url = e.tiktok_url;
-  if (e.youtube_url) patch.youtube_url = e.youtube_url;
-  if (e.location_label) patch.location_label = e.location_label;
-  if (e.instagram_posts.length) patch.instagram_posts = e.instagram_posts;
-  if (e.citations?.length) patch.enrichment_sources = e.citations;
+  const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
+  const heroPost = dossier.best_photo_post_url;
+  const socials = mapSocials(dossier.other_socials);
+  const patch: Record<string, unknown> = { enriched_at: new Date().toISOString() };
 
-  // Geocode so the draft gets a real map location (the Publish guard needs it).
-  let city = e.city ?? row.city;
-  let country = e.country ?? row.country;
-  const geo = await geocodeAddress({
-    address: e.address ?? row.address,
-    city,
-    country,
-  });
-  if (geo) {
-    patch.lat = geo.lat;
-    patch.lng = geo.lng;
-    if (geo.country_code) patch.country_code = geo.country_code;
-    city = geo.city ?? city;
-    country = geo.country ?? country;
+  if (mode === "light") {
+    // Gap-fill only — never overwrite curated fields on a live venue.
+    if (!row.instagram_url && dossier.instagram) patch.instagram_url = dossier.instagram;
+    if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
+    if (!row.hero_post_url && heroPost) patch.hero_post_url = heroPost;
+    if (!row.x_url && socials.x_url) patch.x_url = socials.x_url;
+    if (!row.facebook_url && socials.facebook_url) patch.facebook_url = socials.facebook_url;
+    if (!row.tiktok_url && socials.tiktok_url) patch.tiktok_url = socials.tiktok_url;
+    if (!row.youtube_url && socials.youtube_url) patch.youtube_url = socials.youtube_url;
+    if (dossier.sources.length || citations.length)
+      patch.enrichment_sources = [...new Set([...dossier.sources, ...citations])];
+    // Geocode only if it isn't on the map yet.
+    if (row.lat === 0 && row.lng === 0) {
+      const geo = await geocodeAddress({
+        address: dossier.address ?? row.address,
+        city: dossier.city ?? row.city,
+        country: dossier.country ?? row.country,
+      });
+      if (geo) {
+        patch.lat = geo.lat;
+        patch.lng = geo.lng;
+        if (geo.country_code) patch.country_code = geo.country_code;
+      }
+    }
+
+    const { error: updErr } = await ctx.db
+      .from("restaurants")
+      .update(patch)
+      .eq("id", restaurantId);
+    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+    return NextResponse.json({
+      ok: true,
+      mode,
+      name: row.name,
+      instagram: patch.instagram_url ?? row.instagram_url ?? null,
+      hero_post_url: patch.hero_post_url ?? row.hero_post_url ?? null,
+    });
+  }
+
+  // ---- full mode: research + house-voice copy -----------------------------
+  let copy;
+  try {
+    copy = await writeVenueCopy(dossier);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Copywriting failed." },
+      { status: 502 }
+    );
+  }
+
+  if (dossier.name) patch.name = dossier.name;
+  const composed = [copy.hook, copy.description].filter(Boolean).join("\n\n");
+  if (composed) patch.description = composed;
+  if (copy.style) patch.style = copy.style;
+
+  const address = [dossier.address, dossier.postcode]
+    .filter((s) => s && String(s).trim())
+    .join(", ");
+  if (address) patch.address = address;
+  if (dossier.phone) patch.phone = dossier.phone;
+  if (dossier.website) patch.website = dossier.website;
+  if (dossier.instagram) patch.instagram_url = dossier.instagram;
+  if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
+  if (socials.x_url) patch.x_url = socials.x_url;
+  if (socials.facebook_url) patch.facebook_url = socials.facebook_url;
+  if (socials.tiktok_url) patch.tiktok_url = socials.tiktok_url;
+  if (socials.youtube_url) patch.youtube_url = socials.youtube_url;
+  if (dossier.hours) patch.hours = dossier.hours;
+  const price = priceBandToLevel(dossier.price_band);
+  if (price) patch.price_level = price;
+  if (heroPost) patch.hero_post_url = heroPost;
+  if (dossier.sources.length || citations.length)
+    patch.enrichment_sources = [...new Set([...dossier.sources, ...citations])];
+
+  patch.needs_attention = copy.needs_attention;
+  patch.attention_reason = copy.attention_reason;
+
+  // Geocode (dossier coords first, else address lookup) so it lands on the map.
+  let city = dossier.city ?? row.city;
+  let country = dossier.country ?? row.country;
+  if (dossier.lat !== null && dossier.lng !== null) {
+    patch.lat = dossier.lat;
+    patch.lng = dossier.lng;
+  } else {
+    const geo = await geocodeAddress({
+      address: dossier.address ?? row.address,
+      city,
+      country,
+    });
+    if (geo) {
+      patch.lat = geo.lat;
+      patch.lng = geo.lng;
+      if (geo.country_code) patch.country_code = geo.country_code;
+      city = geo.city ?? city;
+      country = geo.country ?? country;
+    }
   }
   if (city) patch.city = city;
   if (country) patch.country = country;
@@ -109,15 +190,15 @@ export async function POST(request: Request) {
     .from("restaurants")
     .update(patch)
     .eq("id", restaurantId);
-  if (updErr) {
-    return NextResponse.json({ error: updErr.message }, { status: 500 });
-  }
+  if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
   return NextResponse.json({
     ok: true,
+    mode,
     name: (patch.name as string) ?? row.name,
-    confidence: e.confidence,
-    geocoded: Boolean(geo),
-    reviewer_notes: e.reviewer_notes,
+    needs_attention: copy.needs_attention,
+    attention_reason: copy.attention_reason,
+    geocoded: patch.lat !== undefined,
+    confidence: dossier.unknowns.length,
   });
 }

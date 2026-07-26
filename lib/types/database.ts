@@ -148,6 +148,9 @@ export interface Restaurant {
   // Seed-import fields: normalised IG handle (idempotency key) + one hero post.
   instagram_handle?: string | null;
   hero_post_url?: string | null;
+  // Enrichment v3: flag a venue whose dossier was too thin for an honest page.
+  needs_attention?: boolean | null;
+  attention_reason?: string | null;
 }
 
 export interface ReviewPhoto {

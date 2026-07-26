@@ -3,9 +3,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
-import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
-import { PendingVenueActions } from "@/components/admin/PendingVenueActions";
 import { VenueImportPanel } from "@/components/admin/VenueImportPanel";
+import {
+  PendingVenuesManager,
+  type DraftVenue,
+} from "@/components/admin/PendingVenuesManager";
 import type { Restaurant } from "@/lib/types/database";
 
 export const metadata = { title: "Pending Venues" };
@@ -45,6 +47,23 @@ export default async function PendingVenuesPage() {
     .order("created_at", { ascending: true });
   const rows = (pending ?? []) as Restaurant[];
 
+  const drafts: DraftVenue[] = rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    city: r.city || null,
+    country: r.country || null,
+    instagram_handle: r.instagram_handle ?? null,
+    hero_post_url: r.hero_post_url ?? null,
+    enriched_at: r.enriched_at ?? null,
+    needs_attention: Boolean(r.needs_attention),
+    attention_reason: r.attention_reason ?? null,
+    lat: r.lat,
+    lng: r.lng,
+    sourcesCount: Array.isArray(r.enrichment_sources)
+      ? r.enrichment_sources.length
+      : 0,
+  }));
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-16 sm:px-10">
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -53,14 +72,14 @@ export default async function PendingVenuesPage() {
             Pending Venues
           </h1>
           <p className="mt-1 text-text-muted">
-            New venues awaiting a final check before they go live.
+            Seed → enrich → review → publish. Nothing goes live without your yes.
           </p>
         </div>
         <Link
           href="/admin/enrich"
           className="rounded-md border border-border-default px-5 py-2.5 text-sm font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
         >
-          AI Enrichment
+          Single-venue console
         </Link>
       </div>
 
@@ -68,62 +87,13 @@ export default async function PendingVenuesPage() {
         <VenueImportPanel />
       </div>
 
-      {rows.length === 0 ? (
+      {drafts.length === 0 ? (
         <p className="rounded-xl border border-border-subtle bg-surface-0 p-8 text-text-muted">
-          Nothing in the queue. New venues added via enrichment appear here for
-          review before publishing.
+          Nothing in the queue. Import a seed sheet above, or add venues via the
+          console — they appear here as drafts for enrichment and review.
         </p>
       ) : (
-        <div className="space-y-4">
-          {rows.map((r) => (
-            <div
-              key={r.id}
-              className="rounded-xl border border-border-subtle bg-surface-0 p-5"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="font-heading text-lg font-bold text-text-primary">
-                    {r.name}
-                    {r.location_label && (
-                      <span className="ml-2 text-sm font-normal text-brand-sienna-light">
-                        {r.location_label}
-                      </span>
-                    )}
-                  </h2>
-                  <p className="mt-0.5 text-sm text-text-muted">
-                    {[r.city, r.country].filter(Boolean).join(", ")} ·{" "}
-                    {STYLE_LABELS[r.style as BbqStyle] ?? r.style} ·{" "}
-                    {r.address || "no address"}
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
-                    {r.lat === 0 && r.lng === 0 && (
-                      <span className="rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2 py-0.5 font-semibold uppercase tracking-[0.05em] text-brand-gold">
-                        Seed draft — enrich to publish
-                      </span>
-                    )}
-                    {r.instagram_handle && <span>@{r.instagram_handle}</span>}
-                    {r.hero_post_url && <span>hero post ✓</span>}
-                    {r.phone && <span>{r.phone}</span>}
-                    {r.website && <span className="text-brand-gold">website</span>}
-                    {r.instagram_url && <span>Instagram</span>}
-                    {Array.isArray(r.instagram_posts) &&
-                      r.instagram_posts.length > 0 && (
-                        <span>{r.instagram_posts.length} IG posts</span>
-                      )}
-                    {Array.isArray(r.enrichment_sources) &&
-                      r.enrichment_sources.length > 0 && (
-                        <span>· {r.enrichment_sources.length} sources on file</span>
-                      )}
-                  </div>
-                </div>
-                <PendingVenueActions
-                  restaurantId={r.id}
-                  needsEnrich={r.lat === 0 && r.lng === 0}
-                />
-              </div>
-            </div>
-          ))}
-        </div>
+        <PendingVenuesManager venues={drafts} />
       )}
     </div>
   );

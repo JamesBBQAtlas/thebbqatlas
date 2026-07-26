@@ -1,12 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Link } from "@/i18n/navigation";
-import { Sparkles, Search, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Sparkles, Search, ExternalLink, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from "lucide-react";
 import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
 import { CATEGORY_LABELS } from "@/lib/constants/categories";
 import type { MapItemCategory } from "@/lib/types/database";
 import { freshness, FRESH_TONE_CLASSES, FRESH_DOT, type Fresh } from "@/lib/admin/freshness";
+import { QuickPhotoInput } from "./QuickPhotoInput";
 
 export interface ListingRow {
   id: string;
@@ -21,6 +23,8 @@ export interface ListingRow {
   website: string | null;
   phone: string | null;
   instagram_url: string | null;
+  instagram_handle: string | null;
+  hero_post_url: string | null;
   has_hours: boolean;
 }
 
@@ -49,6 +53,28 @@ export function ListingsTable({ rows }: { rows: ListingRow[] }) {
   const [fresh, setFresh] = useState<"all" | Fresh>("all");
   const [sortKey, setSortKey] = useState<SortKey>("enriched");
   const [dir, setDir] = useState<Dir>("asc");
+  const router = useRouter();
+  const [enriching, setEnriching] = useState<Record<string, boolean>>({});
+
+  // Phase B: light enrichment on an EXISTING venue — backfill a missing IG
+  // handle, hero post + socials without touching its curated copy.
+  async function lightEnrich(id: string) {
+    setEnriching((p) => ({ ...p, [id]: true }));
+    try {
+      const res = await fetch("/api/admin/venues/enrich-draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: id, mode: "light" }),
+      });
+      if (res.ok) router.refresh();
+    } finally {
+      setEnriching((p) => {
+        const n = { ...p };
+        delete n[id];
+        return n;
+      });
+    }
+  }
 
   const countries = useMemo(
     () => [...new Set(rows.map((r) => r.country).filter(Boolean) as string[])].sort(),
@@ -231,7 +257,22 @@ export function ListingsTable({ rows }: { rows: ListingRow[] }) {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center justify-end gap-2">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <QuickPhotoInput restaurantId={r.id} current={r.hero_post_url} />
+                      <button
+                        type="button"
+                        onClick={() => lightEnrich(r.id)}
+                        disabled={enriching[r.id]}
+                        title="Find this venue's Instagram, hero post + socials (won't change its copy)"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
+                      >
+                        {enriching[r.id] ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3.5 w-3.5" />
+                        )}
+                        Find IG
+                      </button>
                       <Link
                         href={`/restaurants/${r.slug}`}
                         className="text-text-muted transition-colors hover:text-brand-gold"
@@ -241,10 +282,10 @@ export function ListingsTable({ rows }: { rows: ListingRow[] }) {
                       </Link>
                       <Link
                         href={`/admin/enrich?slug=${r.slug}`}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+                        className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+                        title="Full single-venue enrichment console"
                       >
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Enrich
+                        Console
                       </Link>
                     </div>
                   </td>

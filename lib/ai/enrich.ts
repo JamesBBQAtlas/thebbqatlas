@@ -1,5 +1,5 @@
 import { grokJSON } from "./grok";
-import { claudeJSON } from "./claude";
+import { claudeJSON, CLAUDE_ENABLED } from "./claude";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
 
 export type Engine = "grok" | "claude";
@@ -168,6 +168,230 @@ Return the JSON object described in your instructions.`;
     confidence,
     reviewer_notes: data.reviewer_notes ?? null,
     citations,
+  };
+}
+
+// ===========================================================================
+// Enrichment v3 — Grok RESEARCHES a strict facts-only dossier; Claude WRITES the
+// house-voice copy from it. (ENRICHMENT-SPEC.md). One writer = one voice; Grok
+// never produces marketing copy, Claude never invents facts.
+// ===========================================================================
+
+/** Grok's structured, facts-only research output for ONE venue. */
+export interface VenueDossier {
+  name: string | null;
+  also_known_as: string[];
+  what_it_is: string | null;
+  address: string | null;
+  city: string | null;
+  region_state: string | null;
+  country: string | null;
+  postcode: string | null;
+  lat: number | null;
+  lng: number | null;
+  phone: string | null;
+  website: string | null;
+  instagram: string | null;
+  other_socials: string[];
+  hours: Record<string, string> | null;
+  established: string | null;
+  founders_pitmaster: string | null;
+  bbq_style: string | null;
+  specialities: string[];
+  cook_method: string | null;
+  wood_fuel: string | null;
+  price_band: string | null;
+  awards_press: string[];
+  setting_vibe: string | null;
+  ordering_notes: string | null;
+  best_photo_post_url: string | null;
+  sources: string[];
+  unknowns: string[];
+}
+
+const DOSSIER_SYSTEM = `You are a RELENTLESS barbecue researcher for The BBQ Atlas, with live web-search and browsing tools. Research ONE venue and return a strict, FACTS-ONLY dossier. You are the researcher, not the writer — produce NO marketing or descriptive copy.
+
+Use every tool aggressively and exhaustively — do NOT stop at the first source. Lead with the venue's OWN primary sources, in this order of preference:
+- the venue's official WEBSITE (about, menu, hours, story) — the source of truth;
+- their INSTAGRAM + other official socials (bio, linked site, recent posts);
+- local NEWS, press, food blogs and city guides (history, awards, pitmaster profiles);
+- YOUTUBE (pitmaster interviews often reveal wood, method and backstory nothing else does);
+- Google Business / Maps and review platforms (Google / Yelp / TripAdvisor) — use ONLY as a light CROSS-CHECK of the plain facts (address, coordinates, phone, opening hours). Do NOT copy their review text, editorial descriptions, or photos, and never cite Google Maps as a source.
+
+Prefer PRIMARY sources; corroborate each non-obvious fact across at least two sources where possible. Keep searching until every field below is either filled from a real source or genuinely unavailable — treat empty fields as unfinished work, not a stopping point. Follow links; open pages; don't guess from a snippet.
+
+COPYRIGHT / SOURCING RULE: collect FACTS ONLY (facts aren't copyrightable). NEVER reproduce third-party expressive content — no review text, no editorial blurbs, no photos — from Google or anywhere. Do not scrape any site en masse. The dossier is raw facts + source URLs; all published copy is written fresh by us later.
+
+For anything you cannot verify, use null (or [] for lists) and list the field name under "unknowns" — NEVER guess or invent. Put a source URL for each non-obvious fact in "sources".
+
+Field notes:
+- "what_it_is": ONE factual line (e.g. "Central Texas barbecue joint and butcher shop"). Not a description.
+- "hours": an object keyed mon,tue,wed,thu,fri,sat,sun with strings like "11:00-20:00" or "Closed", or null. Note "sells out early"/variable in "ordering_notes".
+- "bbq_style": the real-world style in plain words (e.g. "Central Texas", "Carolina", "Kansas City", "asado", "Korean", "braai").
+- "price_band": one of £, ££, £££, ££££ or null.
+- "instagram": the venue's official Instagram profile URL. "other_socials": full https URLs for X/Twitter, Facebook, TikTok, YouTube, etc.
+- "best_photo_post_url": a single strong PUBLIC Instagram POST or REEL permalink (https://www.instagram.com/p/... or /reel/...) that would make a good hero image, or null.
+- "lat"/"lng": decimal coordinates if you can verify them, else null.
+
+Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, sources, unknowns.`;
+
+const asArray = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : [];
+const asStr = (v: unknown): string | null =>
+  typeof v === "string" && v.trim() ? v.trim() : null;
+const asNum = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) ? v : null;
+
+/** Grok research leg: one venue → one strict, facts-only dossier. */
+export async function researchDossier(
+  lead: VenueLead,
+  engine: Engine = "grok"
+): Promise<{ dossier: VenueDossier; citations: string[] }> {
+  const known = Object.entries(lead)
+    .filter(([, v]) => v && String(v).trim())
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join("\n");
+
+  const user = `Research this ONE barbecue venue and return the facts-only JSON dossier.
+
+Known so far:
+${known || "- (almost nothing — start from the name/handle above)"}
+
+Return ONLY the dossier JSON described in your instructions. Facts only — no descriptive or marketing copy.`;
+
+  const { data, citations } = await runEngine<Partial<VenueDossier>>(engine, {
+    system: DOSSIER_SYSTEM,
+    user,
+  });
+
+  const hours =
+    data.hours && typeof data.hours === "object" && !Array.isArray(data.hours)
+      ? (data.hours as Record<string, string>)
+      : null;
+
+  const dossier: VenueDossier = {
+    name: asStr(data.name) ?? lead.name ?? null,
+    also_known_as: asArray(data.also_known_as),
+    what_it_is: asStr(data.what_it_is),
+    address: asStr(data.address) ?? lead.address ?? null,
+    city: asStr(data.city) ?? lead.city ?? null,
+    region_state: asStr(data.region_state),
+    country: asStr(data.country) ?? lead.country ?? null,
+    postcode: asStr(data.postcode),
+    lat: asNum(data.lat),
+    lng: asNum(data.lng),
+    phone: asStr(data.phone) ?? lead.phone ?? null,
+    website: asStr(data.website) ?? lead.website ?? null,
+    instagram: asStr(data.instagram) ?? lead.instagram ?? null,
+    other_socials: asArray(data.other_socials),
+    hours,
+    established: asStr(data.established),
+    founders_pitmaster: asStr(data.founders_pitmaster),
+    bbq_style: asStr(data.bbq_style),
+    specialities: asArray(data.specialities),
+    cook_method: asStr(data.cook_method),
+    wood_fuel: asStr(data.wood_fuel),
+    price_band: asStr(data.price_band),
+    awards_press: asArray(data.awards_press),
+    setting_vibe: asStr(data.setting_vibe),
+    ordering_notes: asStr(data.ordering_notes),
+    best_photo_post_url:
+      asStr(data.best_photo_post_url) &&
+      /instagram\.com\/(p|reel)\//.test(String(data.best_photo_post_url))
+        ? String(data.best_photo_post_url)
+        : null,
+    sources: asArray(data.sources),
+    unknowns: asArray(data.unknowns),
+  };
+  return { dossier, citations };
+}
+
+export interface VenueCopy {
+  hook: string | null;
+  description: string | null;
+  style: BbqStyle | null;
+  needs_attention: boolean;
+  attention_reason: string | null;
+}
+
+const COPY_SYSTEM = `You are the SINGLE house writer for The BBQ Atlas. One writer, one voice, across the whole site: dry, warm, certain, a little absurd — Ron Swanson by way of a pitmaster. We CELEBRATE barbecue; we do NOT rank it. No hype, no clichés, no exclamation-mark energy.
+
+You are given a VERIFIED FACTS DOSSIER about one venue. Write the on-site copy using ONLY those facts.
+
+HARD RULES:
+- Never invent. If a fact is missing or listed in "unknowns", write around it — do not fill gaps with fiction.
+- No star ratings, scores, "best/top/#1" claims, or invented awards.
+- Do not reproduce any third-party text — write everything fresh.
+- Keep it specific to THIS place using the dossier's real details (style, wood, method, specialities, setting, backstory). Generic filler is a failure.
+
+Produce JSON with exactly these keys:
+- "hook": one line in house voice (a single sentence, no rating).
+- "description": 2-3 SHORT paragraphs; every fact accurate; personality carries it. Plain text (use \\n\\n between paragraphs).
+- "style": the ONE slug from this list that best matches the dossier's bbq_style, or null: ${STYLE_LIST}.
+- "needs_attention": true ONLY if the dossier is too thin to write an honest, specific page (mostly unknowns; no what_it_is, website or instagram; nothing concrete to say). Prefer a lean true page over a padded invented one.
+- "attention_reason": if needs_attention is true, one short line on what's missing; else null.
+
+Respond ONLY with that JSON object.`;
+
+/** Claude writing leg: dossier → house-voice copy (falls back to Grok if Claude is off). */
+export async function writeVenueCopy(dossier: VenueDossier): Promise<VenueCopy> {
+  const engine: Engine = CLAUDE_ENABLED ? "claude" : "grok";
+  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".
+
+DOSSIER:
+${JSON.stringify(dossier, null, 2)}
+
+Return ONLY the JSON object described in your instructions.`;
+
+  const { data } = await runEngine<Partial<VenueCopy>>(engine, {
+    system: COPY_SYSTEM,
+    user,
+    search: false,
+  });
+
+  const style =
+    data.style && (BBQ_STYLES as string[]).includes(data.style)
+      ? (data.style as BbqStyle)
+      : null;
+  const description = asStr(data.description);
+  // Belt-and-braces: if the writer produced nothing usable, that's needs-attention.
+  const thin =
+    !dossier.what_it_is && !dossier.website && !dossier.instagram && !description;
+  const needs_attention =
+    (typeof data.needs_attention === "boolean" ? data.needs_attention : false) ||
+    thin;
+
+  return {
+    hook: asStr(data.hook),
+    description,
+    style,
+    needs_attention,
+    attention_reason: needs_attention
+      ? asStr(data.attention_reason) ?? "Dossier too thin to write an honest page."
+      : null,
+  };
+}
+
+/** £/££/£££/££££ → 1–4 (or null). */
+export function priceBandToLevel(band: string | null): number | null {
+  if (!band) return null;
+  const n = (band.match(/£/g) || []).length;
+  return n >= 1 && n <= 4 ? n : null;
+}
+
+/** Sort a venue's other-social URLs into our per-network columns. */
+export function mapSocials(urls: string[]): {
+  x_url: string | null;
+  facebook_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
+} {
+  const find = (re: RegExp) => urls.find((u) => re.test(u)) ?? null;
+  return {
+    x_url: find(/(twitter\.com|x\.com)\//i),
+    facebook_url: find(/facebook\.com\//i),
+    tiktok_url: find(/tiktok\.com\//i),
+    youtube_url: find(/youtube\.com|youtu\.be/i),
   };
 }
 

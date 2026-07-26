@@ -9,8 +9,11 @@ import { Instagram } from "lucide-react";
  * the content; we never copy or re-host it). Only public post/reel permalinks
  * work.
  *
- * F-27: embed.js sets Meta cookies, so we gate it behind a click-to-load facade.
- * Nothing loads from Instagram until the visitor explicitly asks for it.
+ * F-27: embed.js sets Meta cookies, so it's gated on consent. Visitors who've
+ * accepted cookies via our banner (Consent Mode v2 → bbqatlas_consent=granted)
+ * get the embed auto-loaded so the photo shows immediately; visitors who
+ * declined or haven't decided see a one-tap cover and nothing loads until they
+ * ask. Either way Instagram serves and attributes the content — we never copy it.
  */
 declare global {
   interface Window {
@@ -18,8 +21,20 @@ declare global {
   }
 }
 
+/** Has the visitor accepted cookies via our banner? */
+function consentGranted(): boolean {
+  if (typeof document === "undefined") return false;
+  return /(?:^|; )bbqatlas_consent=granted(?:;|$)/.test(document.cookie);
+}
+
 export function InstagramEmbed({ posts }: { posts: string[] }) {
   const [loaded, setLoaded] = useState(false);
+
+  // Auto-load for visitors who've already accepted cookies — so venue photos
+  // show on first load rather than hiding behind a tap.
+  useEffect(() => {
+    if (consentGranted()) setLoaded(true);
+  }, []);
 
   useEffect(() => {
     if (!loaded) return;
