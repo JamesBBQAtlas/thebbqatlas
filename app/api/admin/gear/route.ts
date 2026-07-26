@@ -31,7 +31,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
 
-  const db = ctx.db;
+  // Write through the admin's own session; the is_admin() RLS policy authorises
+  // it, so gear writes work regardless of the service-role key's state.
+  const db = ctx.userClient;
   const now = new Date().toISOString();
 
   if (body.action === "retire" || body.action === "restore") {

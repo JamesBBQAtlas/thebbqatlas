@@ -1,7 +1,5 @@
 import { redirect } from "next/navigation";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { GearConsole } from "@/components/admin/GearConsole";
 import type { GearProduct } from "@/lib/types/database";
 
@@ -30,11 +28,10 @@ export default async function AdminGearPage() {
     );
   }
 
-  const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? createAdminClient()
-    : supabase;
-
-  const { data } = await db
+  // Read through the admin's OWN session: the "Admin manage gear products"
+  // is_admin() policy returns every row (active + retired) for admins, so the
+  // console no longer depends on the service-role key being valid.
+  const { data } = await supabase
     .from("gear_products")
     .select("*")
     .order("category", { ascending: true })

@@ -6,6 +6,14 @@ export interface AdminContext {
   userId: string;
   /** Service-role client when available (bypasses RLS), else the user client. */
   db: SupabaseClient;
+  /**
+   * The admin's OWN (cookie) session. Use this for writes to tables that carry an
+   * is_admin() RLS policy (gear_products, voice_lines, suggestions, brands, news,
+   * …) so the admin console works even when the service-role key is missing or
+   * misconfigured. Reserve `db` for operations that genuinely need to bypass RLS
+   * (reading other users, counting private rows, role changes, telemetry).
+   */
+  userClient: SupabaseClient;
 }
 
 /**
@@ -37,5 +45,5 @@ export async function requireAdmin(): Promise<AdminContext | null> {
   const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createAdminClient()
     : supabase;
-  return { userId: user.id, db };
+  return { userId: user.id, db, userClient: supabase };
 }
