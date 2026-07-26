@@ -40,9 +40,6 @@ export default async function GearPage({
         Atlas.
       </p>
 
-      {/* Disclosure at the top of the page (FTC/ASA). */}
-      <AffiliateDisclosure className="mt-6" />
-
       {activeCategories.length === 0 ? (
         <div className="mt-12 rounded-2xl border border-border-subtle bg-surface-0 p-10 text-center">
           <p className="text-text-secondary">
