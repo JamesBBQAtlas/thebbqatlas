@@ -47,7 +47,7 @@ export default async function GearPage({
           </p>
         </div>
       ) : (
-        activeCategories.map((cat, i) => {
+        activeCategories.map((cat) => {
           const items = grouped[cat.key] ?? [];
           return (
             <section key={cat.key} className="mt-12">
@@ -65,16 +65,17 @@ export default async function GearPage({
                   <GearProductCard key={p.id} product={p} />
                 ))}
               </div>
-              {/* Second disclosure, right next to the first set of links. */}
-              {i === 0 && (
-                <AffiliateDisclosure variant="inline" className="mt-4" />
-              )}
             </section>
           );
         })
       )}
 
       <AdSlot slot="in-content" className="mt-12 h-0" />
+
+      {/* Affiliate disclosure — discreet, at the very bottom (FTC/ASA/Amazon). */}
+      {activeCategories.length > 0 && (
+        <AffiliateDisclosure variant="inline" className="mt-12" />
+      )}
     </div>
   );
 }
