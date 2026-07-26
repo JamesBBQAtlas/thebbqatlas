@@ -2,7 +2,14 @@ import { Thermometer, Flame, Trees, UtensilsCrossed, Wrench, Sparkles } from "lu
 import type { LucideIcon } from "lucide-react";
 import type { GearCategory } from "@/lib/types/database";
 
-/** Display order + copy + icon for each gear catalogue category. */
+/**
+ * Display order + copy + icon for each gear catalogue category.
+ *
+ * Order is deliberate (PM, 26 Jul): lead with the cheap, high-velocity items
+ * that convert fastest — thermometers, rubs, fuel, tools, cleaning — to chase
+ * the first sales (and the PA-API unlock). Big-ticket smokers & grills earn
+ * the most per sale but sell slowest, so they sit last.
+ */
 export const GEAR_CATEGORIES: {
   key: GearCategory;
   label: string;
@@ -17,22 +24,16 @@ export const GEAR_CATEGORIES: {
     icon: Thermometer,
   },
   {
-    key: "smokers_grills",
-    label: "Smokers & Grills",
-    blurb: "Where the magic happens — from backyard bullets to offset workhorses.",
-    icon: Flame,
+    key: "rubs_spices",
+    label: "Rubs & Spices",
+    blurb: "Bark, colour, crust — the seasoning that turns meat into barbecue.",
+    icon: UtensilsCrossed,
   },
   {
     key: "fuel_wood",
     label: "Fuel & Wood",
     blurb: "Post oak, hickory, fruit woods — the flavour starts here.",
     icon: Trees,
-  },
-  {
-    key: "rubs_spices",
-    label: "Rubs & Spices",
-    blurb: "Bark, colour, crust — the seasoning that turns meat into barbecue.",
-    icon: UtensilsCrossed,
   },
   {
     key: "tools",
@@ -45,6 +46,12 @@ export const GEAR_CATEGORIES: {
     label: "Cleaning & Care",
     blurb: "Keep the pit in fighting shape between cooks.",
     icon: Sparkles,
+  },
+  {
+    key: "smokers_grills",
+    label: "Smokers & Grills",
+    blurb: "Where the magic happens — from backyard bullets to offset workhorses.",
+    icon: Flame,
   },
 ];
 

@@ -76,9 +76,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     `${restaurant.name} — ${STYLE_LABELS[restaurant.style]} barbecue in ${location}.`;
 
   const canonical = `/restaurants/${restaurant.slug}`;
-  // Fall back to the branded crest when there's no copyright-safe hero, so the
-  // card never renders imageless in social/search previews.
-  const ogImage = safeVenueImage(restaurant.hero_image_url) || SITE.logo;
+  // Fall back to the dedicated 1200×630 share card when there's no copyright-safe
+  // hero, so the preview never renders imageless (or in the wrong aspect ratio).
+  const ogImage = safeVenueImage(restaurant.hero_image_url) || SITE.ogImage;
 
   return {
     title: restaurant.name,
@@ -674,6 +674,7 @@ export default async function RestaurantPage({ params }: Props) {
             lng={restaurant.lng}
             nearby={nearby.map((n) => ({ lat: n.r.lat, lng: n.r.lng }))}
             caption={cityCountry}
+            slug={restaurant.slug}
           />
 
           {/* Ownership + keeping listings honest */}

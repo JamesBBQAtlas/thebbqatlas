@@ -39,15 +39,16 @@ export const metadata: Metadata = {
   openGraph: {
     siteName: BRAND.name,
     type: "website",
-    // Branded default OG image (per-route pages set their own where relevant).
-    images: [{ url: "/logos/crest-gold.jpg", width: 1200, height: 1200 }],
+    // Dedicated 1200×630 share card (F-19); per-route pages set their own where
+    // relevant. Correct aspect ratio so WhatsApp/iMessage/Slack render a preview.
+    images: [{ url: "/og/atlas-og.jpg", width: 1200, height: 630 }],
   },
   twitter: {
     card: "summary_large_image",
     title: `${BRAND.name} — The World's Great Barbecue, Mapped`,
     description:
       "A curated global atlas of the world's great barbecue. Explore the map, read the guides, celebrate the craft.",
-    images: ["/logos/crest-gold.jpg"],
+    images: ["/og/atlas-og.jpg"],
   },
   applicationName: BRAND.name,
   appleWebApp: {

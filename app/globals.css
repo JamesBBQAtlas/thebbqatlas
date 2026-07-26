@@ -364,25 +364,31 @@
     0 0 12px rgba(212, 175, 55, 0.55);
 }
 
-/* Pit Zero (easter egg) — a single ember-glowing gold pin, softly pulsing. */
+/* Pit Zero (easter egg) — a small fox ("Basil") in warm sienna/ember with a
+   soft glow, gently breathing. Unlabelled on the map. */
 .atlas-pit-zero-marker {
-  width: 20px;
-  height: 20px;
-  border-radius: 9999px;
+  width: 30px;
+  height: 30px;
   cursor: pointer;
-  background: radial-gradient(circle, #f5d169 0%, #d4af37 55%, rgba(212, 175, 55, 0.25) 100%);
-  box-shadow: 0 0 14px rgba(212, 175, 55, 0.7);
-  animation: pit-zero-pulse 2.4s ease-in-out infinite;
+  color: #e2703a; /* ember sienna */
+  filter: drop-shadow(0 0 6px rgba(226, 112, 58, 0.85))
+    drop-shadow(0 0 14px rgba(212, 175, 55, 0.5));
+  animation: pit-zero-glow 2.6s ease-in-out infinite;
 }
-@keyframes pit-zero-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.55), 0 0 14px rgba(212, 175, 55, 0.7);
-  }
-  70% {
-    box-shadow: 0 0 0 16px rgba(212, 175, 55, 0), 0 0 14px rgba(212, 175, 55, 0.7);
-  }
+.atlas-pit-zero-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@keyframes pit-zero-glow {
+  0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(212, 175, 55, 0), 0 0 14px rgba(212, 175, 55, 0.7);
+    filter: drop-shadow(0 0 5px rgba(226, 112, 58, 0.7))
+      drop-shadow(0 0 12px rgba(212, 175, 55, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 9px rgba(226, 112, 58, 0.95))
+      drop-shadow(0 0 20px rgba(212, 175, 55, 0.6));
   }
 }
 @media (prefers-reduced-motion: reduce) {

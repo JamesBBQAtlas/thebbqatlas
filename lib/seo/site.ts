@@ -14,6 +14,10 @@ export const SITE = {
   description:
     "A curated global atlas of the world's great barbecue — smokehouses, asados, Korean grills, churrasco and more. Explore the map, read the guides, celebrate the craft.",
   logo: `${SITE_URL}/logos/crest-emblem.png`,
+  // Dedicated 1200×630 share card (F-19) — the correct aspect ratio for
+  // Open Graph / Twitter previews (WhatsApp, iMessage, Slack, etc.). Used as the
+  // site-wide default and the fallback when a page has no copyright-safe hero.
+  ogImage: `${SITE_URL}/og/atlas-og.jpg`,
   // Official social profiles — kept in sync with the footer's social links so
   // the Organization sameAs and the visible footer agree (F-34). Update both
   // together if a handle changes.

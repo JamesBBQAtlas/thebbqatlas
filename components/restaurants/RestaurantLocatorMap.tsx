@@ -16,14 +16,35 @@ export function RestaurantLocatorMap({
   lng,
   nearby,
   caption,
+  slug,
   fullMapHref = "/map",
 }: {
   lat: number;
   lng: number;
   nearby: NearbyPoint[];
   caption?: string;
+  slug?: string;
   fullMapHref?: string;
 }) {
+  // Deep-link "Full map →" so it opens the main map framed on THIS venue with
+  // its neighbours still in shot (pin selected), instead of resetting to the
+  // last remembered world view. We pass the venue slug + a padded bounding box
+  // (minLng,minLat,maxLng,maxLat) covering the venue and the nearby dots. The
+  // map reads these params on load (see MapExplorer); the plain "/map" fallback
+  // stays for any caller that doesn't pass a slug.
+  const mapHref = (() => {
+    if (!slug) return fullMapHref;
+    const lats = [lat, ...nearby.map((n) => n.lat)];
+    const lngs = [lng, ...nearby.map((n) => n.lng)];
+    const pad = 0.02; // ~2km of headroom so the venue is never flush to the edge
+    const w = Math.min(...lngs) - pad;
+    const e = Math.max(...lngs) + pad;
+    const s = Math.min(...lats) - pad;
+    const n = Math.max(...lats) + pad;
+    const bbox = [w, s, e, n].map((v) => v.toFixed(5)).join(",");
+    return `/map?venue=${encodeURIComponent(slug)}&bbox=${bbox}`;
+  })();
+
   const cosLat = Math.cos((lat * Math.PI) / 180);
   const raw = nearby.map((n) => ({
     dx: (n.lng - lng) * cosLat,
@@ -83,7 +104,7 @@ export function RestaurantLocatorMap({
           </span>
         )}
         <Link
-          href={fullMapHref}
+          href={mapHref}
           className="absolute bottom-2 right-3 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-brand-gold/90 transition-colors hover:text-brand-gold"
         >
           Full map →

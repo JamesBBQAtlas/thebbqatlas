@@ -221,3 +221,86 @@ export function sendMissive(opts: {
     },
   });
 }
+
+// Social destinations for lifecycle marketing — kept in sync with the footer.
+const WHATSAPP_CHANNEL = "https://whatsapp.com/channel/0029Vb73kIa3gvWix7CwZh2m";
+const SOCIAL_INSTAGRAM = "https://instagram.com/bbqatlas";
+const SOCIAL_THREADS = "https://threads.net/@bbqatlas";
+const SOCIAL_X = "https://x.com/TheBBQAtlas";
+
+/**
+ * 6. Day-3 lifecycle "social drip" — MARKETING (SOCIAL-DRIP-EMAIL.md, verbatim
+ * voice). Sent once, ~3 days after signup, ONLY to marketing-opted-in users.
+ * WhatsApp channel is the hero CTA; Instagram/Threads/X sit below. Real
+ * one-click unsubscribe via the recipient's own token.
+ */
+export function sendDay3(opts: {
+  to: string;
+  unsubscribeToken: string;
+  userId?: string;
+}) {
+  const pageUrl = `${EMAIL_SITE_URL}/unsubscribe?token=${opts.unsubscribeToken}`;
+  const apiUrl = `${EMAIL_SITE_URL}/api/unsubscribe?token=${opts.unsubscribeToken}`;
+
+  // Hero CTA button (table-based, inline styled — same treatment as the shell's
+  // own CTA, but built inline so the social links can sit BELOW it).
+  const heroButton = `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 20px;">
+      <tr><td style="border-radius:6px;background:#C4622D;">
+        <a href="${WHATSAPP_CHANNEL}" style="display:inline-block;padding:13px 26px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">Follow the WhatsApp channel →</a>
+      </td></tr>
+    </table>`;
+
+  const bodyHtml = `<p style="margin:0 0 14px;">You've been with The BBQ Atlas for three days now. Long enough for a good rest. Not nearly long enough for a brisket.</p>
+    <p style="margin:0 0 14px;">We mostly keep to ourselves — we told you we wouldn't clutter your inbox, and we meant it. But we do turn up in a few other places, and a couple of them are worth your time.</p>
+    <p style="margin:0 0 4px;"><strong>The WhatsApp channel</strong> — this is the one. New pits, quiet tips, the odd strong opinion, delivered where you'll actually see it. No noise, no nonsense.</p>
+    ${heroButton}
+    <p style="margin:0 0 10px;color:#6f6152;">And the rest, if they suit you:</p>
+    <ul style="margin:0 0 14px;padding-left:20px;color:#2b2118;">
+      <li style="margin:0 0 7px;"><a href="${SOCIAL_INSTAGRAM}" style="color:#C4622D;">Instagram</a> — the good-looking end of barbecue. Bark, smoke rings, the occasional perfect slice.</li>
+      <li style="margin:0 0 7px;"><a href="${SOCIAL_THREADS}" style="color:#C4622D;">Threads</a> &amp; <a href="${SOCIAL_X}" style="color:#C4622D;">X</a> — where we say things about barbecue. Some of them defensible.</li>
+    </ul>
+    <p style="margin:0 0 14px;">Pick the ones that suit you. Ignore the rest. We won't take it personally, and we still won't ask you to rate us out of five.</p>
+    <p style="margin:0 0 18px;">Now — back to the barbecue.</p>
+    <p style="margin:0;color:#6f6152;">— The BBQ Atlas<br><em>We map barbecue. We're just a little easier to find these days.</em></p>`;
+
+  const bodyText = `You've been with The BBQ Atlas for three days now. Long enough for a good rest. Not nearly long enough for a brisket.
+
+We mostly keep to ourselves — we told you we wouldn't clutter your inbox, and we meant it. But we do turn up in a few other places, and a couple of them are worth your time.
+
+The WhatsApp channel — this is the one. New pits, quiet tips, the odd strong opinion, delivered where you'll actually see it. No noise, no nonsense.
+Follow the channel: ${WHATSAPP_CHANNEL}
+
+And the rest, if they suit you:
+- Instagram — the good-looking end of barbecue: ${SOCIAL_INSTAGRAM}
+- Threads & X — where we say things about barbecue, some of them defensible: ${SOCIAL_THREADS} · ${SOCIAL_X}
+
+Pick the ones that suit you. Ignore the rest. We won't take it personally, and we still won't ask you to rate us out of five.
+
+Now — back to the barbecue.
+
+— The BBQ Atlas
+We map barbecue. We're just a little easier to find these days.`;
+
+  const footerHtml = `<p style="margin:10px 0 0;">You're receiving this because you opted in to The BBQ Atlas Missives. <a href="${pageUrl}" style="color:#C4622D;">Unsubscribe</a> — one click, no exit survey.</p>`;
+  const footerText = `You're receiving this because you opted in to The BBQ Atlas Missives. Unsubscribe (one click, no exit survey): ${pageUrl}`;
+
+  return sendEmail({
+    to: opts.to,
+    from: M,
+    stream: "marketing",
+    type: "day3_social",
+    userId: opts.userId,
+    subject: "Three days in. Come find us out there.",
+    html: emailShell({
+      title: "Three days in.",
+      preheader: "Instagram, Threads, X — and a WhatsApp channel worth your while.",
+      bodyHtml,
+      footerHtml,
+    }),
+    text: emailText({ title: "Three days in.", bodyText, footerText }),
+    headers: {
+      "List-Unsubscribe": `<${apiUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
+  });
+}

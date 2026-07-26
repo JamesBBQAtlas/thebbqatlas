@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Search, SlidersHorizontal, X, MapPin, Navigation, Loader2, LocateFixed, Flame } from "lucide-react";
+import { Search, SlidersHorizontal, X, MapPin, Navigation, Loader2, LocateFixed } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useRouter } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
@@ -17,10 +18,24 @@ const GOLD = "#D4AF37";
 const SIENNA = "#C4622D";
 const INK = "#0C0907";
 
-// Pit Zero (easter egg) — a single UNLABELLED pin at a founder-meaningful
+// Pit Zero (easter egg) — a single UNLABELLED fox at a founder-meaningful
 // coordinate. Injected client-side only: never in the dataset, sitemap or JSON-LD.
 const PIT_ZERO = { lat: 51.511191, lng: -0.136537 };
 const PIT_ZERO_PHRASES = new Set(["pit zero", "lowandslow"]);
+
+// A small fox silhouette (internally "Basil") — original artwork, two pointed
+// ears and a narrowing muzzle. Drops into the DOM marker; coloured/glowed in CSS.
+const FOX_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 3 L9 9 C10.5 8.3 13.5 8.3 15 9 L21 3 L19.3 12.2 C18.4 16 15.4 18.6 12 20.4 C8.6 18.6 5.6 16 4.7 12.2 Z"/></svg>';
+
+/** The same fox as an inline icon, for the Pit Zero card badge. */
+function FoxIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <path d="M3 3 L9 9 C10.5 8.3 13.5 8.3 15 9 L21 3 L19.3 12.2 C18.4 16 15.4 18.6 12 20.4 C8.6 18.6 5.6 16 4.7 12.2 Z" />
+    </svg>
+  );
+}
 
 // Deep ocean blue applied ONLY to water polygons (sea, lakes, rivers). The dark
 // base layer and land are left untouched, so land keeps its original colour and
@@ -139,9 +154,29 @@ export function MapExplorer({
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const pitMarkerRef = useRef<maplibregl.Marker | null>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Restore the last view once (client-only; the map is imported ssr:false).
   const [initialState] = useState<MapViewState>(() => readMapState() ?? {});
+
+  // Deep link from a venue mini-map ("Full map →"): ?venue=<slug>&bbox=w,s,e,n.
+  // Read ONCE so later param changes can't retrigger it. When present it takes
+  // precedence over the remembered session view for the initial frame.
+  const [deepLink] = useState<{
+    venue: string | null;
+    bbox: [number, number, number, number] | null;
+  }>(() => {
+    const venue = searchParams?.get("venue") ?? null;
+    const raw = searchParams?.get("bbox");
+    let bbox: [number, number, number, number] | null = null;
+    if (raw) {
+      const p = raw.split(",").map(Number);
+      if (p.length === 4 && p.every(Number.isFinite)) {
+        bbox = [p[0], p[1], p[2], p[3]];
+      }
+    }
+    return { venue, bbox };
+  });
 
   const [ready, setReady] = useState(false);
   // Default: list open on desktop, but CLOSED on phones so the map is what you
@@ -159,6 +194,7 @@ export function MapExplorer({
   const [query, setQuery] = useState(initialState.query ?? "");
   const [selected, setSelected] = useState<Restaurant | null>(null);
   const [pitZero, setPitZero] = useState(false);
+  const [homage, setHomage] = useState(false);
 
   // Location (place) search — geocode a city/country/postcode and fly there.
   const [geoBusy, setGeoBusy] = useState(false);
@@ -240,11 +276,20 @@ export function MapExplorer({
         ? `https://api.maptiler.com/maps/dataviz-dark/style.json?key=${mapKey}`
         : FALLBACK_STYLE;
 
+      // A venue deep link frames the bbox on load; construct near its centre so
+      // there's no visible jump from the world view before fitBounds runs.
+      const dlCenter: [number, number] | undefined = deepLink.bbox
+        ? [
+            (deepLink.bbox[0] + deepLink.bbox[2]) / 2,
+            (deepLink.bbox[1] + deepLink.bbox[3]) / 2,
+          ]
+        : undefined;
+
       const map = new maplibregl.Map({
         container: containerRef.current,
         style: styleSpec,
-        center: initialState.center ?? [8, 25],
-        zoom: initialState.zoom ?? 1.3,
+        center: dlCenter ?? initialState.center ?? [8, 25],
+        zoom: dlCenter ? 11 : initialState.zoom ?? 1.3,
         attributionControl: false,
       });
       mapRef.current = map;
@@ -379,6 +424,23 @@ export function MapExplorer({
       });
       map.on("mouseenter", "clusters", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "clusters", () => (map.getCanvas().style.cursor = ""));
+
+      // Venue deep link: frame the venue + its neighbours and open its card so
+      // the pin arrives selected (not reset to the remembered world view).
+      if (deepLink.bbox) {
+        const [w, s, e, n] = deepLink.bbox;
+        map.fitBounds(
+          [
+            [w, s],
+            [e, n],
+          ],
+          { padding: 64, maxZoom: 15, duration: 0 }
+        );
+      }
+      if (deepLink.venue) {
+        const r = bySlug.get(deepLink.venue);
+        if (r) setSelected(r);
+      }
 
       setReady(true);
     });
@@ -540,7 +602,7 @@ export function MapExplorer({
     }
   }
 
-  // Pit Zero: cinematic fly-in + a single ember pin + the card. Ephemeral —
+  // Pit Zero: cinematic fly-in + a single fox ("Basil") + the card. Ephemeral —
   // clearing the search or dismissing removes it; it never enters filters.
   function triggerPitZero() {
     const map = mapRef.current;
@@ -550,13 +612,15 @@ export function MapExplorer({
     const el = document.createElement("div");
     el.className = "atlas-pit-zero-marker";
     el.setAttribute("role", "button");
-    el.setAttribute("aria-label", "Pit Zero");
+    el.setAttribute("aria-label", "Pit Zero"); // the fox stays UNLABELLED on the map
+    el.innerHTML = FOX_SVG;
     el.addEventListener("click", () => setPitZero(true));
     pitMarkerRef.current = new maplibregl.Marker({ element: el })
       .setLngLat([PIT_ZERO.lng, PIT_ZERO.lat])
       .addTo(map);
     setSelected(null);
     setQuery("");
+    setHomage(false);
     setPitZero(true);
     map.flyTo(
       animate({
@@ -571,6 +635,7 @@ export function MapExplorer({
   function clearPitZero() {
     pitMarkerRef.current?.remove();
     pitMarkerRef.current = null;
+    setHomage(false);
     setPitZero(false);
   }
 
@@ -833,7 +898,7 @@ export function MapExplorer({
           <div className="absolute inset-x-4 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] z-20 mx-auto max-w-sm rounded-xl border border-brand-gold/40 bg-surface-0/95 p-5 shadow-xl backdrop-blur lg:bottom-6 lg:left-6 lg:right-auto lg:mx-0">
             <div className="flex items-start justify-between gap-3">
               <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2.5 py-0.5 text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-brand-gold">
-                <Flame className="h-3 w-3" /> Pit Zero
+                <FoxIcon className="h-3 w-3" /> Pit Zero
               </span>
               <button
                 type="button"
@@ -845,10 +910,26 @@ export function MapExplorer({
               </button>
             </div>
             <p className="mt-3 text-sm leading-relaxed text-text-secondary">
-              Pit Zero. Where every atlas begins — a fire, some patience, and
-              someone who refused to rush it. You found it because you went
-              looking. That&apos;s the whole idea.
+              Pit Zero. Where every atlas begins — a fire, some patience, a Smoky
+              Old Fashioned, and someone who refused to rush it. There was a fox
+              here once. If you know, you know.
             </p>
+            {/* Secret homage — reads as whimsy to a stranger, unmistakable to one. */}
+            <button
+              type="button"
+              onClick={() => setHomage((h) => !h)}
+              aria-label="A fox"
+              aria-expanded={homage}
+              className="mt-3 text-base leading-none opacity-40 transition-opacity hover:opacity-100 focus:opacity-100 focus:outline-none"
+            >
+              🦊
+            </button>
+            {homage && (
+              <p className="mt-2 text-xs italic leading-relaxed text-text-muted">
+                For Hix — a very good room on a Soho street, long since closed —
+                and for Basil, who watched the whole thing from the bar.
+              </p>
+            )}
           </div>
         )}
       </div>
