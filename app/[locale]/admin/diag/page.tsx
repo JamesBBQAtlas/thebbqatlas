@@ -34,14 +34,34 @@ export default async function DiagPage() {
   let adminResult = "not-run";
   try {
     const admin = createAdminClient();
-    const { count, error } = await admin
+    const { data, error } = await admin
       .from("check_ins")
-      .select("*", { count: "exact", head: true });
+      .select("id")
+      .limit(1);
     adminResult = error
-      ? `ERROR msg="${error.message}" code="${(error as { code?: string }).code ?? "?"}"`
-      : `OK count=${count}`;
+      ? `ERROR msg="${error.message}" code="${(error as { code?: string }).code ?? "?"}" details="${(error as { details?: string }).details ?? ""}" hint="${(error as { hint?: string }).hint ?? ""}"`
+      : `OK rows=${(data ?? []).length}`;
   } catch (e) {
     adminResult = `THROW: ${(e as Error).message}`;
+  }
+
+  // Raw HTTP to the REST endpoint — reveals the real status code + body.
+  let rawResult = "not-run";
+  try {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/check_ins?select=id&limit=1`,
+      {
+        headers: {
+          apikey: rawKey,
+          Authorization: `Bearer ${rawKey}`,
+        },
+        cache: "no-store",
+      }
+    );
+    const body = (await res.text()).slice(0, 200);
+    rawResult = `HTTP ${res.status} ${res.statusText} — body="${body}"`;
+  } catch (e) {
+    rawResult = `FETCH THREW: ${(e as Error).message}`;
   }
 
   return (
@@ -52,6 +72,7 @@ export default async function DiagPage() {
         `trailingOrLeadingWhitespace: ${trimmedDiffers}`,
         `NEXT_PUBLIC_SUPABASE_URL set: ${Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL)}`,
         `adminClient check_ins: ${adminResult}`,
+        `rawFetch check_ins: ${rawResult}`,
       ].join("\n")}
     </pre>
   );
