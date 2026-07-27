@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAdmin } from "@/lib/auth/admin";
 import { GROK_ENABLED, GROK_MODEL } from "@/lib/ai/grok";
 import { CLAUDE_WRITER_MODEL } from "@/lib/ai/claude";
@@ -16,60 +15,12 @@ import {
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { normalizeHandle } from "@/lib/admin/seed-import";
-import { uniqueRestaurantSlug } from "@/lib/admin/venues";
+import { seedChainLocations } from "@/lib/admin/chain-seed";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const CEILING = 0.04;
-
-/** Insert un-enriched sibling seeds for a chain — never auto-enriched (§09.2). */
-async function seedChainSiblings(
-  db: SupabaseClient,
-  parentId: string,
-  brand: string,
-  country: string | null,
-  dossier: VenueDossier
-): Promise<number> {
-  if (!dossier.is_chain || !dossier.chain_locations.length) return 0;
-  const { data: existing } = await db
-    .from("restaurants")
-    .select("city, location_label")
-    .eq("chain_parent_id", parentId);
-  const seen = new Set(
-    (existing ?? []).map((r) =>
-      `${(r.location_label ?? "").toLowerCase()}|${(r.city ?? "").toLowerCase()}`
-    )
-  );
-  let added = 0;
-  for (const loc of dossier.chain_locations) {
-    const label = loc.name || loc.city || "";
-    const key = `${label.toLowerCase()}|${(loc.city ?? "").toLowerCase()}`;
-    if (!label || seen.has(key)) continue;
-    seen.add(key);
-    const slug = await uniqueRestaurantSlug(db, `${brand} ${loc.city ?? label}`);
-    const { error } = await db.from("restaurants").insert({
-      slug,
-      name: brand,
-      location_label: loc.name && loc.name !== brand ? loc.name : loc.city,
-      description: `${brand} — barbecue${loc.city ? ` in ${loc.city}` : ""}.`,
-      style: "other",
-      lat: 0,
-      lng: 0,
-      address: "",
-      city: loc.city || "",
-      country: country || "",
-      price_level: 2,
-      hero_image_url: "",
-      hero_source: "none",
-      status: "pending",
-      category: "restaurant",
-      chain_parent_id: parentId,
-    });
-    if (!error) added += 1;
-  }
-  return added;
-}
 
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
@@ -91,7 +42,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost"
+      "id, name, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id"
     )
     .eq("id", restaurantId)
     .single();
@@ -116,18 +67,20 @@ export async function POST(request: Request) {
     let find;
     let citations: string[];
     let usage;
+    let grokModel = GROK_MODEL;
     try {
       const r = await researchInstagram(lead);
       find = r.find;
       citations = r.citations;
       usage = r.usage;
+      grokModel = r.model ?? GROK_MODEL;
     } catch (err) {
       return NextResponse.json(
         { error: err instanceof Error ? err.message : "IG search failed." },
         { status: 502 }
       );
     }
-    const cost = round4(grokCost(usage));
+    const cost = round4(grokCost(usage, grokModel));
     const igHandle = find.instagram ? normalizeHandle(find.instagram) : null;
     const socials = mapSocials(find.other_socials);
     const patch: Record<string, unknown> = {
@@ -137,11 +90,11 @@ export async function POST(request: Request) {
         grok_searches: usage.searches,
         grok_in_tokens: usage.in_tokens,
         grok_out_tokens: usage.out_tokens,
-        grok_cost: round4(grokCost(usage)),
+        grok_cost: round4(grokCost(usage, grokModel)),
         search_cost: round4(usage.searches * 0.005),
         action: "find_ig",
       },
-      enrichment_model: GROK_MODEL,
+      enrichment_model: grokModel,
     };
     if (!row.instagram_url && find.instagram) patch.instagram_url = find.instagram;
     if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
@@ -171,11 +124,13 @@ export async function POST(request: Request) {
   let dossier: VenueDossier;
   let citations: string[];
   let grokUsage;
+  let grokModel = GROK_MODEL;
   try {
     const res = await researchDossier(lead);
     dossier = res.dossier;
     citations = res.citations;
     grokUsage = res.usage;
+    grokModel = res.model ?? GROK_MODEL;
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Research failed." }, { status: 502 });
   }
@@ -186,10 +141,11 @@ export async function POST(request: Request) {
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Copywriting failed." }, { status: 502 });
   }
+  const claudeModel = copy.model ?? CLAUDE_WRITER_MODEL;
 
-  // Exact cost from usage.
-  const gCost = grokCost(grokUsage);
-  const cCost = claudeCost(copy.usage);
+  // Exact cost from usage, priced off the models the APIs actually returned.
+  const gCost = grokCost(grokUsage, grokModel);
+  const cCost = claudeCost(copy.usage, claudeModel);
   const thisCost = round4(gCost + cCost);
   const overCeiling = thisCost > CEILING;
 
@@ -268,7 +224,7 @@ export async function POST(request: Request) {
       search_cost: round4(grokUsage.searches * 0.005),
       action: "enrich",
     },
-    enrichment_model: `${GROK_MODEL} + ${CLAUDE_WRITER_MODEL}`,
+    enrichment_model: `${grokModel} + ${claudeModel}`,
     enrichment_sources: sources.length ? sources : null,
   };
   const flagAttention = overCeiling || (row.status !== "approved" && copy.needs_attention);
@@ -287,7 +243,20 @@ export async function POST(request: Request) {
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
-  const seeded = await seedChainSiblings(ctx.db, restaurantId, dossier.name ?? row.name, country, dossier);
+  // Chain seeds are created ONCE, from the parent enrich only (§09.1.2). A
+  // sibling's enrich (row already has a chain_parent_id) must never spawn new
+  // sibling seeds.
+  const isParent = !row.chain_parent_id;
+  const seeded =
+    isParent && dossier.is_chain
+      ? await seedChainLocations(
+          ctx.db,
+          restaurantId,
+          dossier.name ?? row.name,
+          country,
+          dossier.chain_locations
+        )
+      : [];
 
   return NextResponse.json({
     ok: true,
@@ -299,6 +268,11 @@ export async function POST(request: Request) {
     copy: { hook: copy.hook, description: copy.description },
     cost: thisCost,
     over_ceiling: overCeiling,
+    // Chain signalling for the enrich-result banner + §2b roster gateway.
+    is_chain: dossier.is_chain,
+    is_chain_parent: isParent,
+    brand: dossier.is_chain ? dossier.name ?? row.name : null,
+    chain_locations_url: dossier.chain_locations_url,
     chain_seeds: seeded,
   });
 }

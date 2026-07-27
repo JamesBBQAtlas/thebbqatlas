@@ -222,13 +222,15 @@ export interface VenueDossier {
   is_chain: boolean;
   /** Other known locations of the chain (added as un-enriched seeds, never auto-enriched). */
   chain_locations: { name: string | null; city: string | null }[];
+  /** The venue's OWN "Locations"/"Find us" page URL — the authoritative roster source. */
+  chain_locations_url: string | null;
   sources: string[];
   unknowns: string[];
 }
 
 const DOSSIER_SYSTEM = `You are a factual barbecue-venue researcher for The BBQ Atlas, with live web-search and browsing tools. Research ONE venue and return a strict, FACTS-ONLY dossier. You are the researcher, not the writer — produce NO marketing or descriptive copy.
 
-BE EFFICIENT — targeted, NOT exhaustive. This is a HARD COST CONTROL: at most ~5 web searches total for this venue. Prioritise in this order until you have the essentials, then STOP:
+BE EFFICIENT — targeted, NOT exhaustive. This is a HARD COST CONTROL: at most 3 web searches total for this venue (the tool will be cut off after 3). Prioritise in this order until you have the essentials, then STOP:
 1) the venue's OFFICIAL WEBSITE (address, hours, story, menu) — the source of truth;
 2) ONE map/listing ONLY if the site lacks an address or hours (use it only to cross-check the plain facts — address, coordinates, phone, hours);
 3) the venue's INSTAGRAM (handle + a couple of recent public posts).
@@ -248,10 +250,11 @@ Field notes:
 - "recent_instagram_posts": up to 6 recent PUBLIC Instagram post/reel permalinks from this venue, for an on-page photo section. [] if none found.
 - "name": the venue's clean name WITHOUT the city or branch baked in (e.g. "Joe's Kansas City Bar-B-Que", not "…Bar-B-Que Leawood").
 - "location_label": if this is ONE location of a multi-location business, the branch label only (e.g. "Leawood", "Olathe"); else null. Never fold it into "name".
-- "is_chain": true if this business has more than one physical location. "chain_locations": the OTHER known locations as {name, city} — a quick list only, do NOT research them (they are enriched separately later). [] if not a chain.
+- "is_chain": true if this business has more than one physical location. "chain_locations": the OTHER known locations as {name, city} — a quick list ONLY from what you already saw, do NOT search for them (they are enriched separately later). [] if not a chain.
+- "chain_locations_url": if is_chain, the venue's OWN official "Locations"/"Stores"/"Find us" page URL (on their website) — the authoritative roster; else null. Just the URL; do NOT open/scan it here.
 - "lat"/"lng": decimal coordinates if you can verify them, else null.
 
-Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, chain_locations, sources, unknowns.`;
+Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, chain_locations, chain_locations_url, sources, unknowns.`;
 
 const asArray = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : [];
@@ -263,7 +266,7 @@ const asNum = (v: unknown): number | null =>
 /** Grok research leg: one venue → one strict, facts-only dossier. */
 export async function researchDossier(
   lead: VenueLead
-): Promise<{ dossier: VenueDossier; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number } }> {
+): Promise<{ dossier: VenueDossier; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number }; model: string }> {
   const known = Object.entries(lead)
     .filter(([, v]) => v && String(v).trim())
     .map(([k, v]) => `- ${k}: ${v}`)
@@ -276,11 +279,12 @@ ${known || "- (almost nothing — start from the name/handle above)"}
 
 Return ONLY the dossier JSON described in your instructions. Facts only — no descriptive or marketing copy.`;
 
-  const { data, citations, usage } = await grokJSON<Partial<VenueDossier>>({
+  const { data, citations, usage, model } = await grokJSON<Partial<VenueDossier>>({
     system: DOSSIER_SYSTEM,
     user,
-    // Cost cap: a single bounded search, no X-search sprawl (~$0.02/venue).
+    // Cost cap: a single bounded call, HARD 3-search limit, no X-search sprawl.
     maxSearchResults: 3,
+    maxSearches: 3,
     xSearch: false,
   });
 
@@ -335,10 +339,14 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
           .filter((c) => c.name || c.city)
           .slice(0, 12)
       : [],
+    chain_locations_url:
+      asStr(data.chain_locations_url) && /^https?:\/\//i.test(String(data.chain_locations_url))
+        ? String(data.chain_locations_url)
+        : null,
     sources: asArray(data.sources),
     unknowns: asArray(data.unknowns),
   };
-  return { dossier, citations, usage };
+  return { dossier, citations, usage, model };
 }
 
 export interface InstagramFind {
@@ -352,22 +360,24 @@ const IG_SYSTEM = `You find a barbecue venue's official social media with ONE bo
 /** "Find IG" — one lean, targeted Grok search for the handle + recent posts. */
 export async function researchInstagram(
   lead: VenueLead
-): Promise<{ find: InstagramFind; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number } }> {
+): Promise<{ find: InstagramFind; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number }; model: string }> {
   const known = Object.entries(lead)
     .filter(([, v]) => v && String(v).trim())
     .map(([k, v]) => `- ${k}: ${v}`)
     .join("\n");
   const user = `Find the official Instagram for this venue.\n\nKnown:\n${known || "- (name/handle above)"}\n\nReturn ONLY the JSON described.`;
 
-  const { data, citations, usage } = await grokJSON<Partial<InstagramFind>>({
+  const { data, citations, usage, model } = await grokJSON<Partial<InstagramFind>>({
     system: IG_SYSTEM,
     user,
     maxSearchResults: 3,
+    maxSearches: 3,
     xSearch: false,
   });
 
   return {
     usage,
+    model,
     find: {
       instagram:
         asStr(data.instagram) && /instagram\.com/.test(String(data.instagram))
@@ -382,12 +392,53 @@ export async function researchInstagram(
   };
 }
 
+export interface ChainBranch {
+  name: string | null;
+  address: string | null;
+  city: string | null;
+}
+
+const ROSTER_SYSTEM = `You enumerate a barbecue brand's locations from its OWN official "Locations"/"Find us" page. You are given the brand name and (usually) that page's URL. Read that page — and at most 1-2 follow-up pages ONLY if it paginates — and return the CANONICAL, COMPLETE list of physical branches. For each branch: {name, address, city}. Facts only from the official pages. Do NOT write descriptions, do NOT enrich, do NOT crawl the open web. If NO URL is given, do exactly ONE search for "[brand] official locations" and read the official result. Respond ONLY with JSON: {"locations": [{"name":"","address":"","city":""}]}.`;
+
+/**
+ * Chain roster scan (§09.1.2b) — one bounded call whose ONLY job is to read the
+ * brand's own locations page and enumerate every branch. Writes nothing; the
+ * caller turns the result into deduped $0 seeds. Hard search cap 5.
+ */
+export async function researchChainRoster(opts: {
+  brand: string;
+  url?: string | null;
+  country?: string | null;
+}): Promise<{ locations: ChainBranch[]; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number }; model: string }> {
+  const user = `Brand: ${opts.brand}${opts.country ? ` (${opts.country})` : ""}
+Locations page: ${opts.url || "(none found — do ONE search for the brand's official locations)"}
+
+Return ONLY the JSON list of every branch.`;
+  const { data, citations, usage, model } = await grokJSON<{ locations?: unknown }>({
+    system: ROSTER_SYSTEM,
+    user,
+    maxSearchResults: 5,
+    maxSearches: 5,
+    xSearch: false,
+  });
+  const raw = Array.isArray((data as { locations?: unknown }).locations)
+    ? ((data as { locations: unknown[] }).locations)
+    : [];
+  const locations: ChainBranch[] = raw
+    .filter((l): l is Record<string, unknown> => Boolean(l) && typeof l === "object")
+    .map((l) => ({ name: asStr(l.name), address: asStr(l.address), city: asStr(l.city) }))
+    .filter((l) => l.name || l.city)
+    .slice(0, 60);
+  return { locations, citations, usage, model };
+}
+
 export interface VenueCopy {
   hook: string | null;
   description: string | null;
   needs_attention: boolean;
   attention_reason: string | null;
   usage: { in_tokens: number; out_tokens: number };
+  model: string;
 }
 
 // The EXACT house-voice writing prompt (VENUE-SYSTEM-SPEC §6). Trait-led; the
@@ -396,6 +447,8 @@ export interface VenueCopy {
 const COPY_SYSTEM = `You are the staff writer for The BBQ Atlas. Write in ONE house voice: dry, warm, understated and certain, with a wry, deadpan edge — a writer who reveres craft and plain things done properly, is allergic to pretense and marketing-speak, and never wastes a word. (Internal north star only: a Ron Swanson-inspired sensibility; the source is never referenced in output.) The Atlas CELEBRATES barbecue; it never ranks or scores it.
 
 Input: a verified facts dossier (JSON) for one venue. Write (1) a one-line HOOK and (2) a 2-3 short-paragraph DESCRIPTION using ONLY facts in the dossier. If \`unknowns\` lists something, write around it — never invent a fact, dish, date, or person. No ratings/scores. NEVER name Ron Swanson, the TV show he appeared in, its characters, or any of its places/features — that sensibility inspires us, but the source is never mentioned in the output. Keep proper nouns and figures accurate. Structured fields (address/phone/hours) are not yours — leave them factual. If the dossier is too thin to write with a genuine point of view, return {"needs_attention": true, "reason": "..."} instead of padding.
+
+Write in the venue's OWN locale's English, matching the dossier's "country": a US venue uses US spelling and vocabulary ("gas station", not "petrol station"; "sidewalk", "fries"), a UK/Ireland venue uses UK English, etc. Be consistent within the piece.
 
 Match the register of these two reference examples:
 
@@ -432,7 +485,7 @@ Return ONLY the JSON described in your instructions.`;
         user,
         search: false,
       });
-  const { data, usage } = await call;
+  const { data, usage, model } = await call;
 
   const description = asStr(data.description);
   const hook = asStr(data.hook);
@@ -449,6 +502,7 @@ Return ONLY the JSON described in your instructions.`;
       ? asStr(data.reason) ?? "Dossier too thin to write an honest page."
       : null,
     usage: usage ?? { in_tokens: 0, out_tokens: 0 },
+    model,
   };
 }
 

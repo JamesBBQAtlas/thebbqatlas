@@ -30,8 +30,10 @@ interface GrokJSONOptions {
   /** Give Grok live web/X search tools so it can actually hunt. */
   search?: boolean;
   temperature?: number;
-  /** Cap web-search results for a bounded, cheap call (cost cap). */
+  /** Cap web-search RESULTS per query (cost cap). */
   maxSearchResults?: number;
+  /** HARD cap on the NUMBER of web searches (tool uses) — the real guarantee. */
+  maxSearches?: number;
   /** Include the (extra) X search tool. Default true; pass false to bound cost. */
   xSearch?: boolean;
 }
@@ -94,6 +96,7 @@ export async function grokJSON<T>({
   search = true,
   temperature = 0.2,
   maxSearchResults,
+  maxSearches,
   xSearch = true,
 }: GrokJSONOptions): Promise<GrokJSONResult<T>> {
   if (!GROK_ENABLED) {
@@ -127,7 +130,15 @@ export async function grokJSON<T>({
     if (typeof maxSearchResults === "number") {
       webSearch.max_search_results = maxSearchResults;
     }
+    // HARD cap on the number of searches — stop the tool loop after N (§09.1.4).
+    if (typeof maxSearches === "number") {
+      webSearch.max_uses = maxSearches;
+    }
     body.tools = xSearch ? [webSearch, { type: "x_search" }] : [webSearch];
+    // Belt-and-braces: cap total tool iterations at the request level too.
+    if (typeof maxSearches === "number") {
+      body.max_tool_calls = maxSearches;
+    }
   }
 
   // Safety net well inside the (Pro) 300s function limit — a stuck hunt surfaces

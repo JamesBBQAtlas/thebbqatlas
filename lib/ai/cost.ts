@@ -17,19 +17,44 @@ export interface Usage {
   searches?: number;
 }
 
-export function grokCost(u: Usage): number {
+// Per-model rates, keyed on the id the API RETURNS — so the meter is
+// self-correcting if the served model changes (grok-4-fast → grok-4-3, etc.).
+// Unknown ids fall back to the default (fast/Haiku) rates.
+const GROK_RATES: Record<string, { in: number; out: number }> = {
+  "grok-4-fast": { in: PRICING.grokInPerM, out: PRICING.grokOutPerM },
+  "grok-4-3": { in: PRICING.grokInPerM, out: PRICING.grokOutPerM },
+};
+const CLAUDE_RATES: Record<string, { in: number; out: number }> = {
+  "claude-haiku-4-5": { in: PRICING.claudeInPerM, out: PRICING.claudeOutPerM },
+  "claude-haiku-4-5-20251001": { in: PRICING.claudeInPerM, out: PRICING.claudeOutPerM },
+};
+
+function ratesFor(
+  map: Record<string, { in: number; out: number }>,
+  model: string | undefined,
+  dflt: { in: number; out: number }
+): { in: number; out: number } {
+  if (model && map[model]) return map[model];
+  // Prefix match (e.g. dated variants) before the default.
+  if (model) {
+    const hit = Object.keys(map).find((k) => model.startsWith(k));
+    if (hit) return map[hit];
+  }
+  return dflt;
+}
+
+export function grokCost(u: Usage, model?: string): number {
+  const r = ratesFor(GROK_RATES, model, { in: PRICING.grokInPerM, out: PRICING.grokOutPerM });
   return (
-    (u.in_tokens / 1e6) * PRICING.grokInPerM +
-    (u.out_tokens / 1e6) * PRICING.grokOutPerM +
+    (u.in_tokens / 1e6) * r.in +
+    (u.out_tokens / 1e6) * r.out +
     (u.searches ?? 0) * PRICING.grokSearch
   );
 }
 
-export function claudeCost(u: Usage): number {
-  return (
-    (u.in_tokens / 1e6) * PRICING.claudeInPerM +
-    (u.out_tokens / 1e6) * PRICING.claudeOutPerM
-  );
+export function claudeCost(u: Usage, model?: string): number {
+  const r = ratesFor(CLAUDE_RATES, model, { in: PRICING.claudeInPerM, out: PRICING.claudeOutPerM });
+  return (u.in_tokens / 1e6) * r.in + (u.out_tokens / 1e6) * r.out;
 }
 
 export const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;

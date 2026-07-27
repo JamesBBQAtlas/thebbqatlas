@@ -160,6 +160,15 @@ export function VenueHub({
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [rowResult, setRowResult] = useState<Record<string, { msg?: string; err?: string }>>({});
   const [confirmBatch, setConfirmBatch] = useState<{ kind: ActionKind; n: number; est: number } | null>(null);
+  // §09.1.2b — chain roster gateway surfaced after a parent enrich detects a chain.
+  const [chainGateway, setChainGateway] = useState<{
+    venueId: string;
+    brand: string;
+    chainLocationsUrl: string | null;
+    seeded: { label: string; city: string | null }[];
+    scanning: boolean;
+    result: string | null;
+  } | null>(null);
   const pauseRef = useRef(false);
   const stopRef = useRef(false);
 
@@ -328,6 +337,25 @@ export function VenueHub({
     // enrich or rewrite: pop the Preview (full change diff) once the row refreshes
     const mode: PreviewMode = data.pending ? "pending_copy" : "draft";
     const costNote = typeof data.cost === "number" ? ` · ${fmtUsd(data.cost)}` : "";
+    // Chain detected on a PARENT enrich (§09.1.3): surface the banner + roster
+    // gateway. Preview stays for the copy; the gateway is a separate prompt.
+    const seeds: { label: string; city: string | null }[] = Array.isArray(data.chain_seeds)
+      ? data.chain_seeds
+      : [];
+    if (kind === "enrich" && data.is_chain && data.is_chain_parent) {
+      setChainGateway({
+        venueId: v.id,
+        brand: data.brand ?? v.name,
+        chainLocationsUrl: data.chain_locations_url ?? null,
+        seeded: seeds,
+        scanning: false,
+        result: null,
+      });
+    }
+    const chainNote =
+      kind === "enrich" && data.is_chain
+        ? ` · chain — ${seeds.length} location${seeds.length === 1 ? "" : "s"} seeded ($0)`
+        : "";
     setPreview({ venueId: v.id, mode });
     setRowResult((p) => ({
       ...p,
@@ -337,9 +365,54 @@ export function VenueHub({
             ? "Needs attention — see Preview"
             : mode === "pending_copy"
               ? "Proposed changes ready — review & approve"
-              : "Draft ready — review & publish") + costNote,
+              : "Draft ready — review & publish") + costNote + chainNote,
       },
     }));
+    router.refresh();
+  }
+
+  // §09.1.2b — run the single, bounded roster scan for a detected chain.
+  async function runRosterScan(venueId: string) {
+    setChainGateway((g) => (g && g.venueId === venueId ? { ...g, scanning: true, result: null } : g));
+    let data: {
+      ok?: boolean;
+      found?: number;
+      seeded?: { label: string; city: string | null }[];
+      cost?: number;
+      error?: string;
+    } = {};
+    try {
+      const res = await fetch("/api/admin/venues/chain-roster", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: venueId }),
+      });
+      data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setChainGateway((g) =>
+          g && g.venueId === venueId ? { ...g, scanning: false, result: `Scan failed: ${data.error ?? "error"}` } : g
+        );
+        return;
+      }
+    } catch {
+      setChainGateway((g) =>
+        g && g.venueId === venueId ? { ...g, scanning: false, result: "Scan failed: network error" } : g
+      );
+      return;
+    }
+    const newSeeds = Array.isArray(data.seeded) ? data.seeded : [];
+    setChainGateway((g) =>
+      g && g.venueId === venueId
+        ? {
+            ...g,
+            scanning: false,
+            seeded: [...g.seeded, ...newSeeds],
+            result: `Scanned roster — found ${data.found ?? 0}, added ${newSeeds.length} new location${
+              newSeeds.length === 1 ? "" : "s"
+            } (${fmtUsd(data.cost ?? 0)}).`,
+          }
+        : g
+    );
     router.refresh();
   }
 
@@ -435,6 +508,59 @@ export function VenueHub({
           <div className="ml-auto flex gap-2">
             <button type="button" onClick={() => setConfirmBatch(null)} className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted hover:text-text-primary">Cancel</button>
             <button type="button" onClick={() => doBatch(confirmBatch.kind)} className="rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90">Confirm &amp; run</button>
+          </div>
+        </div>
+      )}
+      {chainGateway && (
+        <div className="mb-4 rounded-xl border border-brand-gold/50 bg-brand-gold/10 px-4 py-3">
+          <div className="flex items-start gap-2">
+            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand-gold" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm text-text-primary">
+                <strong>{chainGateway.brand}</strong> looks like a chain —{" "}
+                <strong>{chainGateway.seeded.length}</strong> location
+                {chainGateway.seeded.length === 1 ? "" : "s"} added below as seeds{" "}
+                <span className="text-text-secondary">($0 spent)</span>. Select which to enrich.
+              </p>
+              {chainGateway.seeded.length > 0 && (
+                <p className="mt-1 text-xs text-text-secondary">
+                  Seeded: {chainGateway.seeded.map((s) => s.label).join(", ")}
+                </p>
+              )}
+              <p className="mt-2 text-xs text-text-secondary">
+                {chainGateway.chainLocationsUrl ? (
+                  <>
+                    Found their locations page —{" "}
+                    <a href={chainGateway.chainLocationsUrl} target="_blank" rel="noreferrer" className="text-brand-gold underline">
+                      {chainGateway.chainLocationsUrl.replace(/^https?:\/\//, "").slice(0, 48)}
+                    </a>
+                    . Run a full roster scan to find every branch?
+                  </>
+                ) : (
+                  <>No locations page was found — a roster scan will do a single capped search for the brand&apos;s official locations.</>
+                )}{" "}
+                <span className="text-text-muted">Bounded, one-off, hard-capped {fmtUsd(0.05)}.</span>
+              </p>
+              {chainGateway.result && <p className="mt-2 text-xs text-emerald-400">{chainGateway.result}</p>}
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => runRosterScan(chainGateway.venueId)}
+                  disabled={chainGateway.scanning}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-50"
+                >
+                  {chainGateway.scanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  {chainGateway.scanning ? "Scanning…" : "Scan full roster"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setChainGateway(null)}
+                  className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted hover:text-text-primary"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
