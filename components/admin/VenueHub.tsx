@@ -38,27 +38,45 @@ export interface HubVenue {
   hasPendingCopy: boolean;
   hook: string | null;
   description: string | null;
+  pendingHook: string | null;
+  pendingDescription: string | null;
   lat: number;
   lng: number;
 }
 
-type ActionKind = "enrich" | "rewrite" | "findig" | "publish";
+type ActionKind = "enrich" | "rewrite" | "findig" | "publish" | "reject";
 type RunState = "idle" | "queued" | "running" | "done" | "attention" | "error";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// What the Preview pop-up is showing, and therefore which decision it offers.
+//  pending_copy → proposed copy for a LIVE venue: Approve / Discard
+//  draft        → a pending venue's copy: Publish / Reject
+//  live         → the current published copy (read-only)
+type PreviewMode = "pending_copy" | "draft" | "live";
+interface PreviewData {
+  venue: HubVenue;
+  hook: string | null;
+  description: string | null;
+  mode: PreviewMode;
+}
 
 const ACTIONS: { kind: ActionKind; label: string; icon: typeof Sparkles }[] = [
   { kind: "enrich", label: "Enrich", icon: Sparkles },
   { kind: "rewrite", label: "Rewrite", icon: PenLine },
   { kind: "findig", label: "Find IG", icon: Instagram },
   { kind: "publish", label: "Publish", icon: Check },
+  { kind: "reject", label: "Reject", icon: X },
 ];
 
 async function callAction(id: string, kind: ActionKind): Promise<Response> {
-  if (kind === "publish") {
+  if (kind === "publish" || kind === "reject") {
     return fetch("/api/admin/venues", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ restaurantId: id, status: "approved" }),
+      body: JSON.stringify({
+        restaurantId: id,
+        status: kind === "publish" ? "approved" : "rejected",
+      }),
     });
   }
   if (kind === "rewrite") {
@@ -108,7 +126,8 @@ export function VenueHub({
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState({ done: 0, attention: 0, total: 0, kind: "" as string });
   const [heroOpen, setHeroOpen] = useState<string | null>(null);
-  const [preview, setPreview] = useState<HubVenue | null>(null);
+  const [preview, setPreview] = useState<PreviewData | null>(null);
+  const [rowResult, setRowResult] = useState<Record<string, { msg?: string; err?: string }>>({});
   const pauseRef = useRef(false);
   const stopRef = useRef(false);
 
@@ -214,8 +233,64 @@ export function VenueHub({
     router.refresh();
   }
 
-  async function single(id: string, kind: ActionKind) {
-    await runOne(id, kind);
+  function previewFromRow(v: HubVenue): PreviewData {
+    if (v.pendingHook || v.pendingDescription)
+      return { venue: v, hook: v.pendingHook, description: v.pendingDescription, mode: "pending_copy" };
+    if (v.status !== "approved")
+      return { venue: v, hook: v.hook, description: v.description, mode: "draft" };
+    return { venue: v, hook: v.hook, description: v.description, mode: "live" };
+  }
+
+  async function single(v: HubVenue, kind: ActionKind) {
+    setRowResult((p) => ({ ...p, [v.id]: {} }));
+    setState(v.id, "running");
+    let res: Response;
+    try {
+      res = await callAction(v.id, kind);
+    } catch {
+      setState(v.id, "idle");
+      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setState(v.id, "idle");
+    if (!res.ok) {
+      setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Failed" } }));
+      return;
+    }
+    if (kind === "findig") {
+      setRowResult((p) => ({ ...p, [v.id]: { msg: `Found Instagram · ${data.posts ?? 0} posts` } }));
+      router.refresh();
+      return;
+    }
+    if (kind === "publish") {
+      setRowResult((p) => ({ ...p, [v.id]: { msg: "Published ✓" } }));
+      router.refresh();
+      return;
+    }
+    if (kind === "reject") {
+      setRowResult((p) => ({ ...p, [v.id]: { msg: "Declined" } }));
+      router.refresh();
+      return;
+    }
+    // enrich or rewrite: pop the fresh copy so it can be read before it goes live
+    const mode: PreviewMode = data.pending_copy ? "pending_copy" : "draft";
+    setPreview({
+      venue: v,
+      hook: data.copy?.hook ?? null,
+      description: data.copy?.description ?? null,
+      mode,
+    });
+    setRowResult((p) => ({
+      ...p,
+      [v.id]: {
+        msg: data.needs_attention
+          ? "Needs attention — see Preview"
+          : mode === "pending_copy"
+            ? "New copy ready — review & approve"
+            : "Draft ready — review & publish",
+      },
+    }));
     router.refresh();
   }
 
@@ -299,6 +374,18 @@ export function VenueHub({
       </div>
       {running && <p className="mb-3 text-xs text-text-muted">One venue at a time. Pause/Stop halts after the current venue — never mid-record.</p>}
 
+      {/* Legend — what the row actions do */}
+      <p className="mb-3 text-xs text-text-muted">
+        <span className="font-semibold text-text-secondary">Actions:</span>{" "}
+        <Sparkles className="inline h-3 w-3 align-[-2px]" /> Enrich (research + write) ·{" "}
+        <PenLine className="inline h-3 w-3 align-[-2px]" /> Rewrite (re-word from saved research) ·{" "}
+        <Instagram className="inline h-3 w-3 align-[-2px]" /> Find IG ·{" "}
+        <ImageIcon className="inline h-3 w-3 align-[-2px]" /> Hero ·{" "}
+        <Eye className="inline h-3 w-3 align-[-2px]" /> Preview the copy that will publish. On a
+        live venue, new copy waits as <span className="text-brand-gold">pending copy</span> until
+        you Approve it.
+      </p>
+
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-border-subtle">
         <table className="w-full text-left text-sm">
@@ -333,12 +420,15 @@ export function VenueHub({
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
                       )}
                       {v.hasPendingCopy && (
-                        <div className="mt-1 flex items-center gap-2 text-xs">
-                          <span className="rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2 py-0.5 font-semibold text-brand-gold">Pending copy</span>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                          <span className="rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2 py-0.5 font-semibold text-brand-gold">Pending copy — not yet live</span>
+                          <button type="button" onClick={() => setPreview(previewFromRow(v))} className="font-semibold text-brand-gold hover:underline">Preview</button>
                           <button type="button" onClick={() => copyDecision(v.id, "approve")} className="font-semibold text-emerald-400 hover:underline">Approve</button>
                           <button type="button" onClick={() => copyDecision(v.id, "discard")} className="text-text-muted hover:text-destructive">Discard</button>
                         </div>
                       )}
+                      {rowResult[v.id]?.msg && <div className="mt-1 text-xs text-emerald-400">{rowResult[v.id]?.msg}</div>}
+                      {rowResult[v.id]?.err && <div className="mt-1 text-xs text-destructive">{rowResult[v.id]?.err}</div>}
                     </td>
                     <td className="px-3 py-3">
                       {rt && rt !== "idle" ? (
@@ -352,16 +442,27 @@ export function VenueHub({
                     <td className="px-3 py-3 text-xs text-text-muted">{f.label}</td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap items-center justify-end gap-1.5">
-                        <IconBtn title="Re-research + rewrite" busy={busy} onClick={() => single(v.id, "enrich")}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
-                        <IconBtn title="Rewrite copy (Claude only)" busy={busy} onClick={() => single(v.id, "rewrite")}><PenLine className="h-3.5 w-3.5" /></IconBtn>
-                        <IconBtn title={v.hasIG ? "IG ✓ — re-run Find IG" : "Find IG"} busy={busy} onClick={() => single(v.id, "findig")}>
+                        <IconBtn title="Re-research + rewrite (Grok researches, Claude writes)" busy={busy} onClick={() => single(v, "enrich")}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
+                        <IconBtn title="Rewrite copy from saved research (Claude only)" busy={busy} onClick={() => single(v, "rewrite")}><PenLine className="h-3.5 w-3.5" /></IconBtn>
+                        <IconBtn title={v.hasIG ? "IG ✓ — re-run Find IG" : "Find IG (handle + recent posts)"} busy={busy} onClick={() => single(v, "findig")}>
                           <Instagram className={`h-3.5 w-3.5 ${v.hasIG ? "text-emerald-400" : ""}`} />
                         </IconBtn>
                         <IconBtn title="Hero image" onClick={() => setHeroOpen(heroOpen === v.id ? null : v.id)}><ImageIcon className="h-3.5 w-3.5" /></IconBtn>
-                        <IconBtn title="Preview" onClick={() => setPreview(v)}><Eye className="h-3.5 w-3.5" /></IconBtn>
-                        {v.status !== "approved" && (
-                          <button type="button" onClick={() => single(v.id, "publish")} disabled={busy || needsEnrich} title={needsEnrich ? "Enrich first (no map location)" : "Publish"} className="inline-flex items-center gap-1 rounded-md bg-brand-gold px-2.5 py-1.5 text-xs font-bold uppercase text-text-inverse disabled:opacity-40">
-                            <Check className="h-3.5 w-3.5" />Publish
+                        <button type="button" onClick={() => setPreview(previewFromRow(v))} title="Read the copy that will publish" className="inline-flex items-center gap-1 rounded-md border border-border-strong px-2.5 py-1.5 text-xs font-semibold text-text-primary transition-colors hover:border-brand-gold/60 hover:text-brand-gold">
+                          <Eye className="h-3.5 w-3.5" />Preview
+                        </button>
+                        {v.status !== "approved" ? (
+                          <>
+                            <button type="button" onClick={() => single(v, "publish")} disabled={busy || needsEnrich} title={needsEnrich ? "Enrich first (no map location)" : "Publish"} className="inline-flex items-center gap-1 rounded-md bg-brand-gold px-2.5 py-1.5 text-xs font-bold uppercase text-text-inverse disabled:opacity-40">
+                              <Check className="h-3.5 w-3.5" />Publish
+                            </button>
+                            <button type="button" onClick={() => single(v, "reject")} disabled={busy} title="Decline — remove from the queue" className="inline-flex items-center gap-1 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-muted transition-colors hover:border-destructive hover:text-destructive disabled:opacity-40">
+                              <X className="h-3.5 w-3.5" />Decline
+                            </button>
+                          </>
+                        ) : (
+                          <button type="button" onClick={() => single(v, "reject")} disabled={busy} title="Unpublish — pull this venue from the live site" className="inline-flex items-center gap-1 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-muted transition-colors hover:border-destructive hover:text-destructive disabled:opacity-40">
+                            <X className="h-3.5 w-3.5" />Unpublish
                           </button>
                         )}
                       </div>
@@ -381,7 +482,7 @@ export function VenueHub({
         </table>
       </div>
 
-      {preview && <PreviewModal venue={preview} onClose={() => setPreview(null)} />}
+      {preview && <PreviewModal data={preview} onClose={() => setPreview(null)} />}
     </div>
   );
 }
@@ -459,11 +560,36 @@ function HeroPanel({ venue, styleOptions, onDone }: { venue: HubVenue; styleOpti
   );
 }
 
-function PreviewModal({ venue, onClose }: { venue: HubVenue; onClose: () => void }) {
-  const pc = venue.hasPendingCopy;
+function PreviewModal({ data, onClose }: { data: PreviewData; onClose: () => void }) {
+  const router = useRouter();
+  const { venue, hook, description, mode } = data;
+  const [busy, setBusy] = useState(false);
+  const needsEnrich = venue.lat === 0 && venue.lng === 0;
+
+  async function act(fn: () => Promise<Response>) {
+    setBusy(true);
+    const res = await fn();
+    setBusy(false);
+    if (res.ok) {
+      onClose();
+      router.refresh();
+    }
+  }
+  const approve = () => act(() => fetch("/api/admin/venues/approve-copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: venue.id, action: "approve" }) }));
+  const discard = () => act(() => fetch("/api/admin/venues/approve-copy", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: venue.id, action: "discard" }) }));
+  const publish = () => act(() => fetch("/api/admin/venues", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: venue.id, status: "approved" }) }));
+  const reject = () => act(() => fetch("/api/admin/venues", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: venue.id, status: "rejected" }) }));
+
+  const banner =
+    mode === "pending_copy"
+      ? { text: "Proposed copy — NOT yet live. This is what publishing will show.", cls: "border-brand-gold/40 bg-brand-gold/10 text-brand-gold" }
+      : mode === "draft"
+        ? { text: "Draft — not yet published. This is exactly what will go live.", cls: "border-brand-gold/40 bg-brand-gold/10 text-brand-gold" }
+        : { text: "Currently published copy.", cls: "border-border-default bg-surface-1 text-text-secondary" };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
-      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border-strong bg-surface-0 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-border-strong bg-surface-0 shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="relative h-48 w-full overflow-hidden rounded-t-2xl">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={venue.heroUrl} alt="" className="h-full w-full object-cover" />
@@ -473,17 +599,48 @@ function PreviewModal({ venue, onClose }: { venue: HubVenue; onClose: () => void
         </div>
         <div className="p-6">
           <h3 className="font-heading text-2xl font-bold text-text-primary">{venue.name}{venue.location_label && <span className="ml-2 text-base font-normal text-brand-sienna-light">· {venue.location_label}</span>}</h3>
-          <p className="mt-1 text-sm text-text-muted">{[venue.city, venue.country].filter(Boolean).join(", ")} · {venue.styleLabel}</p>
-          {pc && <p className="mt-3 rounded-md border border-brand-gold/40 bg-brand-gold/10 px-3 py-1.5 text-xs text-brand-gold">Showing pending (unapproved) copy.</p>}
-          {venue.hook && <p className="mt-4 font-heading text-lg italic text-text-primary">{venue.hook}</p>}
-          {venue.description ? (
+          <p className="mt-1 text-sm text-text-muted">{[venue.city, venue.country].filter(Boolean).join(", ") || "no location"} · {venue.styleLabel}</p>
+
+          <p className={`mt-3 rounded-md border px-3 py-1.5 text-xs ${banner.cls}`}>{banner.text}</p>
+
+          {hook && <p className="mt-4 font-heading text-lg italic text-text-primary">{hook}</p>}
+          {description ? (
             <div className="mt-3 space-y-3 text-sm leading-relaxed text-text-secondary">
-              {venue.description.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
+              {description.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
             </div>
           ) : (
-            <p className="mt-3 text-sm text-text-muted">No copy yet — run Enrich or Rewrite.</p>
+            <p className="mt-3 text-sm text-text-muted">No copy yet — run Enrich or Rewrite to generate it.</p>
           )}
+
+          {/* Comparison: for pending copy, show what's currently live below. */}
+          {mode === "pending_copy" && (venue.hook || venue.description) && (
+            <details className="mt-4 rounded-md border border-border-subtle bg-surface-1/40 p-3">
+              <summary className="cursor-pointer text-xs font-semibold text-text-muted">Compare with the current live copy</summary>
+              {venue.hook && <p className="mt-2 text-sm italic text-text-muted">{venue.hook}</p>}
+              {venue.description && <div className="mt-2 space-y-2 text-xs leading-relaxed text-text-muted">{venue.description.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}</div>}
+            </details>
+          )}
+
           <p className="mt-4 text-xs text-text-muted">{venue.hasIG ? `Instagram: ${venue.postsCount} post${venue.postsCount === 1 ? "" : "s"} on file` : "No Instagram on file"}</p>
+
+          {/* Decision buttons */}
+          <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle pt-4">
+            {mode === "pending_copy" && (
+              <>
+                <button type="button" onClick={discard} disabled={busy} className="rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-muted hover:border-destructive hover:text-destructive disabled:opacity-40">Discard</button>
+                <button type="button" onClick={approve} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-4 py-2 text-sm font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Approve &amp; publish copy</button>
+              </>
+            )}
+            {mode === "draft" && (
+              <>
+                <button type="button" onClick={reject} disabled={busy} className="rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-muted hover:border-destructive hover:text-destructive disabled:opacity-40">Decline</button>
+                <button type="button" onClick={publish} disabled={busy || needsEnrich} title={needsEnrich ? "Enrich first (no map location)" : "Publish"} className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-4 py-2 text-sm font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Publish</button>
+              </>
+            )}
+            {mode === "live" && (
+              <button type="button" onClick={onClose} className="rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary hover:text-text-primary">Close</button>
+            )}
+          </div>
         </div>
       </div>
     </div>

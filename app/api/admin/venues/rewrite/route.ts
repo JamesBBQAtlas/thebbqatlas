@@ -71,5 +71,6 @@ export async function POST(request: Request) {
     pending_copy: row.status === "approved",
     needs_attention: copy.needs_attention,
     attention_reason: copy.attention_reason,
+    copy: { hook: copy.hook, description: copy.description },
   });
 }

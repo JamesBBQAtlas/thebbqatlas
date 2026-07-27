@@ -207,6 +207,7 @@ export async function POST(request: Request) {
     needs_attention: copy.needs_attention,
     attention_reason: copy.attention_reason,
     pending_copy: row.status === "approved",
+    copy: { hook: copy.hook, description: copy.description },
     geocoded: patch.lat !== undefined,
   });
 }

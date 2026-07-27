@@ -43,6 +43,8 @@ export function toHubVenue(r: Restaurant): HubVenue {
     hasPendingCopy: Boolean(r.pending_copy),
     hook: r.hook ?? null,
     description: r.description ?? null,
+    pendingHook: r.pending_copy?.hook ?? null,
+    pendingDescription: r.pending_copy?.description ?? null,
     lat: r.lat,
     lng: r.lng,
   };
