@@ -218,6 +218,10 @@ export interface VenueDossier {
   recent_instagram_posts: string[];
   /** For one location of a chain: the branch label (e.g. "Leawood"); else null. */
   location_label: string | null;
+  /** True if this business has more than one physical location. */
+  is_chain: boolean;
+  /** Other known locations of the chain (added as un-enriched seeds, never auto-enriched). */
+  chain_locations: { name: string | null; city: string | null }[];
   sources: string[];
   unknowns: string[];
 }
@@ -244,9 +248,10 @@ Field notes:
 - "recent_instagram_posts": up to 6 recent PUBLIC Instagram post/reel permalinks from this venue, for an on-page photo section. [] if none found.
 - "name": the venue's clean name WITHOUT the city or branch baked in (e.g. "Joe's Kansas City Bar-B-Que", not "…Bar-B-Que Leawood").
 - "location_label": if this is ONE location of a multi-location business, the branch label only (e.g. "Leawood", "Olathe"); else null. Never fold it into "name".
+- "is_chain": true if this business has more than one physical location. "chain_locations": the OTHER known locations as {name, city} — a quick list only, do NOT research them (they are enriched separately later). [] if not a chain.
 - "lat"/"lng": decimal coordinates if you can verify them, else null.
 
-Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, sources, unknowns.`;
+Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, chain_locations, sources, unknowns.`;
 
 const asArray = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : [];
@@ -257,9 +262,8 @@ const asNum = (v: unknown): number | null =>
 
 /** Grok research leg: one venue → one strict, facts-only dossier. */
 export async function researchDossier(
-  lead: VenueLead,
-  engine: Engine = "grok"
-): Promise<{ dossier: VenueDossier; citations: string[] }> {
+  lead: VenueLead
+): Promise<{ dossier: VenueDossier; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number } }> {
   const known = Object.entries(lead)
     .filter(([, v]) => v && String(v).trim())
     .map(([k, v]) => `- ${k}: ${v}`)
@@ -272,7 +276,7 @@ ${known || "- (almost nothing — start from the name/handle above)"}
 
 Return ONLY the dossier JSON described in your instructions. Facts only — no descriptive or marketing copy.`;
 
-  const { data, citations } = await runEngine<Partial<VenueDossier>>(engine, {
+  const { data, citations, usage } = await grokJSON<Partial<VenueDossier>>({
     system: DOSSIER_SYSTEM,
     user,
     // Cost cap: a single bounded search, no X-search sprawl (~$0.02/venue).
@@ -320,10 +324,21 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
       .filter((u) => /instagram\.com\/(p|reel)\//.test(u))
       .slice(0, 6),
     location_label: asStr(data.location_label),
+    is_chain: data.is_chain === true,
+    chain_locations: Array.isArray(data.chain_locations)
+      ? data.chain_locations
+          .filter((c) => c && typeof c === "object")
+          .map((c) => ({
+            name: asStr((c as { name?: unknown }).name),
+            city: asStr((c as { city?: unknown }).city),
+          }))
+          .filter((c) => c.name || c.city)
+          .slice(0, 12)
+      : [],
     sources: asArray(data.sources),
     unknowns: asArray(data.unknowns),
   };
-  return { dossier, citations };
+  return { dossier, citations, usage };
 }
 
 export interface InstagramFind {
@@ -337,14 +352,14 @@ const IG_SYSTEM = `You find a barbecue venue's official social media with ONE bo
 /** "Find IG" — one lean, targeted Grok search for the handle + recent posts. */
 export async function researchInstagram(
   lead: VenueLead
-): Promise<{ find: InstagramFind; citations: string[] }> {
+): Promise<{ find: InstagramFind; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number } }> {
   const known = Object.entries(lead)
     .filter(([, v]) => v && String(v).trim())
     .map(([k, v]) => `- ${k}: ${v}`)
     .join("\n");
   const user = `Find the official Instagram for this venue.\n\nKnown:\n${known || "- (name/handle above)"}\n\nReturn ONLY the JSON described.`;
 
-  const { data, citations } = await grokJSON<Partial<InstagramFind>>({
+  const { data, citations, usage } = await grokJSON<Partial<InstagramFind>>({
     system: IG_SYSTEM,
     user,
     maxSearchResults: 3,
@@ -352,6 +367,7 @@ export async function researchInstagram(
   });
 
   return {
+    usage,
     find: {
       instagram:
         asStr(data.instagram) && /instagram\.com/.test(String(data.instagram))
@@ -371,6 +387,7 @@ export interface VenueCopy {
   description: string | null;
   needs_attention: boolean;
   attention_reason: string | null;
+  usage: { in_tokens: number; out_tokens: number };
 }
 
 // The EXACT house-voice writing prompt (VENUE-SYSTEM-SPEC §6). Trait-led; the
@@ -415,7 +432,7 @@ Return ONLY the JSON described in your instructions.`;
         user,
         search: false,
       });
-  const { data } = await call;
+  const { data, usage } = await call;
 
   const description = asStr(data.description);
   const hook = asStr(data.hook);
@@ -431,6 +448,7 @@ Return ONLY the JSON described in your instructions.`;
     attention_reason: needs_attention
       ? asStr(data.reason) ?? "Dossier too thin to write an honest page."
       : null,
+    usage: usage ?? { in_tokens: 0, out_tokens: 0 },
   };
 }
 
@@ -444,12 +462,9 @@ export function buildCopyPatch(
   copy: VenueCopy
 ): Record<string, unknown> {
   if (status === "approved") {
+    // Live venue: hold the copy in the pending_changes bag for approval.
     return {
-      pending_copy: {
-        hook: copy.hook,
-        description: copy.description,
-        created_at: new Date().toISOString(),
-      },
+      pending_changes: { hook: copy.hook, description: copy.description },
     };
   }
   return {

@@ -40,6 +40,26 @@ interface GrokJSONResult<T> {
   data: T;
   citations: string[];
   model: string;
+  usage: { in_tokens: number; out_tokens: number; searches: number };
+}
+
+/** Best-effort usage extraction from a Responses API payload. */
+function extractUsage(json: unknown): { in_tokens: number; out_tokens: number; searches: number } {
+  const j = json as {
+    usage?: Record<string, number>;
+    output?: Array<{ type?: string }>;
+  };
+  const u = j.usage ?? {};
+  const in_tokens = Number(u.input_tokens ?? u.prompt_tokens ?? 0) || 0;
+  const out_tokens = Number(u.output_tokens ?? u.completion_tokens ?? 0) || 0;
+  // Search count: xAI reports it in usage on some responses; else count the
+  // web_search tool-call items in the output stream.
+  let searches =
+    Number(u.num_sources_used ?? u.num_searches ?? u.server_side_tool_use ?? 0) || 0;
+  if (!searches && Array.isArray(j.output)) {
+    searches = j.output.filter((o) => /search/i.test(String(o?.type ?? ""))).length;
+  }
+  return { in_tokens, out_tokens, searches };
 }
 
 /** Pull the assistant's final text out of a Responses API payload. */
@@ -177,5 +197,6 @@ export async function grokJSON<T>({
     data: parsed,
     citations: citations.slice(0, 20),
     model: json?.model ?? GROK_MODEL,
+    usage: extractUsage(json),
   };
 }

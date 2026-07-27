@@ -32,6 +32,7 @@ interface ClaudeJSONResult<T> {
   data: T;
   citations: string[];
   model: string;
+  usage: { in_tokens: number; out_tokens: number };
 }
 
 function collectText(content: unknown): { text: string; urls: string[] } {
@@ -116,7 +117,7 @@ export async function claudeJSON<T>({
     throw new ClaudeError(`Claude request failed (${res.status}). ${detail.slice(0, 300)}`);
   }
 
-  let json: { content?: unknown; model?: string };
+  let json: { content?: unknown; model?: string; usage?: Record<string, number> };
   try {
     json = await res.json();
   } catch {
@@ -138,5 +139,13 @@ export async function claudeJSON<T>({
     }
   }
 
-  return { data: parsed, citations: urls.slice(0, 20), model: json?.model ?? CLAUDE_MODEL };
+  return {
+    data: parsed,
+    citations: urls.slice(0, 20),
+    model: json?.model ?? CLAUDE_MODEL,
+    usage: {
+      in_tokens: Number(json?.usage?.input_tokens ?? 0) || 0,
+      out_tokens: Number(json?.usage?.output_tokens ?? 0) || 0,
+    },
+  };
 }

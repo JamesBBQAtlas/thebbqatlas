@@ -157,6 +157,12 @@ export interface Restaurant {
   hook?: string | null;
   dossier?: Record<string, unknown> | null;
   pending_copy?: { hook?: string | null; description?: string | null; created_at?: string } | null;
+  // §09: full-change approvals, cost meter, chains.
+  pending_changes?: Record<string, unknown> | null;
+  enrichment_cost?: number | null;
+  enrichment_cost_breakdown?: Record<string, unknown> | null;
+  enrichment_model?: string | null;
+  chain_parent_id?: string | null;
 }
 
 export type HeroSource =

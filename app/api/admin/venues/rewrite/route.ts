@@ -7,6 +7,7 @@ import {
   buildCopyPatch,
   type VenueDossier,
 } from "@/lib/ai/enrich";
+import { claudeCost, round4 } from "@/lib/ai/cost";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
 
   const { data: row, error } = await ctx.db
     .from("restaurants")
-    .select("id, status, dossier")
+    .select("id, status, dossier, enrichment_cost")
     .eq("id", restaurantId)
     .single();
   if (error || !row) {
@@ -59,7 +60,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const patch = buildCopyPatch(row.status, copy);
+  // Rewrite is Claude-only — accumulate just the writer cost (no Grok).
+  const cost = round4(claudeCost(copy.usage));
+  const priorCost = Number(row.enrichment_cost ?? 0) || 0;
+  const patch = {
+    ...buildCopyPatch(row.status, copy),
+    enrichment_cost: round4(priorCost + cost),
+  };
   const { error: updErr } = await ctx.db
     .from("restaurants")
     .update(patch)
@@ -68,9 +75,10 @@ export async function POST(request: Request) {
 
   return NextResponse.json({
     ok: true,
-    pending_copy: row.status === "approved",
+    pending: row.status === "approved",
     needs_attention: copy.needs_attention,
     attention_reason: copy.attention_reason,
     copy: { hook: copy.hook, description: copy.description },
+    cost,
   });
 }

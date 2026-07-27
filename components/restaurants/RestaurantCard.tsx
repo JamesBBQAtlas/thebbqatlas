@@ -14,10 +14,15 @@ import { resolveCountryCode } from "@/lib/constants/countries";
 import { FlagIcon } from "@/components/ui/FlagIcon";
 import { HeroPlaceholder } from "@/components/restaurants/HeroPlaceholder";
 import { safeVenueImage } from "@/lib/restaurants/image";
+import { REAL_HERO_SOURCES } from "@/lib/constants/hero";
+import type { HeroSource } from "@/lib/types/database";
 
 export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
   const code = resolveCountryCode(r.country_code, r.country);
-  const heroSrc = safeVenueImage(r.hero_image_url);
+  // Lists/cards show a REAL photo only — never the style-default atmospheric
+  // image (§09.5). Style defaults live on the venue page; here it's a branded card.
+  const isRealHero = REAL_HERO_SOURCES.includes((r.hero_source ?? "none") as HeroSource);
+  const heroSrc = isRealHero ? safeVenueImage(r.hero_image_url) : null;
   const firstMeat = (r.offerings ?? [])
     .map((slug) => OFFERINGS_BY_SLUG[slug])
     .find((o) => o?.category === "meats");

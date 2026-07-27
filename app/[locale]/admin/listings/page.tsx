@@ -129,7 +129,7 @@ export default async function ListingsPage() {
       db
         .from("restaurants")
         .select(
-          "id, name, slug, city, country, style, category, enriched_at, status, website, phone, hours, instagram_url, instagram_handle, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, lat, lng, hero_image_url, hero_source, hook, description, pending_copy, needs_attention, attention_reason, location_label, created_at, brand_id"
+          "id, name, slug, city, country, style, category, enriched_at, status, address, price_level, website, phone, hours, instagram_url, instagram_handle, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, lat, lng, hero_image_url, hero_source, hook, description, pending_changes, enrichment_cost, chain_parent_id, needs_attention, attention_reason, location_label, created_at, brand_id"
         )
         .limit(2000),
       count(db, "check_ins"),

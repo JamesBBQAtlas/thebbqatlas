@@ -6,6 +6,8 @@ import { ArrowRight, MapPin, Wine, X } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
 import { safeVenueImage } from "@/lib/restaurants/image";
+import { REAL_HERO_SOURCES } from "@/lib/constants/hero";
+import type { HeroSource } from "@/lib/types/database";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import { OFFERINGS_BY_SLUG } from "@/lib/constants/offerings";
 import { resolveCountryCode } from "@/lib/constants/countries";
@@ -32,8 +34,9 @@ export function MapPreviewCard({
   onNavigate: () => void;
 }) {
   const [imgOk, setImgOk] = useState(true);
-  // Never present a raw/stock hero — only approved (Supabase-hosted) imagery.
-  const safeHero = safeVenueImage(r.hero_image_url);
+  // Real photo only — never a stock or style-default image (§09.5).
+  const isRealHero = REAL_HERO_SOURCES.includes((r.hero_source ?? "none") as HeroSource);
+  const safeHero = isRealHero ? safeVenueImage(r.hero_image_url) : null;
   const code = resolveCountryCode(r.country_code, r.country);
   const firstMeat = (r.offerings ?? [])
     .map((slug) => OFFERINGS_BY_SLUG[slug])

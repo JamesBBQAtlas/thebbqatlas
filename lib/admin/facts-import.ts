@@ -76,6 +76,8 @@ export function rowToDossier(row: Record<string, string>): VenueDossier {
       /instagram\.com\/(p|reel)\//.test(u)
     ),
     location_label: g("location_label"),
+    is_chain: false, // facts sheets are per-venue; chains are handled in-app
+    chain_locations: [],
     sources: list(row["sources"]),
     // why_blank explains missing fields — the writer treats it like `unknowns`.
     unknowns: list(row["unknowns"] || row["why_blank"]),

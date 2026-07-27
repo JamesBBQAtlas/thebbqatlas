@@ -36,11 +36,13 @@ export interface HubVenue {
   heroSourceLabel: string;
   hasIG: boolean;
   postsCount: number;
-  hasPendingCopy: boolean;
+  hasPending: boolean;
+  pending: Record<string, unknown> | null; // proposed change set (live venues)
+  fields: Record<string, unknown>; // current values, for the diff
   hook: string | null;
   description: string | null;
-  pendingHook: string | null;
-  pendingDescription: string | null;
+  cost: number;
+  chainSeed: boolean;
   lat: number;
   lng: number;
 }
@@ -54,11 +56,39 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 //  draft        → a pending venue's copy: Publish / Reject
 //  live         → the current published copy (read-only)
 type PreviewMode = "pending_copy" | "draft" | "live";
+// Store just the id + mode; the modal reads the CURRENT row so it reflects
+// changes applied after the last refresh.
 interface PreviewData {
-  venue: HubVenue;
-  hook: string | null;
-  description: string | null;
+  venueId: string;
   mode: PreviewMode;
+}
+
+// Structured fields shown in the full-change diff (§09.3).
+const DIFF_FIELDS: { key: string; label: string }[] = [
+  { key: "name", label: "Name" },
+  { key: "location_label", label: "Location label" },
+  { key: "address", label: "Address" },
+  { key: "phone", label: "Phone" },
+  { key: "website", label: "Website" },
+  { key: "instagram_handle", label: "Instagram" },
+  { key: "style", label: "BBQ style" },
+  { key: "price_level", label: "Price" },
+  { key: "hours", label: "Hours" },
+  { key: "x_url", label: "X" },
+  { key: "facebook_url", label: "Facebook" },
+  { key: "tiktok_url", label: "TikTok" },
+  { key: "youtube_url", label: "YouTube" },
+];
+
+function fmtVal(key: string, val: unknown): string {
+  if (val === null || val === undefined || val === "") return "—";
+  if (key === "price_level") return "$".repeat(Math.max(1, Math.min(4, Number(val) || 1)));
+  if (key === "hours" && typeof val === "object") {
+    return Object.entries(val as Record<string, string>)
+      .map(([d, h]) => `${d}: ${h}`)
+      .join(", ") || "—";
+  }
+  return String(val);
 }
 
 const ACTIONS: { kind: ActionKind; label: string; icon: typeof Sparkles }[] = [
@@ -94,7 +124,7 @@ async function callAction(id: string, kind: ActionKind): Promise<Response> {
   });
 }
 
-function Metric({ label, value, tone = "default" }: { label: string; value: number; tone?: string }) {
+function Metric({ label, value, tone = "default" }: { label: string; value: number | string; tone?: string }) {
   const color =
     tone === "amber" ? "text-amber-400" : tone === "gold" ? "text-brand-gold" : tone === "green" ? "text-emerald-400" : "text-text-primary";
   return (
@@ -163,6 +193,8 @@ export function VenueHub({
       ig: 0,
       fresh30: 0,
       stale: 0,
+      spend: 0,
+      enrichedCount: 0,
     };
     for (const v of venues) {
       if (v.status === "approved") m.published++;
@@ -173,9 +205,14 @@ export function VenueHub({
       const tone = freshness(v.enriched_at).tone;
       if (tone === "green") m.fresh30++;
       if (tone === "red") m.stale++;
+      if (v.cost > 0) {
+        m.spend += v.cost;
+        m.enrichedCount++;
+      }
     }
     return m;
   }, [venues]);
+  const avgCost = metrics.enrichedCount ? metrics.spend / metrics.enrichedCount : 0;
 
   function toggle(id: string) {
     setSelected((p) => {
@@ -248,11 +285,12 @@ export function VenueHub({
   }
 
   function previewFromRow(v: HubVenue): PreviewData {
-    if (v.pendingHook || v.pendingDescription)
-      return { venue: v, hook: v.pendingHook, description: v.pendingDescription, mode: "pending_copy" };
-    if (v.status !== "approved")
-      return { venue: v, hook: v.hook, description: v.description, mode: "draft" };
-    return { venue: v, hook: v.hook, description: v.description, mode: "live" };
+    const mode: PreviewMode = v.hasPending
+      ? "pending_copy"
+      : v.status !== "approved"
+        ? "draft"
+        : "live";
+    return { venueId: v.id, mode };
   }
 
   async function single(v: HubVenue, kind: ActionKind) {
@@ -287,22 +325,19 @@ export function VenueHub({
       router.refresh();
       return;
     }
-    // enrich or rewrite: pop the fresh copy so it can be read before it goes live
-    const mode: PreviewMode = data.pending_copy ? "pending_copy" : "draft";
-    setPreview({
-      venue: v,
-      hook: data.copy?.hook ?? null,
-      description: data.copy?.description ?? null,
-      mode,
-    });
+    // enrich or rewrite: pop the Preview (full change diff) once the row refreshes
+    const mode: PreviewMode = data.pending ? "pending_copy" : "draft";
+    const costNote = typeof data.cost === "number" ? ` · ${fmtUsd(data.cost)}` : "";
+    setPreview({ venueId: v.id, mode });
     setRowResult((p) => ({
       ...p,
       [v.id]: {
-        msg: data.needs_attention
-          ? "Needs attention — see Preview"
-          : mode === "pending_copy"
-            ? "New copy ready — review & approve"
-            : "Draft ready — review & publish",
+        msg:
+          (data.needs_attention
+            ? "Needs attention — see Preview"
+            : mode === "pending_copy"
+              ? "Proposed changes ready — review & approve"
+              : "Draft ready — review & publish") + costNote,
       },
     }));
     router.refresh();
@@ -333,6 +368,8 @@ export function VenueHub({
         <Metric label="With Instagram" value={metrics.ig} />
         <Metric label="Fresh (≤1mo)" value={metrics.fresh30} tone="green" />
         <Metric label="Stale" value={metrics.stale} tone="amber" />
+        <Metric label="Total spent" value={fmtUsd(metrics.spend)} tone="gold" />
+        <Metric label="Avg $/venue" value={fmtUsd(avgCost)} />
       </div>
 
       {/* Filters */}
@@ -449,10 +486,15 @@ export function VenueHub({
                       {v.needs_attention && v.attention_reason && (
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
                       )}
-                      {v.hasPendingCopy && (
+                      {v.chainSeed && (
+                        <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2 py-0.5 text-xs font-semibold text-brand-sienna-light">
+                          Chain sibling — enrich?
+                        </div>
+                      )}
+                      {v.hasPending && (
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                          <span className="rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2 py-0.5 font-semibold text-brand-gold">Pending copy — not yet live</span>
-                          <button type="button" onClick={() => setPreview(previewFromRow(v))} className="font-semibold text-brand-gold hover:underline">Preview</button>
+                          <span className="rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2 py-0.5 font-semibold text-brand-gold">Pending changes — not yet live</span>
+                          <button type="button" onClick={() => setPreview(previewFromRow(v))} className="font-semibold text-brand-gold hover:underline">Review diff</button>
                           <button type="button" onClick={() => copyDecision(v.id, "approve")} className="font-semibold text-emerald-400 hover:underline">Approve</button>
                           <button type="button" onClick={() => copyDecision(v.id, "discard")} className="text-text-muted hover:text-destructive">Discard</button>
                         </div>
@@ -469,7 +511,10 @@ export function VenueHub({
                     </td>
                     <td className="px-3 py-3 text-xs">{v.hasRealPhoto ? <span className="text-emerald-400">yes</span> : <span className="text-text-muted">default</span>}</td>
                     <td className="px-3 py-3 text-xs">{v.hasIG ? <span className="text-emerald-400">✓ {v.postsCount || ""}</span> : <span className="text-text-muted">–</span>}</td>
-                    <td className="px-3 py-3 text-xs text-text-muted">{f.label}</td>
+                    <td className="px-3 py-3 text-xs text-text-muted">
+                      {f.label}
+                      {v.cost > 0 && <span className="ml-1 text-text-secondary">· {fmtUsd(v.cost)}</span>}
+                    </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap items-center justify-end gap-1.5">
                         <IconBtn title="Re-research + rewrite (Grok researches, Claude writes)" busy={busy} onClick={() => single(v, "enrich")}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
@@ -512,7 +557,13 @@ export function VenueHub({
         </table>
       </div>
 
-      {preview && <PreviewModal data={preview} onClose={() => setPreview(null)} />}
+      {preview &&
+        (() => {
+          const pv = venues.find((v) => v.id === preview.venueId);
+          return pv ? (
+            <PreviewModal venue={pv} mode={preview.mode} onClose={() => setPreview(null)} />
+          ) : null;
+        })()}
     </div>
   );
 }
@@ -590,11 +641,23 @@ function HeroPanel({ venue, styleOptions, onDone }: { venue: HubVenue; styleOpti
   );
 }
 
-function PreviewModal({ data, onClose }: { data: PreviewData; onClose: () => void }) {
+function PreviewModal({ venue, mode, onClose }: { venue: HubVenue; mode: PreviewMode; onClose: () => void }) {
   const router = useRouter();
-  const { venue, hook, description, mode } = data;
   const [busy, setBusy] = useState(false);
   const needsEnrich = venue.lat === 0 && venue.lng === 0;
+  const pending = venue.pending ?? {};
+  const fields = venue.fields ?? {};
+  const isPending = mode === "pending_copy";
+  const hook = isPending ? ((pending.hook as string) ?? null) : venue.hook;
+  const description = isPending ? ((pending.description as string) ?? null) : venue.description;
+  const changed = isPending
+    ? DIFF_FIELDS.filter(
+        (f) =>
+          Object.prototype.hasOwnProperty.call(pending, f.key) &&
+          fmtVal(f.key, pending[f.key]) !== fmtVal(f.key, fields[f.key])
+      )
+    : [];
+  const onRecord = DIFF_FIELDS.filter((f) => fmtVal(f.key, fields[f.key]) !== "—");
 
   async function act(fn: () => Promise<Response>) {
     setBusy(true);
@@ -642,13 +705,50 @@ function PreviewModal({ data, onClose }: { data: PreviewData; onClose: () => voi
             <p className="mt-3 text-sm text-text-muted">No copy yet — run Enrich or Rewrite to generate it.</p>
           )}
 
-          {/* Comparison: for pending copy, show what's currently live below. */}
-          {mode === "pending_copy" && (venue.hook || venue.description) && (
-            <details className="mt-4 rounded-md border border-border-subtle bg-surface-1/40 p-3">
-              <summary className="cursor-pointer text-xs font-semibold text-text-muted">Compare with the current live copy</summary>
-              {venue.hook && <p className="mt-2 text-sm italic text-text-muted">{venue.hook}</p>}
-              {venue.description && <div className="mt-2 space-y-2 text-xs leading-relaxed text-text-muted">{venue.description.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}</div>}
-            </details>
+          {/* Full change set — structured fields (§09.3) */}
+          {isPending ? (
+            <div className="mt-5 rounded-md border border-border-subtle bg-surface-1/40 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">
+                Field changes ({changed.length})
+              </p>
+              {changed.length === 0 ? (
+                <p className="text-xs text-text-muted">No structured field changes — copy only.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {changed.map((f) => (
+                    <div key={f.key} className="grid grid-cols-[92px_1fr] gap-2 text-xs">
+                      <span className="font-semibold text-text-secondary">{f.label}</span>
+                      <span className="min-w-0 break-words">
+                        <span className="text-text-muted line-through">{fmtVal(f.key, fields[f.key])}</span>
+                        <span className="mx-1.5 text-brand-gold">→</span>
+                        <span className="text-text-primary">{fmtVal(f.key, pending[f.key])}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(venue.hook || venue.description) && (
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-semibold text-text-muted">Compare with current live copy</summary>
+                  {venue.hook && <p className="mt-2 text-sm italic text-text-muted">{venue.hook}</p>}
+                  {venue.description && <div className="mt-2 space-y-2 text-xs leading-relaxed text-text-muted">{venue.description.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}</div>}
+                </details>
+              )}
+            </div>
+          ) : (
+            onRecord.length > 0 && (
+              <div className="mt-5 rounded-md border border-border-subtle bg-surface-1/40 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">On the record</p>
+                <div className="space-y-1.5">
+                  {onRecord.map((f) => (
+                    <div key={f.key} className="grid grid-cols-[92px_1fr] gap-2 text-xs">
+                      <span className="font-semibold text-text-secondary">{f.label}</span>
+                      <span className="min-w-0 break-words text-text-primary">{fmtVal(f.key, fields[f.key])}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
           )}
 
           <p className="mt-4 text-xs text-text-muted">{venue.hasIG ? `Instagram: ${venue.postsCount} post${venue.postsCount === 1 ? "" : "s"} on file` : "No Instagram on file"}</p>
@@ -658,7 +758,7 @@ function PreviewModal({ data, onClose }: { data: PreviewData; onClose: () => voi
             {mode === "pending_copy" && (
               <>
                 <button type="button" onClick={discard} disabled={busy} className="rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-muted hover:border-destructive hover:text-destructive disabled:opacity-40">Discard</button>
-                <button type="button" onClick={approve} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-4 py-2 text-sm font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Approve &amp; publish copy</button>
+                <button type="button" onClick={approve} disabled={busy} className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-4 py-2 text-sm font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}Approve all changes</button>
               </>
             )}
             {mode === "draft" && (

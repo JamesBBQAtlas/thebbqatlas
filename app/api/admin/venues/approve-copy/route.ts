@@ -21,21 +21,21 @@ export async function POST(request: Request) {
 
   const { data: row, error } = await ctx.db
     .from("restaurants")
-    .select("id, pending_copy")
+    .select("id, pending_changes")
     .eq("id", restaurantId)
     .single();
   if (error || !row) {
     return NextResponse.json({ error: "Venue not found." }, { status: 404 });
   }
-  if (!row.pending_copy) {
-    return NextResponse.json({ error: "No pending copy to act on." }, { status: 400 });
+  if (!row.pending_changes) {
+    return NextResponse.json({ error: "No pending changes to act on." }, { status: 400 });
   }
 
-  const pc = row.pending_copy as { hook?: string | null; description?: string | null };
+  // Approve commits the WHOLE proposed change set (copy + every structured
+  // field) and clears the bag; discard just clears it.
+  const proposed = row.pending_changes as Record<string, unknown>;
   const patch: Record<string, unknown> =
-    action === "approve"
-      ? { hook: pc.hook ?? null, description: pc.description ?? "", pending_copy: null }
-      : { pending_copy: null };
+    action === "approve" ? { ...proposed, pending_changes: null } : { pending_changes: null };
 
   const { error: updErr } = await ctx.db
     .from("restaurants")
