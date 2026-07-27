@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
 import { VenueImportPanel } from "@/components/admin/VenueImportPanel";
+import { FactsImportPanel } from "@/components/admin/FactsImportPanel";
 import { VenueHub } from "@/components/admin/VenueHub";
 import { toHubVenue, STYLE_OPTIONS } from "@/lib/admin/hub";
 import type { Restaurant } from "@/lib/types/database";
@@ -65,8 +66,9 @@ export default async function PendingVenuesPage() {
         </Link>
       </div>
 
-      <div className="mb-8">
+      <div className="mb-8 grid gap-4 lg:grid-cols-2">
         <VenueImportPanel />
+        <FactsImportPanel />
       </div>
 
       {hubVenues.length === 0 ? (

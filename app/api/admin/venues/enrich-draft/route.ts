@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { GROK_ENABLED } from "@/lib/ai/grok";
 import {
   researchDossier,
+  researchInstagram,
   writeVenueCopy,
   buildCopyPatch,
   matchBbqStyle,
@@ -17,14 +18,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Enrich ONE venue (VENUE-SYSTEM-SPEC §6). Grok researches a strict facts-only
- * dossier (persisted); Claude writes the house-voice hook + description; we map
- * facts and geocode. Copy lands as a draft: a live (approved) venue holds it as
- * pending_copy until James approves; a pending venue takes it directly.
+ * Enrich ONE venue (VENUE-SYSTEM-SPEC §6, cost-capped). All AI calls are bounded
+ * (grok-4-fast, 3 search results, no agentic sprawl; Haiku writer, capped output)
+ * to hold well under the $0.04/venue ceiling.
  *
- * mode="full"  (default): full research + house-voice copy.
- * mode="light" (Find IG):  backfill instagram handle/url + posts + socials only,
- *   WITHOUT touching curated copy or the hero.
+ * mode="full"  (default): bounded Grok dossier (persisted) → Haiku house-voice
+ *   copy → geocode. Copy is pending_copy for a live venue, direct for a draft.
+ * mode="light" (Find IG):  ONE lean, targeted IG search — backfills handle/url +
+ *   recent posts + socials only, no full dossier, no copy, no hero.
  */
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
@@ -67,6 +68,54 @@ export async function POST(request: Request) {
     country: row.country || undefined,
   };
 
+  // ---- light mode: one lean, targeted IG search --------------------------
+  if (mode === "light") {
+    let find;
+    let citations: string[];
+    try {
+      const r = await researchInstagram(lead);
+      find = r.find;
+      citations = r.citations;
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "IG search failed." },
+        { status: 502 }
+      );
+    }
+    const igHandle = find.instagram ? normalizeHandle(find.instagram) : null;
+    const socials = mapSocials(find.other_socials);
+    const patch: Record<string, unknown> = { enriched_at: new Date().toISOString() };
+    if (!row.instagram_url && find.instagram) patch.instagram_url = find.instagram;
+    if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
+    if (find.recent_instagram_posts.length) {
+      const existing = Array.isArray(row.instagram_posts) ? row.instagram_posts : [];
+      patch.instagram_posts = existing.length ? existing : find.recent_instagram_posts;
+    }
+    if (!row.x_url && socials.x_url) patch.x_url = socials.x_url;
+    if (!row.facebook_url && socials.facebook_url) patch.facebook_url = socials.facebook_url;
+    if (!row.tiktok_url && socials.tiktok_url) patch.tiktok_url = socials.tiktok_url;
+    if (!row.youtube_url && socials.youtube_url) patch.youtube_url = socials.youtube_url;
+    if (citations.length) patch.enrichment_sources = citations;
+    if (row.lat === 0 && row.lng === 0) {
+      const geo = await geocodeAddress({ address: row.address, city: row.city, country: row.country });
+      if (geo) {
+        patch.lat = geo.lat;
+        patch.lng = geo.lng;
+        if (geo.country_code) patch.country_code = geo.country_code;
+      }
+    }
+    const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
+    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+    return NextResponse.json({
+      ok: true,
+      mode,
+      name: row.name,
+      instagram: patch.instagram_url ?? row.instagram_url ?? null,
+      posts: find.recent_instagram_posts.length,
+    });
+  }
+
+  // ---- full mode: bounded dossier + Haiku copy ---------------------------
   let dossier;
   let citations: string[];
   try {
@@ -80,61 +129,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
-  const socials = mapSocials(dossier.other_socials);
-  const sources = [...new Set([...dossier.sources, ...citations])];
-  // IG posts for the "From their Instagram" section (several), best first.
-  const igPosts = [
-    ...(dossier.best_photo_post_url ? [dossier.best_photo_post_url] : []),
-    ...dossier.recent_instagram_posts,
-  ].filter((v, i, a) => a.indexOf(v) === i);
-
-  const patch: Record<string, unknown> = {
-    enriched_at: new Date().toISOString(),
-    dossier,
-  };
-
-  if (mode === "light") {
-    // Gap-fill only — never overwrite curated fields, never set the hero.
-    if (!row.instagram_url && dossier.instagram) patch.instagram_url = dossier.instagram;
-    if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
-    if (igPosts.length) {
-      const existing = Array.isArray(row.instagram_posts) ? row.instagram_posts : [];
-      patch.instagram_posts = existing.length ? existing : igPosts;
-    }
-    if (!row.x_url && socials.x_url) patch.x_url = socials.x_url;
-    if (!row.facebook_url && socials.facebook_url) patch.facebook_url = socials.facebook_url;
-    if (!row.tiktok_url && socials.tiktok_url) patch.tiktok_url = socials.tiktok_url;
-    if (!row.youtube_url && socials.youtube_url) patch.youtube_url = socials.youtube_url;
-    if (sources.length) patch.enrichment_sources = sources;
-    if (row.lat === 0 && row.lng === 0) {
-      const geo = await geocodeAddress({
-        address: dossier.address ?? row.address,
-        city: dossier.city ?? row.city,
-        country: dossier.country ?? row.country,
-      });
-      if (geo) {
-        patch.lat = geo.lat;
-        patch.lng = geo.lng;
-        if (geo.country_code) patch.country_code = geo.country_code;
-      }
-    }
-
-    const { error: updErr } = await ctx.db
-      .from("restaurants")
-      .update(patch)
-      .eq("id", restaurantId);
-    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
-    return NextResponse.json({
-      ok: true,
-      mode,
-      name: row.name,
-      instagram: patch.instagram_url ?? row.instagram_url ?? null,
-      posts: igPosts.length,
-    });
-  }
-
-  // ---- full mode ----------------------------------------------------------
   let copy;
   try {
     copy = await writeVenueCopy(dossier);
@@ -145,10 +139,20 @@ export async function POST(request: Request) {
     );
   }
 
-  // Copy: pending_copy for a live venue, direct for a draft (§5b).
+  const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
+  const socials = mapSocials(dossier.other_socials);
+  const sources = [...new Set([...dossier.sources, ...citations])];
+  const igPosts = [
+    ...(dossier.best_photo_post_url ? [dossier.best_photo_post_url] : []),
+    ...dossier.recent_instagram_posts,
+  ].filter((v, i, a) => a.indexOf(v) === i);
+
+  const patch: Record<string, unknown> = {
+    enriched_at: new Date().toISOString(),
+    dossier,
+  };
   Object.assign(patch, buildCopyPatch(row.status, copy));
 
-  // Facts (never voiced). Clean name + separate location label (§0).
   if (dossier.name) patch.name = dossier.name;
   if (dossier.location_label) patch.location_label = dossier.location_label;
   const style = matchBbqStyle(dossier.bbq_style);
@@ -171,18 +175,13 @@ export async function POST(request: Request) {
   if (price) patch.price_level = price;
   if (sources.length) patch.enrichment_sources = sources;
 
-  // Geocode (dossier coords first, else address) so it lands on the map.
   let city = dossier.city ?? row.city;
   let country = dossier.country ?? row.country;
   if (dossier.lat !== null && dossier.lng !== null) {
     patch.lat = dossier.lat;
     patch.lng = dossier.lng;
   } else {
-    const geo = await geocodeAddress({
-      address: dossier.address ?? row.address,
-      city,
-      country,
-    });
+    const geo = await geocodeAddress({ address: dossier.address ?? row.address, city, country });
     if (geo) {
       patch.lat = geo.lat;
       patch.lng = geo.lng;
@@ -194,10 +193,7 @@ export async function POST(request: Request) {
   if (city) patch.city = city;
   if (country) patch.country = country;
 
-  const { error: updErr } = await ctx.db
-    .from("restaurants")
-    .update(patch)
-    .eq("id", restaurantId);
+  const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
   return NextResponse.json({

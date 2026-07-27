@@ -17,7 +17,9 @@
  */
 
 const XAI_BASE = process.env.XAI_BASE_URL ?? "https://api.x.ai/v1";
-export const GROK_MODEL = process.env.XAI_MODEL ?? "grok-4.5";
+// Cost-efficient default (COST-EFFICIENT-ENRICHMENT): grok-4-fast keeps a bounded
+// per-venue research call cheap (~$0.02). Override with XAI_MODEL if needed.
+export const GROK_MODEL = process.env.XAI_MODEL ?? "grok-4-fast";
 export const GROK_ENABLED = Boolean(process.env.XAI_API_KEY);
 
 export class GrokError extends Error {}
@@ -28,6 +30,10 @@ interface GrokJSONOptions {
   /** Give Grok live web/X search tools so it can actually hunt. */
   search?: boolean;
   temperature?: number;
+  /** Cap web-search results for a bounded, cheap call (cost cap). */
+  maxSearchResults?: number;
+  /** Include the (extra) X search tool. Default true; pass false to bound cost. */
+  xSearch?: boolean;
 }
 
 interface GrokJSONResult<T> {
@@ -67,6 +73,8 @@ export async function grokJSON<T>({
   user,
   search = true,
   temperature = 0.2,
+  maxSearchResults,
+  xSearch = true,
 }: GrokJSONOptions): Promise<GrokJSONResult<T>> {
   if (!GROK_ENABLED) {
     throw new GrokError(
@@ -87,21 +95,19 @@ export async function grokJSON<T>({
     // there's no question of having copied it. We block the Maps domains at the
     // API level and reinforce "no Maps content" in the prompt. Image
     // understanding lets Grok read details (hours, menus) off social images.
-    body.tools = [
-      {
-        type: "web_search",
-        filters: {
-          excluded_domains: [
-            "maps.google.com",
-            "maps.app.goo.gl",
-            "goo.gl",
-          ],
-        },
-        // Read details (hours, menus) straight off social post images.
-        enable_image_understanding: true,
+    const webSearch: Record<string, unknown> = {
+      type: "web_search",
+      filters: {
+        excluded_domains: ["maps.google.com", "maps.app.goo.gl", "goo.gl"],
       },
-      { type: "x_search" },
-    ];
+      // Read details (hours, menus) straight off social post images.
+      enable_image_understanding: true,
+    };
+    // Bound the search breadth for a cheap, single-pass call (cost cap).
+    if (typeof maxSearchResults === "number") {
+      webSearch.max_search_results = maxSearchResults;
+    }
+    body.tools = xSearch ? [webSearch, { type: "x_search" }] : [webSearch];
   }
 
   // Safety net well inside the (Pro) 300s function limit — a stuck hunt surfaces

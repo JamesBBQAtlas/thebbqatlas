@@ -9,6 +9,10 @@
 
 const ANTHROPIC_BASE = process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1";
 export const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
+// The house-voice WRITING step runs on Haiku by default — lean + cheap (~$0.004
+// per venue), isolated from the research leg (COST-EFFICIENT-ENRICHMENT §3).
+export const CLAUDE_WRITER_MODEL =
+  process.env.ANTHROPIC_WRITER_MODEL ?? "claude-haiku-4-5";
 export const CLAUDE_ENABLED = Boolean(process.env.ANTHROPIC_API_KEY);
 
 export class ClaudeError extends Error {}
@@ -18,6 +22,10 @@ interface ClaudeJSONOptions {
   user: string;
   search?: boolean;
   temperature?: number;
+  /** Override the model for this call (e.g. Haiku for the cheap writing step). */
+  model?: string;
+  /** Cap output tokens (cost cap). */
+  maxTokens?: number;
 }
 
 interface ClaudeJSONResult<T> {
@@ -50,14 +58,16 @@ export async function claudeJSON<T>({
   user,
   search = true,
   temperature = 0.2,
+  model,
+  maxTokens,
 }: ClaudeJSONOptions): Promise<ClaudeJSONResult<T>> {
   if (!CLAUDE_ENABLED) {
     throw new ClaudeError("Claude isn't switched on — set ANTHROPIC_API_KEY.");
   }
 
   const body: Record<string, unknown> = {
-    model: CLAUDE_MODEL,
-    max_tokens: 4096,
+    model: model ?? CLAUDE_MODEL,
+    max_tokens: maxTokens ?? 4096,
     temperature,
     system,
     messages: [{ role: "user", content: user }],

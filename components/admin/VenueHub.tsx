@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { freshness } from "@/lib/admin/freshness";
+import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 
 export interface HubVenue {
   id: string;
@@ -128,6 +129,7 @@ export function VenueHub({
   const [heroOpen, setHeroOpen] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [rowResult, setRowResult] = useState<Record<string, { msg?: string; err?: string }>>({});
+  const [confirmBatch, setConfirmBatch] = useState<{ kind: ActionKind; n: number; est: number } | null>(null);
   const pauseRef = useRef(false);
   const stopRef = useRef(false);
 
@@ -208,7 +210,19 @@ export function VenueHub({
     }
   }
 
-  async function runBatch(kind: ActionKind) {
+  function requestBatch(kind: ActionKind) {
+    const n = shown.filter((v) => selected.has(v.id)).length;
+    if (!n || running) return;
+    const est = estimateCost(kind, n);
+    if (est >= BATCH_CONFIRM_THRESHOLD) {
+      setConfirmBatch({ kind, n, est });
+      return;
+    }
+    doBatch(kind);
+  }
+
+  async function doBatch(kind: ActionKind) {
+    setConfirmBatch(null);
     const ids = shown.filter((v) => selected.has(v.id)).map((v) => v.id);
     if (!ids.length || running) return;
     setRunning(true);
@@ -365,14 +379,30 @@ export function VenueHub({
             <button type="button" onClick={() => { stopRef.current = true; pauseRef.current = false; setPaused(false); }} className="inline-flex items-center gap-1.5 rounded-md border border-destructive/60 px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/10"><Square className="h-3.5 w-3.5" />Stop</button>
           </>
         ) : (
-          ACTIONS.map((a) => (
-            <button key={a.kind} type="button" onClick={() => runBatch(a.kind)} disabled={selCount === 0} className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3 py-2 text-xs font-bold uppercase tracking-[0.04em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">
-              <a.icon className="h-3.5 w-3.5" />{a.label} selected ({selCount})
-            </button>
-          ))
+          ACTIONS.map((a) => {
+            const est = estimateCost(a.kind, selCount);
+            return (
+              <button key={a.kind} type="button" onClick={() => requestBatch(a.kind)} disabled={selCount === 0} className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3 py-2 text-xs font-bold uppercase tracking-[0.04em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">
+                <a.icon className="h-3.5 w-3.5" />{a.label} ({selCount})
+                {est > 0 && <span className="font-normal normal-case text-text-muted">· {fmtUsd(est)}</span>}
+              </button>
+            );
+          })
         )}
       </div>
+      {confirmBatch && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-brand-gold/50 bg-brand-gold/10 px-4 py-3">
+          <span className="text-sm text-text-primary">
+            This will run <strong>{confirmBatch.kind}</strong> on <strong>{confirmBatch.n}</strong> venues — estimated <strong>{fmtUsd(confirmBatch.est)}</strong>. Proceed?
+          </span>
+          <div className="ml-auto flex gap-2">
+            <button type="button" onClick={() => setConfirmBatch(null)} className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted hover:text-text-primary">Cancel</button>
+            <button type="button" onClick={() => doBatch(confirmBatch.kind)} className="rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90">Confirm &amp; run</button>
+          </div>
+        </div>
+      )}
       {running && <p className="mb-3 text-xs text-text-muted">One venue at a time. Pause/Stop halts after the current venue — never mid-record.</p>}
+      <p className="mb-3 text-xs text-text-muted">Cost-capped: bounded search + Haiku writer, hard ceiling {fmtUsd(COST_PER_VENUE_CEILING)}/venue. Estimates shown per batch; anything over {fmtUsd(BATCH_CONFIRM_THRESHOLD)} asks first.</p>
 
       {/* Legend — what the row actions do */}
       <p className="mb-3 text-xs text-text-muted">
