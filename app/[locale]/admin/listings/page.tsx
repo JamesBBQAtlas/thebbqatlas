@@ -5,7 +5,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
 import { CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/constants/categories";
 import { freshness } from "@/lib/admin/freshness";
-import { ListingsTable, type ListingRow } from "@/components/admin/ListingsTable";
+import { VenueHub } from "@/components/admin/VenueHub";
+import { toHubVenue, STYLE_OPTIONS } from "@/lib/admin/hub";
 import type { Restaurant, MapItemCategory } from "@/lib/types/database";
 
 export const metadata = { title: "Listings" };
@@ -128,7 +129,7 @@ export default async function ListingsPage() {
       db
         .from("restaurants")
         .select(
-          "id, name, slug, city, country, style, category, enriched_at, status, website, phone, hours, instagram_url, instagram_handle, hero_post_url, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, lat, lng, hero_image_url, created_at, brand_id"
+          "id, name, slug, city, country, style, category, enriched_at, status, website, phone, hours, instagram_url, instagram_handle, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, lat, lng, hero_image_url, hero_source, hook, description, pending_copy, needs_attention, attention_reason, location_label, created_at, brand_id"
         )
         .limit(2000),
       count(db, "check_ins"),
@@ -195,23 +196,7 @@ export default async function ListingsPage() {
     all.filter((r) => r.created_at && now - new Date(r.created_at).getTime() <= days * 86_400_000)
       .length;
 
-  const rows: ListingRow[] = all.map((r) => ({
-    id: r.id,
-    name: r.name,
-    slug: r.slug,
-    city: r.city,
-    country: r.country,
-    style: r.style,
-    category: r.category ?? null,
-    status: r.status,
-    enriched_at: r.enriched_at ?? null,
-    website: r.website,
-    phone: r.phone ?? null,
-    instagram_url: r.instagram_url ?? null,
-    instagram_handle: r.instagram_handle ?? null,
-    hero_post_url: r.hero_post_url ?? null,
-    has_hours: Boolean(r.hours),
-  }));
+  const hubVenues = all.map(toHubVenue);
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10">
@@ -304,9 +289,9 @@ export default async function ListingsPage() {
         )}
       </Section>
 
-      {/* Interactive table */}
-      <Section title="All listings">
-        <ListingsTable rows={rows} />
+      {/* Control hub — the same surface for existing venues and new imports */}
+      <Section title="Venue control hub">
+        <VenueHub venues={hubVenues} styleOptions={STYLE_OPTIONS} />
       </Section>
     </div>
   );

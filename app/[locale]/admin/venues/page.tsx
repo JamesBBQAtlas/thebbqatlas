@@ -4,10 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
 import { VenueImportPanel } from "@/components/admin/VenueImportPanel";
-import {
-  PendingVenuesManager,
-  type DraftVenue,
-} from "@/components/admin/PendingVenuesManager";
+import { VenueHub } from "@/components/admin/VenueHub";
+import { toHubVenue, STYLE_OPTIONS } from "@/lib/admin/hub";
 import type { Restaurant } from "@/lib/types/database";
 
 export const metadata = { title: "Pending Venues" };
@@ -46,23 +44,7 @@ export default async function PendingVenuesPage() {
     .eq("status", "pending")
     .order("created_at", { ascending: true });
   const rows = (pending ?? []) as Restaurant[];
-
-  const drafts: DraftVenue[] = rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    city: r.city || null,
-    country: r.country || null,
-    instagram_handle: r.instagram_handle ?? null,
-    hero_post_url: r.hero_post_url ?? null,
-    enriched_at: r.enriched_at ?? null,
-    needs_attention: Boolean(r.needs_attention),
-    attention_reason: r.attention_reason ?? null,
-    lat: r.lat,
-    lng: r.lng,
-    sourcesCount: Array.isArray(r.enrichment_sources)
-      ? r.enrichment_sources.length
-      : 0,
-  }));
+  const hubVenues = rows.map(toHubVenue);
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-16 sm:px-10">
@@ -87,13 +69,13 @@ export default async function PendingVenuesPage() {
         <VenueImportPanel />
       </div>
 
-      {drafts.length === 0 ? (
+      {hubVenues.length === 0 ? (
         <p className="rounded-xl border border-border-subtle bg-surface-0 p-8 text-text-muted">
           Nothing in the queue. Import a seed sheet above, or add venues via the
           console — they appear here as drafts for enrichment and review.
         </p>
       ) : (
-        <PendingVenuesManager venues={drafts} />
+        <VenueHub venues={hubVenues} styleOptions={STYLE_OPTIONS} initialStatus="pending" />
       )}
     </div>
   );

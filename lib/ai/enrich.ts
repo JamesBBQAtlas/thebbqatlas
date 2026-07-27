@@ -205,6 +205,10 @@ export interface VenueDossier {
   setting_vibe: string | null;
   ordering_notes: string | null;
   best_photo_post_url: string | null;
+  /** Several recent public IG post permalinks for the "From their Instagram" section. */
+  recent_instagram_posts: string[];
+  /** For one location of a chain: the branch label (e.g. "Leawood"); else null. */
+  location_label: string | null;
   sources: string[];
   unknowns: string[];
 }
@@ -230,10 +234,13 @@ Field notes:
 - "bbq_style": the real-world style in plain words (e.g. "Central Texas", "Carolina", "Kansas City", "asado", "Korean", "braai").
 - "price_band": one of £, ££, £££, ££££ or null.
 - "instagram": the venue's official Instagram profile URL. "other_socials": full https URLs for X/Twitter, Facebook, TikTok, YouTube, etc.
-- "best_photo_post_url": a single strong PUBLIC Instagram POST or REEL permalink (https://www.instagram.com/p/... or /reel/...) that would make a good hero image, or null.
+- "best_photo_post_url": a single strong PUBLIC Instagram POST or REEL permalink (https://www.instagram.com/p/... or /reel/...), or null.
+- "recent_instagram_posts": up to 6 recent PUBLIC Instagram post/reel permalinks from this venue, for an on-page photo section. [] if none found.
+- "name": the venue's clean name WITHOUT the city or branch baked in (e.g. "Joe's Kansas City Bar-B-Que", not "…Bar-B-Que Leawood").
+- "location_label": if this is ONE location of a multi-location business, the branch label only (e.g. "Leawood", "Olathe"); else null. Never fold it into "name".
 - "lat"/"lng": decimal coordinates if you can verify them, else null.
 
-Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, sources, unknowns.`;
+Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, sources, unknowns.`;
 
 const asArray = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : [];
@@ -300,6 +307,10 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
       /instagram\.com\/(p|reel)\//.test(String(data.best_photo_post_url))
         ? String(data.best_photo_post_url)
         : null,
+    recent_instagram_posts: asArray(data.recent_instagram_posts)
+      .filter((u) => /instagram\.com\/(p|reel)\//.test(u))
+      .slice(0, 6),
+    location_label: asStr(data.location_label),
     sources: asArray(data.sources),
     unknowns: asArray(data.unknowns),
   };
@@ -309,29 +320,29 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
 export interface VenueCopy {
   hook: string | null;
   description: string | null;
-  style: BbqStyle | null;
   needs_attention: boolean;
   attention_reason: string | null;
 }
 
-const COPY_SYSTEM = `You are the SINGLE house writer for The BBQ Atlas. One writer, one voice, across the whole site: dry, warm, certain, a little absurd — Ron Swanson by way of a pitmaster. We CELEBRATE barbecue; we do NOT rank it. No hype, no clichés, no exclamation-mark energy.
+// The EXACT house-voice writing prompt (VENUE-SYSTEM-SPEC §6). Trait-led; the
+// internal "north star" must never be named in output. Voice-reference examples
+// (VOICE-REFERENCE-VENUES.md) are embedded for calibration.
+const COPY_SYSTEM = `You are the staff writer for The BBQ Atlas. Write in ONE house voice: dry, warm, understated and certain, with a wry, deadpan edge — a writer who reveres craft and plain things done properly, is allergic to pretense and marketing-speak, and never wastes a word. (Internal north star only: a Ron Swanson-inspired sensibility; the source is never referenced in output.) The Atlas CELEBRATES barbecue; it never ranks or scores it.
 
-You are given a VERIFIED FACTS DOSSIER about one venue. Write the on-site copy using ONLY those facts.
+Input: a verified facts dossier (JSON) for one venue. Write (1) a one-line HOOK and (2) a 2-3 short-paragraph DESCRIPTION using ONLY facts in the dossier. If \`unknowns\` lists something, write around it — never invent a fact, dish, date, or person. No ratings/scores. NEVER name Ron Swanson, the TV show he appeared in, its characters, or any of its places/features — that sensibility inspires us, but the source is never mentioned in the output. Keep proper nouns and figures accurate. Structured fields (address/phone/hours) are not yours — leave them factual. If the dossier is too thin to write with a genuine point of view, return {"needs_attention": true, "reason": "..."} instead of padding.
 
-HARD RULES:
-- Never invent. If a fact is missing or listed in "unknowns", write around it — do not fill gaps with fiction.
-- No star ratings, scores, "best/top/#1" claims, or invented awards.
-- Do not reproduce any third-party text — write everything fresh.
-- Keep it specific to THIS place using the dossier's real details (style, wood, method, specialities, setting, backstory). Generic filler is a failure.
+Match the register of these reference examples:
 
-Produce JSON with exactly these keys:
-- "hook": one line in house voice (a single sentence, no rating).
-- "description": 2-3 SHORT paragraphs; every fact accurate; personality carries it. Plain text (use \\n\\n between paragraphs).
-- "style": the ONE slug from this list that best matches the dossier's bbq_style, or null: ${STYLE_LIST}.
-- "needs_attention": true ONLY if the dossier is too thin to write an honest, specific page (mostly unknowns; no what_it_is, website or instagram; nothing concrete to say). Prefer a lean true page over a padded invented one.
-- "attention_reason": if needs_attention is true, one short line on what's missing; else null.
+Franklin Barbecue — Austin, TX:
+"Franklin Barbecue is what happens when a man decides brisket is worth queuing an hour for and thousands of people quietly agree. Aaron Franklin started with a trailer; now there's a line down the block on Austin's East Side most mornings, and it moves at the pace of things done properly — USDA Prime, post oak, no shortcuts. They sell out daily, and when it's gone it's gone. Order the brisket. Get there early. Bring patience — you'll be repaid in bark."
 
-Respond ONLY with that JSON object.`;
+Kreuz Market — Lockhart, TX:
+"Kreuz Market does not have sauce. It does not have forks. It has meat, butcher paper, and a century of not needing your opinion on either. In Lockhart, Kreuz sells brisket, sausage and pork chops by the pound, and lets the smoke do the seasoning. Eat with your hands. It's how it's meant to be done, and they will not be moved on the matter."
+
+Joe's Kansas City Bar-B-Que — Kansas City, KS:
+"Joe's does something most restaurants wouldn't dare: it runs out of a working petrol station and refuses to apologise for it. Since 1996, people have queued past the pumps for burnt ends, ribs, and the Z-Man. No pretense. A pit, a queue, and the quiet confidence of a place that knows exactly what it is. Fill the tank. Then fill the plate."
+
+Output ONLY JSON: {"hook": "...", "description": "..."} — or {"needs_attention": true, "reason": "..."} if the dossier is too thin. In the description use \\n\\n between paragraphs.`;
 
 /** Claude writing leg: dossier → house-voice copy (falls back to Grok if Claude is off). */
 export async function writeVenueCopy(dossier: VenueDossier): Promise<VenueCopy> {
@@ -341,35 +352,77 @@ export async function writeVenueCopy(dossier: VenueDossier): Promise<VenueCopy> 
 DOSSIER:
 ${JSON.stringify(dossier, null, 2)}
 
-Return ONLY the JSON object described in your instructions.`;
+Return ONLY the JSON described in your instructions.`;
 
-  const { data } = await runEngine<Partial<VenueCopy>>(engine, {
-    system: COPY_SYSTEM,
-    user,
-    search: false,
-  });
+  const { data } = await runEngine<{
+    hook?: string;
+    description?: string;
+    needs_attention?: boolean;
+    reason?: string;
+  }>(engine, { system: COPY_SYSTEM, user, search: false });
 
-  const style =
-    data.style && (BBQ_STYLES as string[]).includes(data.style)
-      ? (data.style as BbqStyle)
-      : null;
   const description = asStr(data.description);
-  // Belt-and-braces: if the writer produced nothing usable, that's needs-attention.
-  const thin =
-    !dossier.what_it_is && !dossier.website && !dossier.instagram && !description;
-  const needs_attention =
-    (typeof data.needs_attention === "boolean" ? data.needs_attention : false) ||
-    thin;
+  const hook = asStr(data.hook);
+  const flaggedThin = data.needs_attention === true || (!description && !hook);
+  const dossierThin =
+    !dossier.what_it_is && !dossier.website && !dossier.instagram;
+  const needs_attention = flaggedThin || (dossierThin && !description);
 
   return {
-    hook: asStr(data.hook),
+    hook,
     description,
-    style,
     needs_attention,
     attention_reason: needs_attention
-      ? asStr(data.attention_reason) ?? "Dossier too thin to write an honest page."
+      ? asStr(data.reason) ?? "Dossier too thin to write an honest page."
       : null,
   };
+}
+
+/**
+ * How copy lands: a DRAFT venue (pending) takes the copy straight onto
+ * hook/description; a LIVE venue (approved) holds it as pending_copy so the
+ * public page doesn't change until James approves (§5b).
+ */
+export function buildCopyPatch(
+  status: string,
+  copy: VenueCopy
+): Record<string, unknown> {
+  if (status === "approved") {
+    return {
+      pending_copy: {
+        hook: copy.hook,
+        description: copy.description,
+        created_at: new Date().toISOString(),
+      },
+    };
+  }
+  return {
+    hook: copy.hook,
+    description: copy.description,
+    needs_attention: copy.needs_attention,
+    attention_reason: copy.attention_reason,
+  };
+}
+
+/** Map a dossier's free-text bbq_style to our taxonomy slug (or null). */
+export function matchBbqStyle(freeform: string | null): BbqStyle | null {
+  const s = (freeform ?? "").toLowerCase();
+  if (!s) return null;
+  if (/central tex|texas|brisket|hill country|lockhart|austin/.test(s)) return "texas";
+  if (/carolina|whole hog|pulled pork|vinegar/.test(s)) return "carolina";
+  if (/kansas|burnt end|\bkc\b/.test(s)) return "kansas-city";
+  if (/memphis|dry[- ]rub/.test(s)) return "memphis";
+  if (/alabama|white sauce|deep south/.test(s)) return "alabama";
+  if (/korean|galbi|bulgogi|gogigui/.test(s)) return "korean";
+  if (/yakiniku|yakitori|robata|japanese/.test(s)) return "yakiniku";
+  if (/asado|parrilla|argentin/.test(s)) return "asado";
+  if (/churrasco|brazil|rodizio|espeto/.test(s)) return "churrasco";
+  if (/mexican|barbacoa|birria/.test(s)) return "mexican";
+  if (/braai|south africa/.test(s)) return "braai";
+  if (/nyama|choma|kenya|east africa/.test(s)) return "nyama-choma";
+  if (/mangal|turkish|ocakbasi|kebab|middle eastern|lebanese|persian/.test(s)) return "mangal";
+  if (/modern|contemporary|new[- ]school|fusion|craft/.test(s)) return "modern";
+  return null;
 }
 
 /** £/££/£££/££££ → 1–4 (or null). */

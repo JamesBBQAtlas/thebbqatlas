@@ -151,7 +151,20 @@ export interface Restaurant {
   // Enrichment v3: flag a venue whose dossier was too thin for an honest page.
   needs_attention?: boolean | null;
   attention_reason?: string | null;
+  // Venue system: hero provenance, the one-line hook, the persisted Grok
+  // dossier, and pending (proposed-but-unapproved) copy for a live venue.
+  hero_source?: HeroSource | null;
+  hook?: string | null;
+  dossier?: Record<string, unknown> | null;
+  pending_copy?: { hook?: string | null; description?: string | null; created_at?: string } | null;
 }
+
+export type HeroSource =
+  | "user_upload"
+  | "venue_provided"
+  | "atlas_licensed"
+  | "style_default"
+  | "none";
 
 export interface ReviewPhoto {
   id: string;

@@ -4,6 +4,8 @@ import { GROK_ENABLED } from "@/lib/ai/grok";
 import {
   researchDossier,
   writeVenueCopy,
+  buildCopyPatch,
+  matchBbqStyle,
   priceBandToLevel,
   mapSocials,
   type VenueLead,
@@ -15,17 +17,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * Enrich ONE venue (enrichment v3). Grok researches a strict facts-only dossier;
- * Claude writes the house-voice copy; we geocode and write the record back —
- * status stays 'pending' so nothing publishes without a human Publish.
+ * Enrich ONE venue (VENUE-SYSTEM-SPEC §6). Grok researches a strict facts-only
+ * dossier (persisted); Claude writes the house-voice hook + description; we map
+ * facts and geocode. Copy lands as a draft: a live (approved) venue holds it as
+ * pending_copy until James approves; a pending venue takes it directly.
  *
- * mode="full"  (default): full research + house-voice copy. For seed drafts.
- * mode="light" (Phase B): gap-fill only — backfill a missing Instagram handle,
- *   hero post and socials on an already-live venue WITHOUT touching its curated
- *   name / description / style / status. Skips the Claude copy leg.
- *
- * A dossier too thin to write honestly sets needs_attention instead of a padded
- * page.
+ * mode="full"  (default): full research + house-voice copy.
+ * mode="light" (Find IG):  backfill instagram handle/url + posts + socials only,
+ *   WITHOUT touching curated copy or the hero.
  */
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
@@ -47,7 +46,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, instagram_url, instagram_handle, hero_post_url, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, status"
+      "id, name, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status"
     )
     .eq("id", restaurantId)
     .single();
@@ -82,22 +81,32 @@ export async function POST(request: Request) {
   }
 
   const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
-  const heroPost = dossier.best_photo_post_url;
   const socials = mapSocials(dossier.other_socials);
-  const patch: Record<string, unknown> = { enriched_at: new Date().toISOString() };
+  const sources = [...new Set([...dossier.sources, ...citations])];
+  // IG posts for the "From their Instagram" section (several), best first.
+  const igPosts = [
+    ...(dossier.best_photo_post_url ? [dossier.best_photo_post_url] : []),
+    ...dossier.recent_instagram_posts,
+  ].filter((v, i, a) => a.indexOf(v) === i);
+
+  const patch: Record<string, unknown> = {
+    enriched_at: new Date().toISOString(),
+    dossier,
+  };
 
   if (mode === "light") {
-    // Gap-fill only — never overwrite curated fields on a live venue.
+    // Gap-fill only — never overwrite curated fields, never set the hero.
     if (!row.instagram_url && dossier.instagram) patch.instagram_url = dossier.instagram;
     if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
-    if (!row.hero_post_url && heroPost) patch.hero_post_url = heroPost;
+    if (igPosts.length) {
+      const existing = Array.isArray(row.instagram_posts) ? row.instagram_posts : [];
+      patch.instagram_posts = existing.length ? existing : igPosts;
+    }
     if (!row.x_url && socials.x_url) patch.x_url = socials.x_url;
     if (!row.facebook_url && socials.facebook_url) patch.facebook_url = socials.facebook_url;
     if (!row.tiktok_url && socials.tiktok_url) patch.tiktok_url = socials.tiktok_url;
     if (!row.youtube_url && socials.youtube_url) patch.youtube_url = socials.youtube_url;
-    if (dossier.sources.length || citations.length)
-      patch.enrichment_sources = [...new Set([...dossier.sources, ...citations])];
-    // Geocode only if it isn't on the map yet.
+    if (sources.length) patch.enrichment_sources = sources;
     if (row.lat === 0 && row.lng === 0) {
       const geo = await geocodeAddress({
         address: dossier.address ?? row.address,
@@ -121,11 +130,11 @@ export async function POST(request: Request) {
       mode,
       name: row.name,
       instagram: patch.instagram_url ?? row.instagram_url ?? null,
-      hero_post_url: patch.hero_post_url ?? row.hero_post_url ?? null,
+      posts: igPosts.length,
     });
   }
 
-  // ---- full mode: research + house-voice copy -----------------------------
+  // ---- full mode ----------------------------------------------------------
   let copy;
   try {
     copy = await writeVenueCopy(dossier);
@@ -136,11 +145,14 @@ export async function POST(request: Request) {
     );
   }
 
-  if (dossier.name) patch.name = dossier.name;
-  const composed = [copy.hook, copy.description].filter(Boolean).join("\n\n");
-  if (composed) patch.description = composed;
-  if (copy.style) patch.style = copy.style;
+  // Copy: pending_copy for a live venue, direct for a draft (§5b).
+  Object.assign(patch, buildCopyPatch(row.status, copy));
 
+  // Facts (never voiced). Clean name + separate location label (§0).
+  if (dossier.name) patch.name = dossier.name;
+  if (dossier.location_label) patch.location_label = dossier.location_label;
+  const style = matchBbqStyle(dossier.bbq_style);
+  if (style) patch.style = style;
   const address = [dossier.address, dossier.postcode]
     .filter((s) => s && String(s).trim())
     .join(", ");
@@ -149,6 +161,7 @@ export async function POST(request: Request) {
   if (dossier.website) patch.website = dossier.website;
   if (dossier.instagram) patch.instagram_url = dossier.instagram;
   if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
+  if (igPosts.length) patch.instagram_posts = igPosts;
   if (socials.x_url) patch.x_url = socials.x_url;
   if (socials.facebook_url) patch.facebook_url = socials.facebook_url;
   if (socials.tiktok_url) patch.tiktok_url = socials.tiktok_url;
@@ -156,14 +169,9 @@ export async function POST(request: Request) {
   if (dossier.hours) patch.hours = dossier.hours;
   const price = priceBandToLevel(dossier.price_band);
   if (price) patch.price_level = price;
-  if (heroPost) patch.hero_post_url = heroPost;
-  if (dossier.sources.length || citations.length)
-    patch.enrichment_sources = [...new Set([...dossier.sources, ...citations])];
+  if (sources.length) patch.enrichment_sources = sources;
 
-  patch.needs_attention = copy.needs_attention;
-  patch.attention_reason = copy.attention_reason;
-
-  // Geocode (dossier coords first, else address lookup) so it lands on the map.
+  // Geocode (dossier coords first, else address) so it lands on the map.
   let city = dossier.city ?? row.city;
   let country = dossier.country ?? row.country;
   if (dossier.lat !== null && dossier.lng !== null) {
@@ -198,7 +206,7 @@ export async function POST(request: Request) {
     name: (patch.name as string) ?? row.name,
     needs_attention: copy.needs_attention,
     attention_reason: copy.attention_reason,
+    pending_copy: row.status === "approved",
     geocoded: patch.lat !== undefined,
-    confidence: dossier.unknowns.length,
   });
 }

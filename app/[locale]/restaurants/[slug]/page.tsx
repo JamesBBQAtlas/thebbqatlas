@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Camera, Clock } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Clock } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
@@ -9,7 +9,8 @@ import {
   getSignatureDishes,
 } from "@/lib/queries/restaurants";
 import { safeVenueImage } from "@/lib/restaurants/image";
-import { STYLE_LABELS, STYLE_PIN_COLORS } from "@/lib/constants/styles";
+import { STYLE_LABELS } from "@/lib/constants/styles";
+import { styleHeroUrl } from "@/lib/constants/hero";
 import {
   groupOfferings,
   OFFERING_CATEGORY_LABELS,
@@ -23,7 +24,6 @@ import { TrackedLink } from "@/components/monetization/TrackedLink";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { CheckInButton } from "@/components/restaurants/CheckInButton";
 import { InstagramEmbed } from "@/components/restaurants/InstagramEmbed";
-import { HeroPlaceholder } from "@/components/restaurants/HeroPlaceholder";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
@@ -173,18 +173,19 @@ export default async function RestaurantPage({ params }: Props) {
   // from our moderated media system; else (2) the official Instagram embed (its
   // own section below); else (3) the branded "Add a photo" placeholder. We never
   // scrape, hotlink, or self-host a third party's image as a hero.
-  const heroImage = media.find((m) => m.kind === "image")?.url ?? null;
-  // Tier 2 hero (when there's no uploaded photo): the venue's own Instagram post,
-  // shown via Instagram's official embed — credited, links back, never scraped.
-  const heroPost =
-    typeof restaurant.hero_post_url === "string" &&
-    /instagram\.com\/(p|reel)\//.test(restaurant.hero_post_url)
-      ? restaurant.hero_post_url
-      : null;
-  const canUpload = Boolean(user);
-  const uploadHref = canUpload
-    ? "#add-photos"
-    : `/login?next=/restaurants/${restaurant.slug}`;
+  // §2 hero resolution: a real photo when we have one — the admin-set
+  // hero_image_url, else an approved community photo — otherwise the atmospheric
+  // style default. Instagram is NEVER the hero. Always an image; never photo-less.
+  const communityHero = media.find((m) => m.kind === "image")?.url ?? null;
+  const realHero =
+    restaurant.hero_image_url && restaurant.hero_image_url.trim()
+      ? { url: restaurant.hero_image_url, source: restaurant.hero_source ?? "atlas_licensed" }
+      : communityHero
+        ? { url: communityHero, source: "user_upload" as const }
+        : null;
+  const hero = realHero
+    ? { url: realHero.url, isReal: true }
+    : { url: styleHeroUrl(restaurant.style), isReal: false };
 
   // Nearby (by true distance). Miles for US/UK, kilometres elsewhere.
   const useMiles = code === "US" || code === "GB";
@@ -244,59 +245,20 @@ export default async function RestaurantPage({ params }: Props) {
         slug={restaurant.slug}
       />
 
-      {/* Hero */}
+      {/* Hero — always a good-looking, legal image (real photo or style default),
+          under a warm-dark gradient for legibility. Never an Instagram embed. */}
       <section className="relative h-[52vh] min-h-[360px] w-full overflow-hidden">
-        {heroImage ? (
-          // Approved, moderated upload from our own media system — never scraped.
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={heroImage}
-            alt={`${restaurant.name} — ${STYLE_LABELS[restaurant.style]} barbecue in ${cityCountry}`}
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-        ) : heroPost ? (
-          // Tier 2: the venue's own Instagram post as the hero, on the branded
-          // backdrop. Official embed (cookie-gated facade) — credited + links back.
-          <>
-            <HeroPlaceholder
-              variant="hero"
-              styleColor={STYLE_PIN_COLORS[restaurant.style]}
-            />
-            <div className="absolute inset-0 z-[2] flex items-center justify-center p-5">
-              <div className="w-full max-w-sm">
-                <InstagramEmbed posts={[heroPost]} />
-              </div>
-            </div>
-          </>
-        ) : (
-          <HeroPlaceholder
-            variant="hero"
-            styleColor={STYLE_PIN_COLORS[restaurant.style]}
-          />
-        )}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={hero.url}
+          alt={
+            hero.isReal
+              ? `${restaurant.name} — ${STYLE_LABELS[restaurant.style]} barbecue in ${cityCountry}`
+              : `${STYLE_LABELS[restaurant.style]} barbecue`
+          }
+          className="absolute inset-0 h-full w-full object-cover"
+        />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/10 via-background/40 to-background" />
-
-        {/* Tier 3: branded invitation to contribute the first photo. */}
-        {!heroImage && !heroPost && (
-          <div className="absolute inset-x-0 top-[34%] z-[1] flex flex-col items-center px-6 text-center">
-            <p className="font-heading text-xs uppercase tracking-[0.22em] text-white/70">
-              No photos yet
-            </p>
-            <Link
-              href={uploadHref}
-              className="mt-3 inline-flex items-center gap-2 rounded-md bg-brand-gold px-5 py-2.5 text-sm font-bold uppercase tracking-[0.06em] text-text-inverse shadow-lg transition-colors hover:bg-brand-gold/90"
-            >
-              <Camera className="h-4 w-4" />
-              Add a photo
-            </Link>
-            <Link
-              href={`/list?claim=${restaurant.slug}`}
-              className="mt-2.5 text-xs font-semibold text-white/70 underline-offset-2 transition-colors hover:text-brand-gold hover:underline"
-            >
-              Own this venue?
-            </Link>
-          </div>
-        )}
 
         <div className="absolute inset-x-0 bottom-0">
           <div className="mx-auto max-w-[1200px] px-6 pb-10 sm:px-10">
@@ -388,12 +350,17 @@ export default async function RestaurantPage({ params }: Props) {
       <div className="mx-auto grid max-w-[1200px] grid-cols-1 gap-12 px-6 py-12 sm:px-10 lg:grid-cols-[1fr_360px]">
         {/* Left column */}
         <div className="min-w-0">
-          {paragraphs.length > 0 && (
+          {(restaurant.hook || paragraphs.length > 0) && (
             <section className="mb-12">
               <h2 className="mb-1 font-heading text-2xl font-bold text-text-primary">
                 {t("atlasReview")}
               </h2>
               <p className="u-eyebrow mb-5 text-text-muted">The BBQ Atlas</p>
+              {restaurant.hook && (
+                <p className="mb-5 font-heading text-xl italic leading-snug text-text-primary text-balance">
+                  {restaurant.hook}
+                </p>
+              )}
               <div className="space-y-4 text-lg leading-[1.75] text-text-secondary">
                 {paragraphs.map((p, i) => (
                   <p key={i}>{p}</p>
@@ -434,24 +401,15 @@ export default async function RestaurantPage({ params }: Props) {
             </section>
           )}
 
-          {(() => {
-            // Gallery = the enrichment's IG posts, minus whatever is already the
-            // hero, so we never show the same post twice.
-            const galleryPosts = (
-              Array.isArray(restaurant.instagram_posts)
-                ? restaurant.instagram_posts
-                : []
-            ).filter((p) => p !== heroPost);
-            if (galleryPosts.length === 0) return null;
-            return (
+          {Array.isArray(restaurant.instagram_posts) &&
+            restaurant.instagram_posts.length > 0 && (
               <section className="mb-12">
                 <h2 className="mb-5 border-b border-border-subtle pb-3 font-heading text-xl font-bold text-text-primary">
                   From their Instagram
                 </h2>
-                <InstagramEmbed posts={galleryPosts} />
+                <InstagramEmbed posts={restaurant.instagram_posts} />
               </section>
-            );
-          })()}
+            )}
 
           <CommunityGallery
             restaurantId={restaurant.id}
