@@ -26,9 +26,24 @@ const num = (s?: string): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** Build a facts dossier from one sheet row. */
+/**
+ * Build a facts dossier from one sheet row. Accepts the Path A column names from
+ * COST-EFFICIENT-ENRICHMENT (name, city, country, instagram_handle, address,
+ * phone, website, opening_hours, established, pitmaster_owner, bbq_style,
+ * specialities, cook_method, wood_fuel, price_band, best_instagram_post_url,
+ * other_socials, sources, why_blank) plus the fuller dossier column names.
+ */
 export function rowToDossier(row: Record<string, string>): VenueDossier {
-  const g = (k: string): string | null => (row[k] ?? "").trim() || null;
+  const g = (...keys: string[]): string | null => {
+    for (const k of keys) {
+      const v = (row[k] ?? "").trim();
+      if (v) return v;
+    }
+    return null;
+  };
+  const handle = row["instagram_handle"] ? normalizeHandle(row["instagram_handle"]) : null;
+  const instagram =
+    g("instagram") ?? (handle ? `https://www.instagram.com/${handle}/` : null);
   return {
     name: g("name"),
     also_known_as: list(row["also_known_as"]),
@@ -42,11 +57,11 @@ export function rowToDossier(row: Record<string, string>): VenueDossier {
     lng: num(row["lng"]),
     phone: g("phone"),
     website: g("website"),
-    instagram: g("instagram"),
+    instagram,
     other_socials: list(row["other_socials"]),
-    hours: null, // sheet hours are free text; structured hours left null
+    hours: null, // sheet hours are free text; captured in ordering_notes below
     established: g("established"),
-    founders_pitmaster: g("founders_pitmaster"),
+    founders_pitmaster: g("founders_pitmaster", "pitmaster_owner"),
     bbq_style: g("bbq_style"),
     specialities: list(row["specialities"]),
     cook_method: g("cook_method"),
@@ -54,8 +69,9 @@ export function rowToDossier(row: Record<string, string>): VenueDossier {
     price_band: g("price_band"),
     awards_press: list(row["awards_press"]),
     setting_vibe: g("setting_vibe"),
-    ordering_notes: g("ordering_notes"),
-    best_photo_post_url: g("best_photo_post_url"),
+    // Keep free-text opening hours available to the writer.
+    ordering_notes: g("ordering_notes", "opening_hours"),
+    best_photo_post_url: g("best_photo_post_url", "best_instagram_post_url"),
     recent_instagram_posts: list(row["recent_instagram_posts"]).filter((u) =>
       /instagram\.com\/(p|reel)\//.test(u)
     ),

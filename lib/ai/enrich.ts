@@ -222,20 +222,17 @@ export interface VenueDossier {
   unknowns: string[];
 }
 
-const DOSSIER_SYSTEM = `You are a RELENTLESS barbecue researcher for The BBQ Atlas, with live web-search and browsing tools. Research ONE venue and return a strict, FACTS-ONLY dossier. You are the researcher, not the writer — produce NO marketing or descriptive copy.
+const DOSSIER_SYSTEM = `You are a factual barbecue-venue researcher for The BBQ Atlas, with live web-search and browsing tools. Research ONE venue and return a strict, FACTS-ONLY dossier. You are the researcher, not the writer — produce NO marketing or descriptive copy.
 
-Use every tool aggressively and exhaustively — do NOT stop at the first source. Lead with the venue's OWN primary sources, in this order of preference:
-- the venue's official WEBSITE (about, menu, hours, story) — the source of truth;
-- their INSTAGRAM + other official socials (bio, linked site, recent posts);
-- local NEWS, press, food blogs and city guides (history, awards, pitmaster profiles);
-- YOUTUBE (pitmaster interviews often reveal wood, method and backstory nothing else does);
-- Google Business / Maps and review platforms (Google / Yelp / TripAdvisor) — use ONLY as a light CROSS-CHECK of the plain facts (address, coordinates, phone, opening hours). Do NOT copy their review text, editorial descriptions, or photos, and never cite Google Maps as a source.
-
-Prefer PRIMARY sources; corroborate each non-obvious fact across at least two sources where possible. Keep searching until every field below is either filled from a real source or genuinely unavailable — treat empty fields as unfinished work, not a stopping point. Follow links; open pages; don't guess from a snippet.
+BE EFFICIENT — targeted, NOT exhaustive. This is a HARD COST CONTROL: at most ~5 web searches total for this venue. Prioritise in this order until you have the essentials, then STOP:
+1) the venue's OFFICIAL WEBSITE (address, hours, story, menu) — the source of truth;
+2) ONE map/listing ONLY if the site lacks an address or hours (use it only to cross-check the plain facts — address, coordinates, phone, hours);
+3) the venue's INSTAGRAM (handle + a couple of recent public posts).
+Query → read → move on. Do NOT open every link. Do NOT cross-check every fact across multiple sources. Do NOT keep searching to fill every field. If a field isn't found within the budget, set it null and name it in "unknowns" — a lean, accurate dossier beats an exhaustive one; we can refresh later. Never cite Google Maps as a source.
 
 COPYRIGHT / SOURCING RULE: collect FACTS ONLY (facts aren't copyrightable). NEVER reproduce third-party expressive content — no review text, no editorial blurbs, no photos — from Google or anywhere. Do not scrape any site en masse. The dossier is raw facts + source URLs; all published copy is written fresh by us later.
 
-For anything you cannot verify, use null (or [] for lists) and list the field name under "unknowns" — NEVER guess or invent. Put a source URL for each non-obvious fact in "sources".
+For anything you cannot verify within the budget, use null (or [] for lists) and list the field name under "unknowns" — NEVER guess or invent. Put a source URL for each non-obvious fact in "sources".
 
 Field notes:
 - "what_it_is": ONE factual line (e.g. "Central Texas barbecue joint and butcher shop"). Not a description.
@@ -411,7 +408,7 @@ Return ONLY the JSON described in your instructions.`;
         user,
         search: false,
         model: CLAUDE_WRITER_MODEL,
-        maxTokens: 700,
+        maxTokens: 512,
       })
     : grokJSON<{ hook?: string; description?: string; needs_attention?: boolean; reason?: string }>({
         system: COPY_SYSTEM,
