@@ -51,6 +51,8 @@ const STAR_SVG =
   '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 L14.2 8.6 L21 8.6 L15.4 12.7 L17.6 19.4 L12 15.2 L6.4 19.4 L8.6 12.7 L3 8.6 L9.8 8.6 Z"/></svg>';
 const RADIO_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/><path d="M8 8 A6 6 0 0 0 8 16 M16 8 A6 6 0 0 1 16 16 M5 5 A10 10 0 0 0 5 19 M19 5 A10 10 0 0 1 19 19" stroke-width="1.5" stroke-linecap="round"/></svg>';
+const OWL_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3 C6.8 3 4 6.6 4 11.2 C4 16.2 7.6 21 12 21 C16.4 21 20 16.2 20 11.2 C20 6.6 17.2 3 12 3 Z"/><circle cx="9" cy="10" r="2.3" fill="#0C0907"/><circle cx="15" cy="10" r="2.3" fill="#0C0907"/><circle cx="9" cy="10" r="0.9" fill="#e2703a"/><circle cx="15" cy="10" r="0.9" fill="#e2703a"/><path d="M12 12.4 L10.6 14 L13.4 14 Z" fill="#0C0907"/></svg>';
 
 interface EggSecondary {
   link: string; // link text shown on the primary card
@@ -72,9 +74,9 @@ interface MapEgg {
   secondary?: EggSecondary;
 }
 
-// Coordinates per spec (§Eggs 6–8). Bionic's quarry is a PLACEHOLDER pending
-// Michelle's exact spot — flagged here to swap before final.
-const BIONIC_PLACEHOLDER = { lat: 49.28, lng: -122.79 }; // TODO: swap for Michelle's exact quarry
+// Bionic's quarry: Pitt River Quarries, Pitt Meadows BC — the confirmed spot
+// James supplied for where the 2007 series filmed near Vancouver.
+const BIONIC_QUARRY = { lat: 49.28647, lng: -122.65856 };
 
 const MAP_EGGS: MapEgg[] = [
   {
@@ -98,8 +100,8 @@ const MAP_EGGS: MapEgg[] = [
   {
     id: "bionic",
     phrases: ["bionic", "jaime sommers"],
-    coord: BIONIC_PLACEHOLDER,
-    zoom: 12.5,
+    coord: BIONIC_QUARRY,
+    zoom: 13,
     fast: true,
     svg: STAR_SVG,
     cardLabel: "Bionic",
@@ -116,6 +118,16 @@ const MAP_EGGS: MapEgg[] = [
     cardLabel: "BBC Radio Norwich",
     cardBody:
       "Ah-ha. BBC Radio Norwich. Not a barbecue joint — but a very good building, in a very good city, run by a broadcasting legend (in his own mind). Back to the smoke?",
+  },
+  {
+    id: "owl-sanctuary",
+    phrases: ["cracking owl sanctuary"],
+    coord: { lat: 52.5433, lng: 1.6389 }, // Fritton Owl Sanctuary, Fritton (Great Yarmouth), Norfolk
+    zoom: 14.5,
+    svg: OWL_SVG,
+    cardLabel: "Fritton Owl Sanctuary",
+    cardBody:
+      "Not barbecue. But a cracking owl sanctuary. Sometimes a man just needs to look at an owl. Back to the map when you're ready.",
   },
 ];
 
