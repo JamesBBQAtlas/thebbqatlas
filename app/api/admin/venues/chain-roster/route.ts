@@ -83,26 +83,36 @@ export async function POST(request: Request) {
   const cost = round4(grokCost(roster.usage, roster.model ?? GROK_MODEL));
   const overCeiling = cost > ROSTER_CEILING;
 
-  // Seed every branch as a deduped $0 placeholder under this parent.
-  const seeded = await seedChainLocations(
+  // Seed/reconcile every branch — matched on PHYSICAL LOCATION, idempotent, and
+  // skipping the parent's own venue (§09.2.2). Full address available here.
+  const result = await seedChainLocations(
     ctx.db,
     restaurantId,
     brand,
     row.country ?? null,
-    roster.locations.map((l) => ({ name: l.name, city: l.city }))
+    roster.locations.map((l) => ({ name: l.name, address: l.address, city: l.city }))
   );
 
-  // Record the roster-scan spend on the parent (it paid for the scan).
+  // Record the roster-scan spend AND stamp the chain as rostered so the gateway
+  // is never offered again for this chain (§09.2.1).
   await ctx.db
     .from("restaurants")
-    .update({ enrichment_cost: round4(priorCost + cost) })
+    .update({
+      enrichment_cost: round4(priorCost + cost),
+      chain_rostered_at: new Date().toISOString(),
+    })
     .eq("id", restaurantId);
 
+  const alreadyPresent = result.updated.length + result.matchedParent;
   return NextResponse.json({
     ok: true,
     brand,
-    found: roster.locations.length,
-    seeded,
+    // One honest, consistent readout (§09.2.3).
+    found: result.found,
+    added: result.added.length,
+    already_present: alreadyPresent,
+    summary: `${result.found} found · ${result.added.length} new · ${alreadyPresent} already present`,
+    seeded: result.added,
     cost,
     over_ceiling: overCeiling,
     used_url: dossier.chain_locations_url ?? null,

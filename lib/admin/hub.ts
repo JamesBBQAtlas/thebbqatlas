@@ -64,6 +64,10 @@ export function toHubVenue(r: Restaurant): HubVenue {
     description: r.description ?? null,
     cost: Number(r.enrichment_cost ?? 0) || 0,
     chainSeed: Boolean(r.chain_parent_id),
+    // Parent-of-a-chain flag (for the "part of a chain" preview note); siblings
+    // are chainSeed, not isChainParent.
+    isChainParent: !r.chain_parent_id && Boolean((r.dossier as { is_chain?: boolean } | null)?.is_chain),
+    chainRostered: Boolean(r.chain_rostered_at),
     lat: r.lat,
     lng: r.lng,
   };

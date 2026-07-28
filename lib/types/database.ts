@@ -163,6 +163,7 @@ export interface Restaurant {
   enrichment_cost_breakdown?: Record<string, unknown> | null;
   enrichment_model?: string | null;
   chain_parent_id?: string | null;
+  chain_rostered_at?: string | null;
 }
 
 export type HeroSource =

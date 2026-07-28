@@ -15,8 +15,9 @@ import {
   ImageIcon,
   Eye,
   X,
+  Store,
 } from "lucide-react";
-import { freshness } from "@/lib/admin/freshness";
+import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 
 export interface HubVenue {
@@ -43,6 +44,8 @@ export interface HubVenue {
   description: string | null;
   cost: number;
   chainSeed: boolean;
+  isChainParent: boolean;
+  chainRostered: boolean;
   lat: number;
   lng: number;
 }
@@ -167,6 +170,7 @@ export function VenueHub({
     chainLocationsUrl: string | null;
     seeded: { label: string; city: string | null }[];
     scanning: boolean;
+    rostered: boolean;
     result: string | null;
   } | null>(null);
   const pauseRef = useRef(false);
@@ -325,36 +329,46 @@ export function VenueHub({
       return;
     }
     if (kind === "publish") {
+      // Clear any stale enrich message ("Draft ready…") so a published row
+      // never shows a draft line (§09.2.4).
       setRowResult((p) => ({ ...p, [v.id]: { msg: "Published ✓" } }));
       router.refresh();
       return;
     }
     if (kind === "reject") {
-      setRowResult((p) => ({ ...p, [v.id]: { msg: "Declined" } }));
+      setRowResult((p) => ({ ...p, [v.id]: { msg: v.status === "approved" ? "Unpublished" : "Declined" } }));
       router.refresh();
       return;
     }
     // enrich or rewrite: pop the Preview (full change diff) once the row refreshes
     const mode: PreviewMode = data.pending ? "pending_copy" : "draft";
     const costNote = typeof data.cost === "number" ? ` · ${fmtUsd(data.cost)}` : "";
-    // Chain detected on a PARENT enrich (§09.1.3): surface the banner + roster
-    // gateway. Preview stays for the copy; the gateway is a separate prompt.
+    // Chain detected on a PARENT enrich (§09.2). Siblings report is_chain:false,
+    // so this never fires for them (loop fix). Skip the gateway if the chain has
+    // already been rostered once.
+    const sr = data.chain_seed_result as
+      | { found: number; added: unknown[]; updated: unknown[]; matchedParent: number }
+      | null
+      | undefined;
     const seeds: { label: string; city: string | null }[] = Array.isArray(data.chain_seeds)
       ? data.chain_seeds
       : [];
-    if (kind === "enrich" && data.is_chain && data.is_chain_parent) {
+    if (kind === "enrich" && data.is_chain && data.is_chain_parent && !data.chain_already_rostered) {
       setChainGateway({
         venueId: v.id,
         brand: data.brand ?? v.name,
         chainLocationsUrl: data.chain_locations_url ?? null,
         seeded: seeds,
         scanning: false,
+        rostered: false,
         result: null,
       });
     }
     const chainNote =
       kind === "enrich" && data.is_chain
-        ? ` · chain — ${seeds.length} location${seeds.length === 1 ? "" : "s"} seeded ($0)`
+        ? sr
+          ? ` · chain — ${sr.found} found · ${sr.added.length} new · ${sr.updated.length + sr.matchedParent} already present`
+          : ` · part of a chain`
         : "";
     setPreview({ venueId: v.id, mode });
     setRowResult((p) => ({
@@ -377,6 +391,9 @@ export function VenueHub({
     let data: {
       ok?: boolean;
       found?: number;
+      added?: number;
+      already_present?: number;
+      summary?: string;
       seeded?: { label: string; city: string | null }[];
       cost?: number;
       error?: string;
@@ -400,16 +417,19 @@ export function VenueHub({
       );
       return;
     }
+    // One honest readout (§09.2.3): N found · X new · Y already present.
     const newSeeds = Array.isArray(data.seeded) ? data.seeded : [];
+    const summary =
+      data.summary ??
+      `${data.found ?? 0} found · ${data.added ?? newSeeds.length} new · ${data.already_present ?? 0} already present`;
     setChainGateway((g) =>
       g && g.venueId === venueId
         ? {
             ...g,
             scanning: false,
+            rostered: true,
             seeded: [...g.seeded, ...newSeeds],
-            result: `Scanned roster — found ${data.found ?? 0}, added ${newSeeds.length} new location${
-              newSeeds.length === 1 ? "" : "s"
-            } (${fmtUsd(data.cost ?? 0)}).`,
+            result: `Roster scanned — ${summary} (${fmtUsd(data.cost ?? 0)}).`,
           }
         : g
     );
@@ -527,37 +547,41 @@ export function VenueHub({
                   Seeded: {chainGateway.seeded.map((s) => s.label).join(", ")}
                 </p>
               )}
-              <p className="mt-2 text-xs text-text-secondary">
-                {chainGateway.chainLocationsUrl ? (
-                  <>
-                    Found their locations page —{" "}
-                    <a href={chainGateway.chainLocationsUrl} target="_blank" rel="noreferrer" className="text-brand-gold underline">
-                      {chainGateway.chainLocationsUrl.replace(/^https?:\/\//, "").slice(0, 48)}
-                    </a>
-                    . Run a full roster scan to find every branch?
-                  </>
-                ) : (
-                  <>No locations page was found — a roster scan will do a single capped search for the brand&apos;s official locations.</>
-                )}{" "}
-                <span className="text-text-muted">Bounded, one-off, hard-capped {fmtUsd(0.05)}.</span>
-              </p>
+              {!chainGateway.rostered && (
+                <p className="mt-2 text-xs text-text-secondary">
+                  {chainGateway.chainLocationsUrl ? (
+                    <>
+                      Found their locations page —{" "}
+                      <a href={chainGateway.chainLocationsUrl} target="_blank" rel="noreferrer" className="text-brand-gold underline">
+                        {chainGateway.chainLocationsUrl.replace(/^https?:\/\//, "").slice(0, 48)}
+                      </a>
+                      . Run a full roster scan to find every branch?
+                    </>
+                  ) : (
+                    <>No locations page was found — a roster scan will do a single capped search for the brand&apos;s official locations.</>
+                  )}{" "}
+                  <span className="text-text-muted">Bounded, one-off, hard-capped {fmtUsd(0.05)}.</span>
+                </p>
+              )}
               {chainGateway.result && <p className="mt-2 text-xs text-emerald-400">{chainGateway.result}</p>}
               <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => runRosterScan(chainGateway.venueId)}
-                  disabled={chainGateway.scanning}
-                  className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-50"
-                >
-                  {chainGateway.scanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                  {chainGateway.scanning ? "Scanning…" : "Scan full roster"}
-                </button>
+                {!chainGateway.rostered && (
+                  <button
+                    type="button"
+                    onClick={() => runRosterScan(chainGateway.venueId)}
+                    disabled={chainGateway.scanning}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-50"
+                  >
+                    {chainGateway.scanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    {chainGateway.scanning ? "Scanning…" : "Scan full roster"}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setChainGateway(null)}
                   className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted hover:text-text-primary"
                 >
-                  Dismiss
+                  {chainGateway.rostered ? "Done" : "Dismiss"}
                 </button>
               </div>
             </div>
@@ -613,8 +637,20 @@ export function VenueHub({
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
                       )}
                       {v.chainSeed && (
-                        <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2 py-0.5 text-xs font-semibold text-brand-sienna-light">
-                          Chain sibling — enrich?
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          {/* Status LABEL (not a button) — §09.2.10 */}
+                          <span className="inline-flex items-center gap-1 rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2 py-0.5 text-xs font-semibold text-brand-sienna-light">
+                            Chain location · seed
+                          </span>
+                          {/* Distinct ACTION button */}
+                          <button
+                            type="button"
+                            onClick={() => single(v, "enrich")}
+                            disabled={busy}
+                            className="inline-flex items-center gap-1 rounded-md bg-brand-sienna px-2.5 py-1 text-xs font-bold uppercase text-text-inverse transition-colors hover:bg-brand-sienna/90 disabled:opacity-40"
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />Enrich this location
+                          </button>
                         </div>
                       )}
                       {v.hasPending && (
@@ -638,7 +674,11 @@ export function VenueHub({
                     <td className="px-3 py-3 text-xs">{v.hasRealPhoto ? <span className="text-emerald-400">yes</span> : <span className="text-text-muted">default</span>}</td>
                     <td className="px-3 py-3 text-xs">{v.hasIG ? <span className="text-emerald-400">✓ {v.postsCount || ""}</span> : <span className="text-text-muted">–</span>}</td>
                     <td className="px-3 py-3 text-xs text-text-muted">
-                      {f.label}
+                      {/* RAG freshness dot (§09.2.5): green fresh · amber ageing · red stale/never */}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${FRESH_DOT[f.tone]}`} title={`Enriched: ${f.label}`} />
+                        {f.label}
+                      </span>
                       {v.cost > 0 && <span className="ml-1 text-text-secondary">· {fmtUsd(v.cost)}</span>}
                     </td>
                     <td className="px-3 py-3">
@@ -687,7 +727,12 @@ export function VenueHub({
         (() => {
           const pv = venues.find((v) => v.id === preview.venueId);
           return pv ? (
-            <PreviewModal venue={pv} mode={preview.mode} onClose={() => setPreview(null)} />
+            <PreviewModal
+              venue={pv}
+              mode={preview.mode}
+              onClose={() => setPreview(null)}
+              onResolved={(id) => setRowResult((p) => ({ ...p, [id]: {} }))}
+            />
           ) : null;
         })()}
     </div>
@@ -767,7 +812,7 @@ function HeroPanel({ venue, styleOptions, onDone }: { venue: HubVenue; styleOpti
   );
 }
 
-function PreviewModal({ venue, mode, onClose }: { venue: HubVenue; mode: PreviewMode; onClose: () => void }) {
+function PreviewModal({ venue, mode, onClose, onResolved }: { venue: HubVenue; mode: PreviewMode; onClose: () => void; onResolved?: (id: string) => void }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const needsEnrich = venue.lat === 0 && venue.lng === 0;
@@ -790,6 +835,9 @@ function PreviewModal({ venue, mode, onClose }: { venue: HubVenue; mode: Preview
     const res = await fn();
     setBusy(false);
     if (res.ok) {
+      // Clear the row's stale "Draft ready…" line so the published row updates
+      // cleanly (§09.2.4).
+      onResolved?.(venue.id);
       onClose();
       router.refresh();
     }
@@ -819,6 +867,13 @@ function PreviewModal({ venue, mode, onClose }: { venue: HubVenue; mode: Preview
         <div className="p-6">
           <h3 className="font-heading text-2xl font-bold text-text-primary">{venue.name}{venue.location_label && <span className="ml-2 text-base font-normal text-brand-sienna-light">· {venue.location_label}</span>}</h3>
           <p className="mt-1 text-sm text-text-muted">{[venue.city, venue.country].filter(Boolean).join(", ") || "no location"} · {venue.styleLabel}</p>
+
+          {/* Chain signal surfaced at the COPY-preview stage, not only at approve (§09.2.8). */}
+          {venue.isChainParent && (
+            <p className="mt-2 inline-flex items-center gap-1.5 rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2.5 py-0.5 text-xs font-semibold text-brand-sienna-light">
+              <Store className="h-3 w-3" /> Part of a chain{venue.chainRostered ? " · roster scanned" : " — roster scan available after approve"}
+            </p>
+          )}
 
           <p className={`mt-3 rounded-md border px-3 py-1.5 text-xs ${banner.cls}`}>{banner.text}</p>
 

@@ -54,12 +54,19 @@ function extractUsage(json: unknown): { in_tokens: number; out_tokens: number; s
   const u = j.usage ?? {};
   const in_tokens = Number(u.input_tokens ?? u.prompt_tokens ?? 0) || 0;
   const out_tokens = Number(u.output_tokens ?? u.completion_tokens ?? 0) || 0;
-  // Search count: xAI reports it in usage on some responses; else count the
-  // web_search tool-call items in the output stream.
-  let searches =
-    Number(u.num_sources_used ?? u.num_searches ?? u.server_side_tool_use ?? 0) || 0;
-  if (!searches && Array.isArray(j.output)) {
+  // Search count = number of actual web_search CALLS, not sources returned
+  // (§09.2.9). One call can return several sources, so billing off
+  // `num_sources_used` over-counts — a single capped call reading 4 sources read
+  // as "4 searches / $0.02", making the hard-3 cap look like it leaked. Prefer
+  // counting the search tool-call items in the output stream (the real,
+  // cap-bounded call count); fall back to usage call-count fields only when the
+  // stream has no items, with num_sources_used as the last resort.
+  let searches = 0;
+  if (Array.isArray(j.output)) {
     searches = j.output.filter((o) => /search/i.test(String(o?.type ?? ""))).length;
+  }
+  if (!searches) {
+    searches = Number(u.num_searches ?? u.server_side_tool_use ?? u.num_sources_used ?? 0) || 0;
   }
   return { in_tokens, out_tokens, searches };
 }

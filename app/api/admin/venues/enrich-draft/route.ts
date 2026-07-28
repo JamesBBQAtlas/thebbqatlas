@@ -16,6 +16,7 @@ import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
+import { composeAddress, preferFullerAddress } from "@/lib/admin/address";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -42,7 +43,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id"
+      "id, name, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id, chain_rostered_at"
     )
     .eq("id", restaurantId)
     .single();
@@ -158,7 +159,15 @@ export async function POST(request: Request) {
   ].filter((v, i, a) => a.indexOf(v) === i);
   const style = matchBbqStyle(dossier.bbq_style);
   const price = priceBandToLevel(dossier.price_band);
-  const address = [dossier.address, dossier.postcode].filter((s) => s && String(s).trim()).join(", ");
+  // Full address — street, city, region/state, postcode (§09.2.6). Never
+  // downgrade an existing fuller address to a thinner one.
+  const composed = composeAddress({
+    street: dossier.address,
+    city: dossier.city,
+    region: dossier.region_state,
+    postcode: dossier.postcode,
+  });
+  const address = preferFullerAddress(composed, row.address);
 
   // Geocode.
   let city = dossier.city ?? row.city;
@@ -243,12 +252,14 @@ export async function POST(request: Request) {
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
-  // Chain seeds are created ONCE, from the parent enrich only (§09.1.2). A
-  // sibling's enrich (row already has a chain_parent_id) must never spawn new
-  // sibling seeds.
+  // Chain handling is PARENT-ONLY (§09.2.1). A sibling (row already carries a
+  // chain_parent_id) never runs chain detection, never seeds, never signals a
+  // chain back to the UI — it only writes its own venue's dossier/copy/cost.
   const isParent = !row.chain_parent_id;
+  const isChain = isParent && dossier.is_chain;
+  const alreadyRostered = Boolean(row.chain_rostered_at);
   const seeded =
-    isParent && dossier.is_chain
+    isChain && !alreadyRostered
       ? await seedChainLocations(
           ctx.db,
           restaurantId,
@@ -256,7 +267,7 @@ export async function POST(request: Request) {
           country,
           dossier.chain_locations
         )
-      : [];
+      : null;
 
   return NextResponse.json({
     ok: true,
@@ -268,11 +279,15 @@ export async function POST(request: Request) {
     copy: { hook: copy.hook, description: copy.description },
     cost: thisCost,
     over_ceiling: overCeiling,
-    // Chain signalling for the enrich-result banner + §2b roster gateway.
-    is_chain: dossier.is_chain,
+    // Chain signalling — parent only. Siblings report is_chain:false so the UI
+    // never re-opens the roster gateway for them (the loop fix).
+    is_chain: isChain,
     is_chain_parent: isParent,
-    brand: dossier.is_chain ? dossier.name ?? row.name : null,
-    chain_locations_url: dossier.chain_locations_url,
-    chain_seeds: seeded,
+    chain_already_rostered: alreadyRostered,
+    brand: isChain ? dossier.name ?? row.name : null,
+    chain_locations_url: isChain ? dossier.chain_locations_url : null,
+    // Honest counts from the quick-seed pass (roster gateway does the full one).
+    chain_seed_result: seeded,
+    chain_seeds: seeded ? seeded.added : [],
   });
 }
