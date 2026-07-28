@@ -1,0 +1,27 @@
+name: DB write-permission guardrail
+
+# Fails the build if a table the app writes lacks the matching grant + RLS policy
+# (or a declared service-role route), or if write_permission_audit() flags a live
+# gap. Prevents the recurring "permission denied before RLS" bug class.
+
+on:
+  push:
+    branches: [main, rebuild]
+  pull_request:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Code-scan half always runs; the DB half runs only if the secrets exist.
+      - name: Write-permission audit
+        run: node scripts/audit-write-grants.mjs
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
