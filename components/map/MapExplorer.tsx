@@ -37,6 +37,100 @@ function FoxIcon({ className }: { className?: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Map search-box easter eggs (EASTER-EGGS-SPEC §Eggs 6–9). All client-side,
+// ephemeral, and words-only allusions — every marker below is ORIGINAL art; no
+// character images, likenesses, show artwork, or copyrighted audio. Injected on
+// trigger only (no CWV cost otherwise); never in the dataset, sitemap or JSON-LD.
+// ---------------------------------------------------------------------------
+
+// Original marker art (our own glyphs — a fish, a star-spark, a broadcast dot).
+const KIPPER_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M2 12 C6 6.5 13 6.5 17 10 L22 6.5 L20.6 12 L22 17.5 L17 14 C13 17.5 6 17.5 2 12 Z"/><circle cx="15" cy="10.8" r="1" fill="#0C0907"/></svg>';
+const STAR_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 L14.2 8.6 L21 8.6 L15.4 12.7 L17.6 19.4 L12 15.2 L6.4 19.4 L8.6 12.7 L3 8.6 L9.8 8.6 Z"/></svg>';
+const RADIO_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/><path d="M8 8 A6 6 0 0 0 8 16 M16 8 A6 6 0 0 1 16 16 M5 5 A10 10 0 0 0 5 19 M19 5 A10 10 0 0 1 19 19" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+interface EggSecondary {
+  link: string; // link text shown on the primary card
+  coord: { lat: number; lng: number };
+  zoom: number;
+  cardLabel: string;
+  cardBody: string;
+}
+interface MapEgg {
+  id: string;
+  phrases: string[]; // lowercased, trimmed triggers
+  coord: { lat: number; lng: number };
+  zoom: number;
+  fast?: boolean; // superhuman-speed flyTo (Bionic)
+  svg: string;
+  cardLabel: string;
+  cardBody: string;
+  seal?: boolean; // Bionic "blessed" angel+star seal
+  secondary?: EggSecondary;
+}
+
+// Coordinates per spec (§Eggs 6–8). Bionic's quarry is a PLACEHOLDER pending
+// Michelle's exact spot — flagged here to swap before final.
+const BIONIC_PLACEHOLDER = { lat: 49.28, lng: -122.79 }; // TODO: swap for Michelle's exact quarry
+
+const MAP_EGGS: MapEgg[] = [
+  {
+    id: "kipper",
+    phrases: ["smoke me a kipper", "smoke me a kipper, i'll be back for breakfast"],
+    coord: { lat: 51.509, lng: -0.0838 }, // historic Billingsgate, Lower Thames St
+    zoom: 14.5,
+    svg: KIPPER_SVG,
+    cardLabel: "Billingsgate",
+    cardBody:
+      "Smoke me a kipper — I'll be back for breakfast. This is Billingsgate, London's fish market since the 1800s, about the closest a smoked herring gets to a pin on a barbecue map. Ace Rimmer would approve. What a guy.",
+    secondary: {
+      link: "→ But the real home of the kipper is up north. Take me to Craster.",
+      coord: { lat: 55.473, lng: -1.594 }, // Craster, Northumberland
+      zoom: 13.5,
+      cardLabel: "Craster",
+      cardBody:
+        "Craster, Northumberland. Oak-smoked herring in the same sheds since the 1850s — the definitive kipper. Worth the trip; worth the smell in the car.",
+    },
+  },
+  {
+    id: "bionic",
+    phrases: ["bionic", "jaime sommers"],
+    coord: BIONIC_PLACEHOLDER,
+    zoom: 12.5,
+    fast: true,
+    svg: STAR_SVG,
+    cardLabel: "Bionic",
+    cardBody:
+      "A quarry outside Vancouver, where a bionic woman was rebuilt better, stronger, faster. The same someone who gave this whole map its warmth — and lends it her voice. We had the technology. We pointed it at brisket.",
+    seal: true,
+  },
+  {
+    id: "partridge-norwich",
+    phrases: ["cookpassbabtridge"],
+    coord: { lat: 52.6284, lng: 1.2909 }, // The Forum, Norwich
+    zoom: 15,
+    svg: RADIO_SVG,
+    cardLabel: "BBC Radio Norwich",
+    cardBody:
+      "Ah-ha. BBC Radio Norwich. Not a barbecue joint — but a very good building, in a very good city, run by a broadcasting legend (in his own mind). Back to the smoke?",
+  },
+];
+
+// "Back of the net!" (Egg 9) — a Surprise-Me in disguise; picks a real
+// published venue. Kept separate from MAP_EGGS (no fixed coordinate/art).
+const BACK_OF_NET_PHRASES = new Set(["back of the net", "back of the net!"]);
+
+/** What the ephemeral egg card is currently showing. */
+interface EggCardState {
+  label: string;
+  body: string;
+  seal?: boolean;
+  secondary?: EggSecondary;
+}
+
 // Deep ocean blue applied ONLY to water polygons (sea, lakes, rivers). The dark
 // base layer and land are left untouched, so land keeps its original colour and
 // just the water reads blue.
@@ -153,6 +247,7 @@ export function MapExplorer({
   const geoMarkerRef = useRef<maplibregl.Marker | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const pitMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const eggMarkersRef = useRef<maplibregl.Marker[]>([]);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -195,6 +290,9 @@ export function MapExplorer({
   const [selected, setSelected] = useState<Restaurant | null>(null);
   const [pitZero, setPitZero] = useState(false);
   const [homage, setHomage] = useState(false);
+  // Search-box eggs (§Eggs 6–9): the ephemeral card + the "back of the net" toast.
+  const [eggCard, setEggCard] = useState<EggCardState | null>(null);
+  const [netToast, setNetToast] = useState(false);
 
   // Location (place) search — geocode a city/country/postcode and fly there.
   const [geoBusy, setGeoBusy] = useState(false);
@@ -536,11 +634,22 @@ export function MapExplorer({
     const q = query.trim();
     const map = mapRef.current;
     if (!q || !map || geoBusy) return;
-    if (PIT_ZERO_PHRASES.has(q.toLowerCase())) {
+    const lc = q.toLowerCase();
+    if (PIT_ZERO_PHRASES.has(lc)) {
       triggerPitZero();
       return;
     }
+    if (BACK_OF_NET_PHRASES.has(lc)) {
+      triggerBackOfNet();
+      return;
+    }
+    const egg = MAP_EGGS.find((e) => e.phrases.includes(lc));
+    if (egg) {
+      triggerMapEgg(egg);
+      return;
+    }
     clearPitZero();
+    clearEggs();
     setGeoBusy(true);
     setGeoMiss(false);
     try {
@@ -637,6 +746,80 @@ export function MapExplorer({
     pitMarkerRef.current = null;
     setHomage(false);
     setPitZero(false);
+  }
+
+  // --- Search-box eggs 6–9 (ephemeral, original art only) --------------------
+  function clearEggs() {
+    for (const m of eggMarkersRef.current) m.remove();
+    eggMarkersRef.current = [];
+    setEggCard(null);
+  }
+
+  function dropEggMarker(coord: { lat: number; lng: number }, svg: string) {
+    const map = mapRef.current;
+    if (!map) return;
+    const el = document.createElement("div");
+    el.className = "atlas-egg-marker";
+    el.innerHTML = svg;
+    const marker = new maplibregl.Marker({ element: el })
+      .setLngLat([coord.lng, coord.lat])
+      .addTo(map);
+    eggMarkersRef.current.push(marker);
+  }
+
+  // A search-triggered map egg: clear everything else, drop an original marker,
+  // cinematic (or superhuman-fast, for Bionic) flyTo, then show the card.
+  function triggerMapEgg(egg: MapEgg) {
+    const map = mapRef.current;
+    if (!map) return;
+    clearPlace();
+    clearPitZero();
+    clearEggs();
+    setSelected(null);
+    setQuery("");
+    dropEggMarker(egg.coord, egg.svg);
+    setEggCard({ label: egg.cardLabel, body: egg.cardBody, seal: egg.seal, secondary: egg.secondary });
+    map.flyTo(
+      animate(
+        egg.fast
+          ? { center: [egg.coord.lng, egg.coord.lat], zoom: egg.zoom, speed: 3.2, curve: 1, essential: true }
+          : { center: [egg.coord.lng, egg.coord.lat], zoom: egg.zoom, speed: 0.7, curve: 1.5 }
+      )
+    );
+  }
+
+  // Kipper follow-on: fly north to Craster and swap the card.
+  function triggerEggSecondary(sec: EggSecondary, svg: string) {
+    const map = mapRef.current;
+    if (!map) return;
+    dropEggMarker(sec.coord, svg);
+    setEggCard({ label: sec.cardLabel, body: sec.cardBody });
+    map.flyTo(
+      animate({ center: [sec.coord.lng, sec.coord.lat], zoom: sec.zoom, speed: 0.75, curve: 1.5 })
+    );
+  }
+
+  // "Back of the net!" (Egg 9) — a Surprise-Me: fly to a random REAL published
+  // venue, open its card, and flash a toast. Never a seed/draft.
+  function triggerBackOfNet() {
+    clearPlace();
+    clearPitZero();
+    clearEggs();
+    setQuery("");
+    const pool = restaurants.filter(
+      (r) =>
+        Number.isFinite(r.lat) &&
+        Number.isFinite(r.lng) &&
+        !(r.lat === 0 && r.lng === 0) &&
+        (r.status ? r.status === "approved" : true)
+    );
+    if (!pool.length) return;
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    setSelected(pick);
+    mapRef.current?.flyTo(animate({ center: [pick.lng, pick.lat], zoom: 13, speed: 1.6, curve: 1.4 }));
+    if (isMobileViewport()) setSidebarOpen(false);
+    setNetToast(true);
+    window.setTimeout(() => setNetToast(false), 2600);
   }
 
   function clearPlace() {
@@ -930,6 +1113,54 @@ export function MapExplorer({
                 and for Basil, who watched the whole thing from the bar.
               </p>
             )}
+          </div>
+        )}
+
+        {/* Search-box eggs 6–8: ephemeral card (original art only, words-only allusions). */}
+        {eggCard && (
+          <div className="absolute inset-x-4 bottom-[calc(3.5rem+env(safe-area-inset-bottom)+0.5rem)] z-20 mx-auto max-w-sm rounded-xl border border-brand-sienna/40 bg-surface-0/95 p-5 shadow-xl backdrop-blur lg:bottom-6 lg:left-6 lg:right-auto lg:mx-0">
+            <div className="flex items-start justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2.5 py-0.5 text-[0.6875rem] font-bold uppercase tracking-[0.1em] text-brand-sienna-light">
+                <MapPin className="h-3 w-3" /> {eggCard.label}
+              </span>
+              <button
+                type="button"
+                onClick={clearEggs}
+                aria-label="Close"
+                className="shrink-0 text-text-muted transition-colors hover:text-text-primary"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <p className="mt-3 text-sm leading-relaxed text-text-secondary">{eggCard.body}</p>
+            {/* Bionic "blessed" seal — original angel+star mark, no likeness. */}
+            {eggCard.seal && (
+              <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-brand-gold/40 bg-brand-gold/10 px-2.5 py-1 text-xs font-semibold text-brand-gold">
+                <span aria-hidden="true">⭐👼</span> Blessed by Michelle Ryan herself
+              </p>
+            )}
+            {/* Kipper → Craster follow-on link. */}
+            {eggCard.secondary && (
+              <button
+                type="button"
+                onClick={() => {
+                  const sec = eggCard.secondary;
+                  if (sec) triggerEggSecondary(sec, KIPPER_SVG);
+                }}
+                className="mt-3 text-left text-sm font-semibold text-brand-gold transition-colors hover:text-brand-gold-light hover:underline"
+              >
+                {eggCard.secondary.link}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* "Back of the net!" toast (Egg 9). */}
+        {netToast && (
+          <div className="pointer-events-none absolute inset-x-0 top-16 z-30 flex justify-center">
+            <span className="rounded-full border border-brand-gold/50 bg-surface-0/95 px-4 py-2 font-heading text-sm font-bold uppercase tracking-[0.08em] text-brand-gold shadow-xl backdrop-blur">
+              Back of the net!
+            </span>
           </div>
         )}
       </div>

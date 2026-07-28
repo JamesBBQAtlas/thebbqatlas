@@ -397,6 +397,27 @@
   }
 }
 
+/* Search-box eggs 6–8 — original marker art (fish / star / broadcast) in the
+   same warm ember/gold glow as Pit Zero, gently breathing. Ephemeral. */
+.atlas-egg-marker {
+  width: 30px;
+  height: 30px;
+  color: #e2703a; /* ember sienna */
+  filter: drop-shadow(0 0 6px rgba(226, 112, 58, 0.85))
+    drop-shadow(0 0 14px rgba(212, 175, 55, 0.5));
+  animation: pit-zero-glow 2.6s ease-in-out infinite;
+}
+.atlas-egg-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .atlas-egg-marker {
+    animation: none;
+  }
+}
+
 /* "You are here" — the visitor's own geolocated position (blue, distinct from
    the gold/sienna venue pins and the gold place-search marker). */
 .atlas-user-marker {
