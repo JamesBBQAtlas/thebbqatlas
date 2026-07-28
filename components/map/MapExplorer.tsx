@@ -53,6 +53,9 @@ const RADIO_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/><path d="M8 8 A6 6 0 0 0 8 16 M16 8 A6 6 0 0 1 16 16 M5 5 A10 10 0 0 0 5 19 M19 5 A10 10 0 0 1 19 19" stroke-width="1.5" stroke-linecap="round"/></svg>';
 const OWL_SVG =
   '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3 C6.8 3 4 6.6 4 11.2 C4 16.2 7.6 21 12 21 C16.4 21 20 16.2 20 11.2 C20 6.6 17.2 3 12 3 Z"/><circle cx="9" cy="10" r="2.3" fill="#0C0907"/><circle cx="15" cy="10" r="2.3" fill="#0C0907"/><circle cx="9" cy="10" r="0.9" fill="#e2703a"/><circle cx="15" cy="10" r="0.9" fill="#e2703a"/><path d="M12 12.4 L10.6 14 L13.4 14 Z" fill="#0C0907"/></svg>';
+// An original shark-fin cutting the water — our own glyph, no film artwork.
+const FIN_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.5 17 C11 16.2 15 11 21 3.2 C20.3 10 18.8 15 22 17 C16 18.4 9 18.4 3.5 17 Z"/></svg>';
 
 interface EggSecondary {
   link: string; // link text shown on the primary card
@@ -128,6 +131,16 @@ const MAP_EGGS: MapEgg[] = [
     cardLabel: "Fritton Owl Sanctuary",
     cardBody:
       "Not barbecue. But a cracking owl sanctuary. Sometimes a man just needs to look at an owl. Back to the map when you're ready.",
+  },
+  {
+    id: "jaws",
+    phrases: ["jaws", "amity island"],
+    coord: { lat: 41.4174, lng: -70.5533 }, // Joseph Sylvia State Beach ("Jaws Bridge"), Martha's Vineyard, MA
+    zoom: 12.5,
+    svg: FIN_SVG,
+    cardLabel: "Amity Island",
+    cardBody:
+      "Amity Island — or, in the real world, Martha's Vineyard, Massachusetts, where in 1975 they filmed a small story about a rather large fish. Not a barbecue joint. But you're gonna need a bigger plate. Try not to go in the water.",
   },
 ];
 
@@ -662,6 +675,15 @@ export function MapExplorer({
     }
     clearPitZero();
     clearEggs();
+    // If the query matches a venue by NAME, hitting Enter jumps straight to that
+    // venue (opens its card + flies there), and on mobile reveals the map. This
+    // also fixes the mobile case where entering a name left you stuck on the
+    // filters panel. City/country-only matches fall through to place search.
+    const nameMatch = filtered.find((r) => r.name.toLowerCase().includes(lc));
+    if (nameMatch) {
+      openPreview(nameMatch); // selects, flies, and closes the sidebar on mobile
+      return;
+    }
     setGeoBusy(true);
     setGeoMiss(false);
     try {
@@ -715,6 +737,8 @@ export function MapExplorer({
       );
       setAreaCount(inArea);
       setSelected(null);
+      // Reveal the map on mobile (the search lives in the full-width panel).
+      if (isMobileViewport()) setSidebarOpen(false);
     } catch {
       setGeoMiss(true);
       setPlaceLabel(null);
@@ -743,6 +767,7 @@ export function MapExplorer({
     setQuery("");
     setHomage(false);
     setPitZero(true);
+    if (isMobileViewport()) setSidebarOpen(false);
     map.flyTo(
       animate({
         center: [PIT_ZERO.lng, PIT_ZERO.lat],
@@ -790,6 +815,7 @@ export function MapExplorer({
     setSelected(null);
     setQuery("");
     dropEggMarker(egg.coord, egg.svg);
+    if (isMobileViewport()) setSidebarOpen(false);
     setEggCard({ label: egg.cardLabel, body: egg.cardBody, seal: egg.seal, secondary: egg.secondary });
     map.flyTo(
       animate(
