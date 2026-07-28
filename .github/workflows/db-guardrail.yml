@@ -8,6 +8,7 @@ on:
   push:
     branches: [main, rebuild]
   pull_request:
+  workflow_dispatch: # allow manual runs from the Actions tab
 
 jobs:
   audit:
