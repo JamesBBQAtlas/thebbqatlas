@@ -69,7 +69,18 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
       const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       if (Array.isArray(data)) {
-        setSuggestions(data.map(parseNominatimResult));
+        // Collapse duplicate geocoder hits (the API can return the same place
+        // twice) by their visible label.
+        const seen = new Set<string>();
+        const deduped = data.map(parseNominatimResult).filter((s) => {
+          const key = [s.address, s.city, s.country]
+            .map((x) => x.toLowerCase().trim())
+            .join("|");
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        setSuggestions(deduped);
         setShowSuggestions(true);
       }
     } catch {
@@ -145,7 +156,10 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
         </div>
         {searching && <p className="text-xs text-white/40 mt-1">Searching...</p>}
         {showSuggestions && suggestions.length > 0 && (
-          <ul className="absolute left-0 right-0 top-full z-[70] mt-1 max-h-56 overflow-y-auto rounded-md border border-border-default bg-surface-1 shadow-2xl">
+          // z-index must clear Leaflet's panes/controls (up to ~1000) so the
+          // dropdown floats fully above the map instead of being clipped by it.
+          // bg-surface-1 is fully opaque so suggestions stay legible over tiles.
+          <ul className="absolute left-0 right-0 top-full z-[1100] mt-1 max-h-56 overflow-y-auto rounded-md border border-border-default bg-surface-1 shadow-2xl">
             {suggestions.map((s, i) => (
               <li key={i} className="border-b border-border-subtle/60 last:border-b-0">
                 <button

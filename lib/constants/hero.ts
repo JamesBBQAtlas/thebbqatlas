@@ -41,6 +41,21 @@ export const REAL_HERO_SOURCES: HeroSource[] = [
   "atlas_licensed",
 ];
 
+/**
+ * The single definition of "has a real photo" — a stored image whose source is
+ * one of the real sources. Used by every metric so they can't disagree.
+ */
+export function isRealPhoto(row: {
+  hero_image_url?: string | null;
+  hero_source?: HeroSource | string | null;
+}): boolean {
+  return Boolean(
+    row.hero_image_url &&
+      row.hero_image_url.trim() &&
+      REAL_HERO_SOURCES.includes((row.hero_source ?? "none") as HeroSource)
+  );
+}
+
 export interface ResolvedHero {
   url: string;
   source: HeroSource;

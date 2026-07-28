@@ -43,6 +43,7 @@ export interface HubVenue {
   hook: string | null;
   description: string | null;
   cost: number;
+  lastRunCost: number;
   chainSeed: boolean;
   isChainParent: boolean;
   chainRostered: boolean;
@@ -687,7 +688,10 @@ export function VenueHub({
                       {v.needs_attention && v.attention_reason && (
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
                       )}
-                      {v.chainSeed && (
+                      {/* The "seed" label + big Enrich CTA show ONLY while this is
+                          an un-enriched chain seed (pending AND never enriched).
+                          Once enriched or published it's a normal row. */}
+                      {v.chainSeed && v.status === "pending" && !v.enriched_at && (
                         <div className="mt-1 flex flex-wrap items-center gap-2">
                           {/* Status LABEL (not a button) — §09.2.10 */}
                           <span className="inline-flex items-center gap-1 rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2 py-0.5 text-xs font-semibold text-brand-sienna-light">
@@ -731,7 +735,14 @@ export function VenueHub({
                         <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${FRESH_DOT[f.tone]}`} title={`Enriched: ${f.label}`} />
                         {f.label}
                       </span>
-                      {v.cost > 0 && <span className="ml-1 text-text-secondary">· {fmtUsd(v.cost)}</span>}
+                      {v.cost > 0 && (
+                        <span className="ml-1 text-text-secondary" title="This-run cost · accumulated total across all runs">
+                          · {fmtUsd(v.lastRunCost || v.cost)} run
+                          {v.lastRunCost > 0 && v.cost > v.lastRunCost + 0.0001 && (
+                            <span className="text-text-muted"> · {fmtUsd(v.cost)} total</span>
+                          )}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex flex-wrap items-center justify-end gap-1.5">

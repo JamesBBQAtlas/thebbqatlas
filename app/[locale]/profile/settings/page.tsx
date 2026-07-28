@@ -9,6 +9,7 @@ import { AccountManagement } from "@/components/account/AccountManagement";
 import { SecuritySettings } from "@/components/account/SecuritySettings";
 import { MarketingPrefToggle } from "@/components/email/MarketingPrefToggle";
 import { resolveAvatarUrl } from "@/lib/account/avatar-resolve";
+import { resolveDisplayName } from "@/lib/account/name";
 import type { AccountType } from "@/lib/types/database";
 
 export const metadata = { title: "Account settings" };
@@ -28,7 +29,7 @@ export default async function SettingsPage() {
     .single();
 
   const accountType = (profile?.account_type ?? "consumer") as AccountType;
-  const displayName = profile?.display_name ?? user.email?.split("@")[0] ?? "Member";
+  const displayName = resolveDisplayName(user, profile?.display_name);
   const avatar = await resolveAvatarUrl(supabase, profile?.avatar_url, accountType);
 
   return (

@@ -18,6 +18,7 @@ import { getPremiumStatus } from "@/lib/account/entitlements";
 import { getUserCheckIns } from "@/lib/queries/checkins";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import type { Restaurant, Submission, AccountType } from "@/lib/types/database";
+import { resolveDisplayName } from "@/lib/account/name";
 
 export const metadata = {
   title: "My Atlas",
@@ -67,7 +68,7 @@ export default async function ProfilePage() {
     .single();
 
   const accountType = (profile?.account_type ?? "consumer") as AccountType;
-  const displayName = profile?.display_name ?? user.email?.split("@")[0] ?? "Member";
+  const displayName = resolveDisplayName(user, profile?.display_name);
   const avatar = await resolveAvatarUrl(supabase, profile?.avatar_url, accountType);
   const premium = await getPremiumStatus(supabase, user.id);
 

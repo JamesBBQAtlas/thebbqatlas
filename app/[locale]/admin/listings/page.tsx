@@ -7,6 +7,7 @@ import { CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/constants/categories";
 import { freshness } from "@/lib/admin/freshness";
 import { VenueHub } from "@/components/admin/VenueHub";
 import { toHubVenue, STYLE_OPTIONS } from "@/lib/admin/hub";
+import { isRealPhoto } from "@/lib/constants/hero";
 import type { Restaurant, MapItemCategory } from "@/lib/types/database";
 
 export const metadata = { title: "Listings" };
@@ -162,14 +163,23 @@ export default async function ListingsPage() {
     phone: approved.filter((r) => r.phone).length,
     hours: approved.filter((r) => r.hours).length,
     socials: approved.filter(hasSocial).length,
-    photos: approved.filter((r) => (r.instagram_posts?.length ?? 0) > 0 || r.hero_image_url).length,
+    // "Real photo" — the SAME definition the Venue Hub uses (hero_source is a
+    // real source), so the two metrics can't disagree.
+    photos: approved.filter(isRealPhoto).length,
     geo: approved.filter(hasGeo).length,
   };
 
   // Coverage
   const countries = new Set(all.map((r) => r.country).filter(Boolean));
   const cities = new Set(all.map((r) => r.city).filter(Boolean));
-  const brands = new Set(all.map((r) => r.brand_id).filter(Boolean));
+  // Distinct multi-location brands: those modelled via a brands row (brand_id)
+  // AND those modelled as chains (a parent referenced by its siblings via
+  // chain_parent_id). Either way, one brand = one entry.
+  const brands = new Set<string>();
+  for (const r of all) {
+    if (r.brand_id) brands.add(`b:${r.brand_id}`);
+    if (r.chain_parent_id) brands.add(`c:${r.chain_parent_id}`);
+  }
 
   // Category mix
   const catCounts = new Map<string, number>();
@@ -231,7 +241,7 @@ export default async function ListingsPage() {
           <Bar label="Phone" value={comp.phone} total={A} health />
           <Bar label="Opening hours" value={comp.hours} total={A} health />
           <Bar label="Socials" value={comp.socials} total={A} health />
-          <Bar label="Photos" value={comp.photos} total={A} health />
+          <Bar label="Real photo" value={comp.photos} total={A} health />
           <Bar label="On the map (geo)" value={comp.geo} total={A} health />
         </div>
       </Section>

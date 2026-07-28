@@ -1,6 +1,6 @@
-import type { Restaurant, HeroSource } from "@/lib/types/database";
+import type { Restaurant } from "@/lib/types/database";
 import { STYLE_LABELS, BBQ_STYLES, type BbqStyle } from "@/lib/constants/styles";
-import { resolveHero, heroSourceLabel, REAL_HERO_SOURCES } from "@/lib/constants/hero";
+import { resolveHero, heroSourceLabel, isRealPhoto } from "@/lib/constants/hero";
 import type { HubVenue } from "@/components/admin/VenueHub";
 
 /** Style dropdown options for the admin Hero panel. */
@@ -17,11 +17,7 @@ export function toHubVenue(r: Restaurant): HubVenue {
     style: r.style,
   });
   const styleLabel = STYLE_LABELS[r.style as BbqStyle] ?? r.style;
-  const hasRealPhoto = Boolean(
-    r.hero_image_url &&
-      r.hero_image_url.trim() &&
-      REAL_HERO_SOURCES.includes((r.hero_source ?? "none") as HeroSource)
-  );
+  const hasRealPhoto = isRealPhoto(r);
   const posts = Array.isArray(r.instagram_posts) ? r.instagram_posts : [];
   return {
     id: r.id,
@@ -63,6 +59,13 @@ export function toHubVenue(r: Restaurant): HubVenue {
     hook: r.hook ?? null,
     description: r.description ?? null,
     cost: Number(r.enrichment_cost ?? 0) || 0,
+    // The MOST RECENT run's cost (from the breakdown), shown separately from the
+    // accumulated total so a re-enriched venue's $0.04 total doesn't read as a
+    // per-run ceiling breach.
+    lastRunCost: (() => {
+      const bd = (r.enrichment_cost_breakdown ?? {}) as Record<string, unknown>;
+      return (Number(bd.grok_cost) || 0) + (Number(bd.claude_cost) || 0);
+    })(),
     chainSeed: Boolean(r.chain_parent_id),
     // Parent-of-a-chain flag (for the "part of a chain" preview note); siblings
     // are chainSeed, not isChainParent.
