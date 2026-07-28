@@ -102,6 +102,19 @@ const ACTIONS: { kind: ActionKind; label: string; icon: typeof Sparkles }[] = [
   { kind: "reject", label: "Reject", icon: X },
 ];
 
+// Enrichment (Grok research + Claude write) is genuinely slow — up to a couple
+// of minutes — so give it a generous client timeout that still recovers a hung
+// request instead of spinning "Working…" forever.
+async function fetchWithTimeout(url: string, opts: RequestInit, ms: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callAction(id: string, kind: ActionKind): Promise<Response> {
   if (kind === "publish" || kind === "reject") {
     return fetch("/api/admin/venues", {
@@ -114,17 +127,21 @@ async function callAction(id: string, kind: ActionKind): Promise<Response> {
     });
   }
   if (kind === "rewrite") {
-    return fetch("/api/admin/venues/rewrite", {
+    return fetchWithTimeout(
+      "/api/admin/venues/rewrite",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: id }) },
+      240_000
+    );
+  }
+  return fetchWithTimeout(
+    "/api/admin/venues/enrich-draft",
+    {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ restaurantId: id }),
-    });
-  }
-  return fetch("/api/admin/venues/enrich-draft", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ restaurantId: id, mode: kind === "findig" ? "light" : "full" }),
-  });
+      body: JSON.stringify({ restaurantId: id, mode: kind === "findig" ? "light" : "full" }),
+    },
+    240_000
+  );
 }
 
 function Metric({ label, value, tone = "default" }: { label: string; value: number | string; tone?: string }) {
@@ -161,7 +178,7 @@ export function VenueHub({
   const [progress, setProgress] = useState({ done: 0, attention: 0, total: 0, kind: "" as string });
   const [heroOpen, setHeroOpen] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
-  const [rowResult, setRowResult] = useState<Record<string, { msg?: string; err?: string }>>({});
+  const [rowResult, setRowResult] = useState<Record<string, { msg?: string; err?: string; warn?: string }>>({});
   const [confirmBatch, setConfirmBatch] = useState<{ kind: ActionKind; n: number; est: number } | null>(null);
   // §09.1.2b — chain roster gateway surfaced after a parent enrich detects a chain.
   const [chainGateway, setChainGateway] = useState<{
@@ -312,9 +329,13 @@ export function VenueHub({
     let res: Response;
     try {
       res = await callAction(v.id, kind);
-    } catch {
+    } catch (e) {
       setState(v.id, "idle");
-      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      const timedOut = e instanceof DOMException && e.name === "AbortError";
+      setRowResult((p) => ({
+        ...p,
+        [v.id]: { err: timedOut ? "Timed out — the research took too long. Try again." : "Network error" },
+      }));
       return;
     }
     const data = await res.json().catch(() => ({}));
@@ -340,8 +361,7 @@ export function VenueHub({
       router.refresh();
       return;
     }
-    // enrich or rewrite: pop the Preview (full change diff) once the row refreshes
-    const mode: PreviewMode = data.pending ? "pending_copy" : "draft";
+    // enrich or rewrite
     const costNote = typeof data.cost === "number" ? ` · ${fmtUsd(data.cost)}` : "";
     // Chain detected on a PARENT enrich (§09.2). Siblings report is_chain:false,
     // so this never fires for them (loop fix). Skip the gateway if the chain has
@@ -370,16 +390,33 @@ export function VenueHub({
           ? ` · chain — ${sr.found} found · ${sr.added.length} new · ${sr.updated.length + sr.matchedParent} already present`
           : ` · part of a chain`
         : "";
+
+    // Dossier too thin → no copy written. Don't pop an empty Preview; show the
+    // reason as an amber warning on the row (it also persists on the row after
+    // refresh via needs_attention).
+    if (data.needs_attention && !data.has_copy) {
+      setRowResult((p) => ({
+        ...p,
+        [v.id]: {
+          warn:
+            (data.attention_reason
+              ? `Needs attention — ${data.attention_reason}`
+              : "Needs attention — dossier too thin, no copy written.") + costNote + chainNote,
+        },
+      }));
+      router.refresh();
+      return;
+    }
+
+    const mode: PreviewMode = data.pending ? "pending_copy" : "draft";
     setPreview({ venueId: v.id, mode });
     setRowResult((p) => ({
       ...p,
       [v.id]: {
         msg:
-          (data.needs_attention
-            ? "Needs attention — see Preview"
-            : mode === "pending_copy"
-              ? "Proposed changes ready — review & approve"
-              : "Draft ready — review & publish") + costNote + chainNote,
+          (mode === "pending_copy"
+            ? "Proposed changes ready — review & approve"
+            : "Draft ready — review & publish") + costNote + chainNote,
       },
     }));
     router.refresh();
@@ -662,6 +699,7 @@ export function VenueHub({
                         </div>
                       )}
                       {rowResult[v.id]?.msg && <div className="mt-1 text-xs text-emerald-400">{rowResult[v.id]?.msg}</div>}
+                      {rowResult[v.id]?.warn && <div className="mt-1 flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{rowResult[v.id]?.warn}</div>}
                       {rowResult[v.id]?.err && <div className="mt-1 text-xs text-destructive">{rowResult[v.id]?.err}</div>}
                     </td>
                     <td className="px-3 py-3">
@@ -877,13 +915,27 @@ function PreviewModal({ venue, mode, onClose, onResolved }: { venue: HubVenue; m
 
           <p className={`mt-3 rounded-md border px-3 py-1.5 text-xs ${banner.cls}`}>{banner.text}</p>
 
+          {/* Why this venue needs attention (e.g. dossier too thin) — shown here
+              so it's obvious why there may be no copy. */}
+          {venue.needs_attention && venue.attention_reason && (
+            <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                <span className="font-semibold">Needs attention. </span>
+                {venue.attention_reason}
+              </span>
+            </div>
+          )}
+
           {hook && <p className="mt-4 font-heading text-lg italic text-text-primary">{hook}</p>}
           {description ? (
             <div className="mt-3 space-y-3 text-sm leading-relaxed text-text-secondary">
               {description.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
             </div>
           ) : (
-            <p className="mt-3 text-sm text-text-muted">No copy yet — run Enrich or Rewrite to generate it.</p>
+            <p className="mt-3 text-sm text-text-muted">
+              No copy was written{venue.needs_attention ? " — see the note above" : " — run Enrich or Rewrite to generate it"}.
+            </p>
           )}
 
           {/* Full change set — structured fields (§09.3) */}

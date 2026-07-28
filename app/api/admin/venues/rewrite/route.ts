@@ -73,9 +73,13 @@ export async function POST(request: Request) {
     .eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
+  const hasCopy = Boolean(copy.hook || copy.description);
   return NextResponse.json({
     ok: true,
-    pending: row.status === "approved",
+    pending: row.status === "approved" && hasCopy,
+    has_pending: row.status === "approved" && hasCopy,
+    has_copy: hasCopy,
+    thin: copy.needs_attention && !hasCopy,
     needs_attention: copy.needs_attention,
     attention_reason: copy.attention_reason,
     copy: { hook: copy.hook, description: copy.description },

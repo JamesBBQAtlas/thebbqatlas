@@ -515,18 +515,23 @@ export function buildCopyPatch(
   status: string,
   copy: VenueCopy
 ): Record<string, unknown> {
-  if (status === "approved") {
-    // Live venue: hold the copy in the pending_changes bag for approval.
-    return {
-      pending_changes: { hook: copy.hook, description: copy.description },
-    };
-  }
-  return {
-    hook: copy.hook,
-    description: copy.description,
+  // Too thin to write? Never blank existing copy with an empty draft — just
+  // carry the attention flag (and clear it on a clean run).
+  const thin = copy.needs_attention && !copy.hook && !copy.description;
+  const flags = {
     needs_attention: copy.needs_attention,
-    attention_reason: copy.attention_reason,
+    attention_reason: copy.needs_attention
+      ? copy.attention_reason ?? "Dossier too thin to write an honest page."
+      : null,
   };
+  if (status === "approved") {
+    // Live venue: hold the copy in the pending_changes bag for approval — but
+    // never create a blank pending set when there's nothing to write.
+    return thin
+      ? flags
+      : { ...flags, pending_changes: { hook: copy.hook, description: copy.description } };
+  }
+  return thin ? flags : { ...flags, hook: copy.hook, description: copy.description };
 }
 
 /** Map a dossier's free-text bbq_style to our taxonomy slug (or null). */

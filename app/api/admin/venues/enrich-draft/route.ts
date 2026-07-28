@@ -43,7 +43,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id, chain_rostered_at"
+      "id, name, location_label, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id, chain_rostered_at"
     )
     .eq("id", restaurantId)
     .single();
@@ -52,15 +52,37 @@ export async function POST(request: Request) {
   }
   const priorCost = Number(row.enrichment_cost ?? 0) || 0;
 
+  // For a chain SIBLING with sparse facts, borrow the parent's website and tell
+  // Grok exactly which branch to research — otherwise it burns its (bounded)
+  // search budget re-discovering that the brand is a chain instead of finding
+  // this location's address/hours/phone (the Joe's-Olathe thin-dossier case).
+  let parentWebsite: string | null = null;
+  let branchNote: string | undefined;
+  if (row.chain_parent_id) {
+    const { data: parent } = await ctx.db
+      .from("restaurants")
+      .select("website")
+      .eq("id", row.chain_parent_id)
+      .single();
+    parentWebsite = parent?.website ?? null;
+    const label = row.location_label || row.city || "this";
+    branchNote =
+      `This is the ${label} location of ${row.name}, a known multi-location barbecue chain. ` +
+      `Find THIS specific branch's street address, opening hours, and phone` +
+      (parentWebsite ? ` — start from ${parentWebsite} and its Locations/Find-us page.` : ".") +
+      ` It is definitely a chain; do not spend searches re-confirming that.`;
+  }
+
   const lead: VenueLead = {
     name: row.name ?? undefined,
     instagram:
       row.instagram_url ??
       (row.instagram_handle ? `https://www.instagram.com/${row.instagram_handle}/` : undefined),
-    website: row.website ?? undefined,
+    website: row.website ?? parentWebsite ?? undefined,
     address: row.address || undefined,
     city: row.city || undefined,
     country: row.country || undefined,
+    notes: branchNote,
   };
 
   // ---- light mode: one lean, targeted IG search --------------------------
@@ -189,12 +211,20 @@ export async function POST(request: Request) {
     }
   }
 
+  // Was the dossier too thin to write honest copy? If so we must NOT blank the
+  // venue's copy with an empty draft — we keep whatever's there and flag why.
+  const thin = copy.needs_attention && !copy.hook && !copy.description;
+
   // The full proposed change set (venue-facing fields).
   const proposed: Record<string, unknown> = {};
   if (dossier.name) proposed.name = dossier.name;
   if (dossier.location_label) proposed.location_label = dossier.location_label;
-  proposed.hook = copy.hook;
-  proposed.description = copy.description ?? "";
+  // Only propose copy when we actually wrote some — never overwrite existing
+  // copy (or create a blank "pending change") when the dossier was too thin.
+  if (!thin) {
+    if (copy.hook) proposed.hook = copy.hook;
+    if (copy.description) proposed.description = copy.description;
+  }
   if (style) proposed.style = style;
   if (address) proposed.address = address;
   if (dossier.phone) proposed.phone = dossier.phone;
@@ -236,17 +266,33 @@ export async function POST(request: Request) {
     enrichment_model: `${grokModel} + ${claudeModel}`,
     enrichment_sources: sources.length ? sources : null,
   };
-  const flagAttention = overCeiling || (row.status !== "approved" && copy.needs_attention);
-  if (flagAttention) {
-    metadata.needs_attention = true;
-    metadata.attention_reason = overCeiling
+  // Flag attention for ANY venue (draft OR approved) when the cost overran or
+  // the dossier was too thin — and always CLEAR the flag on a clean run so a
+  // successful re-enrich un-flags a previously-flagged venue.
+  const attention = overCeiling || copy.needs_attention;
+  metadata.needs_attention = attention;
+  metadata.attention_reason = attention
+    ? overCeiling
       ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${CEILING} ceiling.`
-      : copy.attention_reason;
-  }
+      : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
+    : null;
+
+  // For an approved (live) venue, hold changes as pending — but only if there's
+  // actually something worth approving. A too-thin result that changes nothing
+  // real should NOT create an empty "pending changes" (the confusing state).
+  const rowKnown = row as unknown as Record<string, unknown>;
+  const differsFromRow = (key: string, val: unknown) =>
+    !(key in rowKnown) || String(rowKnown[key] ?? "") !== String(val ?? "");
+  const meaningful =
+    "hook" in proposed ||
+    "description" in proposed ||
+    Object.entries(proposed).some(([k, v]) => differsFromRow(k, v));
 
   const patch =
     row.status === "approved"
-      ? { ...metadata, pending_changes: proposed }
+      ? meaningful
+        ? { ...metadata, pending_changes: proposed }
+        : metadata
       : { ...metadata, ...proposed };
 
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
@@ -273,9 +319,13 @@ export async function POST(request: Request) {
     ok: true,
     mode,
     name: dossier.name ?? row.name,
-    needs_attention: copy.needs_attention,
-    attention_reason: copy.attention_reason,
-    pending: row.status === "approved",
+    needs_attention: attention,
+    attention_reason: metadata.attention_reason,
+    thin, // dossier too thin → no copy written
+    has_copy: Boolean(copy.hook || copy.description),
+    // Did an approved venue actually get proposed changes to review?
+    has_pending: row.status === "approved" && meaningful,
+    pending: row.status === "approved" && meaningful,
     copy: { hook: copy.hook, description: copy.description },
     cost: thisCost,
     over_ceiling: overCeiling,
