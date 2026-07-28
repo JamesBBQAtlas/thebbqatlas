@@ -53,9 +53,16 @@ const RADIO_SVG =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/><path d="M8 8 A6 6 0 0 0 8 16 M16 8 A6 6 0 0 1 16 16 M5 5 A10 10 0 0 0 5 19 M19 5 A10 10 0 0 1 19 19" stroke-width="1.5" stroke-linecap="round"/></svg>';
 const OWL_SVG =
   '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3 C6.8 3 4 6.6 4 11.2 C4 16.2 7.6 21 12 21 C16.4 21 20 16.2 20 11.2 C20 6.6 17.2 3 12 3 Z"/><circle cx="9" cy="10" r="2.3" fill="#0C0907"/><circle cx="15" cy="10" r="2.3" fill="#0C0907"/><circle cx="9" cy="10" r="0.9" fill="#e2703a"/><circle cx="15" cy="10" r="0.9" fill="#e2703a"/><path d="M12 12.4 L10.6 14 L13.4 14 Z" fill="#0C0907"/></svg>';
-// An original shark-fin cutting the water — our own glyph, no film artwork.
-const FIN_SVG =
-  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3.5 17 C11 16.2 15 11 21 3.2 C20.3 10 18.8 15 22 17 C16 18.4 9 18.4 3.5 17 Z"/></svg>';
+// An original grinning shark — blue body (currentColor), open toothy mouth and
+// a dorsal fin. Our own glyph, no film artwork/likeness.
+const SHARK_SVG =
+  '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+  '<path fill="currentColor" d="M1.6 12.5 C3.2 9 7 7.1 11 7.4 C14 7.6 16.8 8.8 19.4 11 L22.6 8.4 L21.4 12.5 L22.6 16.4 L19.4 13.8 C16.8 15.9 14 17.1 11 17.3 C7 17.6 3.2 15.8 1.6 12.5 Z"/>' +
+  '<path fill="currentColor" d="M9.6 7.5 C10.2 4.1 12.4 3.4 13.6 6.7 C12.3 6.9 10.9 7.1 9.6 7.5 Z"/>' +
+  '<path fill="#0B1B2E" d="M1.7 12.4 C2.7 11.2 4.3 10.6 5.9 10.5 L6.6 12.4 L5.7 14.3 C4 14.1 2.6 13.5 1.7 12.4 Z"/>' +
+  '<path fill="#ffffff" d="M2.4 11.6 L3.4 12.5 L2.5 13.2 Z M3.8 11.1 L4.7 12.2 L3.7 12.6 Z M3.7 13.9 L4.4 12.7 L5.1 13.7 Z M5.1 11.1 L5.7 12.2 L4.9 12.5 Z"/>' +
+  '<circle cx="9.2" cy="10" r="0.95" fill="#0B1B2E"/>' +
+  "</svg>";
 
 interface EggSecondary {
   link: string; // link text shown on the primary card
@@ -71,6 +78,7 @@ interface MapEgg {
   zoom: number;
   fast?: boolean; // superhuman-speed flyTo (Bionic)
   svg: string;
+  markerClass?: string; // override marker colour/glow (e.g. blue shark)
   cardLabel: string;
   cardBody: string;
   seal?: boolean; // Bionic "blessed" angel+star seal
@@ -137,10 +145,11 @@ const MAP_EGGS: MapEgg[] = [
     phrases: ["jaws", "amity island"],
     coord: { lat: 41.4174, lng: -70.5533 }, // Joseph Sylvia State Beach ("Jaws Bridge"), Martha's Vineyard, MA
     zoom: 12.5,
-    svg: FIN_SVG,
+    svg: SHARK_SVG,
+    markerClass: "atlas-egg-marker atlas-egg-marker--shark",
     cardLabel: "Amity Island",
     cardBody:
-      "Amity Island — or, in the real world, Martha's Vineyard, Massachusetts, where in 1975 they filmed a small story about a rather large fish. Not a barbecue joint. But you're gonna need a bigger plate. Try not to go in the water.",
+      "Amity Island — better known as Martha's Vineyard, where in 1975 a mechanical shark ruined swimming for an entire generation. No barbecue here: the only thing well-smoked was the mayor's re-election campaign. Still, you're gonna need a bigger plate. We recommend the brisket — on dry land, facing the exit.",
   },
 ];
 
@@ -792,11 +801,15 @@ export function MapExplorer({
     setEggCard(null);
   }
 
-  function dropEggMarker(coord: { lat: number; lng: number }, svg: string) {
+  function dropEggMarker(
+    coord: { lat: number; lng: number },
+    svg: string,
+    className = "atlas-egg-marker"
+  ) {
     const map = mapRef.current;
     if (!map) return;
     const el = document.createElement("div");
-    el.className = "atlas-egg-marker";
+    el.className = className;
     el.innerHTML = svg;
     const marker = new maplibregl.Marker({ element: el })
       .setLngLat([coord.lng, coord.lat])
@@ -814,7 +827,7 @@ export function MapExplorer({
     clearEggs();
     setSelected(null);
     setQuery("");
-    dropEggMarker(egg.coord, egg.svg);
+    dropEggMarker(egg.coord, egg.svg, egg.markerClass ?? "atlas-egg-marker");
     if (isMobileViewport()) setSidebarOpen(false);
     setEggCard({ label: egg.cardLabel, body: egg.cardBody, seal: egg.seal, secondary: egg.secondary });
     map.flyTo(

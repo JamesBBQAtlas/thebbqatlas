@@ -418,6 +418,30 @@
   }
 }
 
+/* Jaws shark — blue body with a blue glow instead of the ember one. */
+.atlas-egg-marker--shark {
+  color: #3aa0e2; /* shark blue (body/fin use currentColor) */
+  filter: drop-shadow(0 0 6px rgba(58, 160, 226, 0.85))
+    drop-shadow(0 0 14px rgba(58, 160, 226, 0.45));
+  animation: egg-glow-blue 2.6s ease-in-out infinite;
+}
+@keyframes egg-glow-blue {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 5px rgba(58, 160, 226, 0.7))
+      drop-shadow(0 0 12px rgba(58, 160, 226, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 9px rgba(58, 160, 226, 0.95))
+      drop-shadow(0 0 20px rgba(58, 160, 226, 0.6));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .atlas-egg-marker--shark {
+    animation: none;
+  }
+}
+
 /* "You are here" — the visitor's own geolocated position (blue, distinct from
    the gold/sienna venue pins and the gold place-search marker). */
 .atlas-user-marker {
