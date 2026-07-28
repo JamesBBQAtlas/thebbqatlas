@@ -130,7 +130,7 @@ export default async function ListingsPage() {
       db
         .from("restaurants")
         .select(
-          "id, name, slug, city, country, style, category, enriched_at, status, address, price_level, website, phone, hours, instagram_url, instagram_handle, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, lat, lng, hero_image_url, hero_source, hook, description, pending_changes, enrichment_cost, chain_parent_id, needs_attention, attention_reason, location_label, created_at, brand_id"
+          "id, name, slug, city, country, style, category, enriched_at, status, address, price_level, website, phone, hours, instagram_url, instagram_handle, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, lat, lng, hero_image_url, hero_source, hook, description, pending_changes, enrichment_cost, enrichment_cost_breakdown, chain_parent_id, chain_rostered_at, dossier, needs_attention, attention_reason, location_label, created_at, brand_id"
         )
         .limit(2000),
       count(db, "check_ins"),
@@ -172,13 +172,14 @@ export default async function ListingsPage() {
   // Coverage
   const countries = new Set(all.map((r) => r.country).filter(Boolean));
   const cities = new Set(all.map((r) => r.city).filter(Boolean));
-  // Distinct multi-location brands: those modelled via a brands row (brand_id)
-  // AND those modelled as chains (a parent referenced by its siblings via
-  // chain_parent_id). Either way, one brand = one entry.
+  // Distinct multi-location brands, each keyed by its parent identity so a
+  // chain is counted once however it's modelled: a brands-table brand (brand_id),
+  // a chain parent flagged is_chain, or a sibling pointing at its parent.
   const brands = new Set<string>();
   for (const r of all) {
-    if (r.brand_id) brands.add(`b:${r.brand_id}`);
-    if (r.chain_parent_id) brands.add(`c:${r.chain_parent_id}`);
+    if (r.brand_id) brands.add(`brand:${r.brand_id}`);
+    if (r.chain_parent_id) brands.add(`chain:${r.chain_parent_id}`);
+    else if ((r.dossier as { is_chain?: boolean } | null)?.is_chain) brands.add(`chain:${r.id}`);
   }
 
   // Category mix
