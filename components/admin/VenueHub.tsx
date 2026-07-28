@@ -475,13 +475,27 @@ export function VenueHub({
 
   async function copyDecision(id: string, action: "approve" | "discard") {
     setState(id, "running");
-    const res = await fetch("/api/admin/venues/approve-copy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ restaurantId: id, action }),
-    });
-    if (res.ok) router.refresh();
-    else setState(id, "error", "Failed");
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/venues/approve-copy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: id, action }),
+      });
+    } catch {
+      setState(id, "error", "Network error");
+      return;
+    }
+    if (res.ok) {
+      // Reset the row's spinner (router.refresh alone re-fetches data but does
+      // NOT clear this per-row state — that left "Working…" spinning after a
+      // successful Approve/Discard until a full reload).
+      setState(id, "idle");
+      setRowResult((p) => ({ ...p, [id]: { msg: action === "approve" ? "Changes approved ✓" : "Changes discarded" } }));
+      router.refresh();
+    } else {
+      setState(id, "error", "Failed");
+    }
   }
 
   const selCount = shown.filter((v) => selected.has(v.id)).length;
