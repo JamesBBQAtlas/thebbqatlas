@@ -162,14 +162,21 @@ export async function POST(request: Request) {
   // ---- full mode: bounded dossier + Haiku copy ---------------------------
   let dossier: VenueDossier;
   let citations: string[];
-  let grokUsage;
   let grokModel = GROK_MODEL;
+  // Research usage accumulates across passes (a chain flagship runs two).
+  let grokInTokens = 0;
+  let grokOutTokens = 0;
+  let grokSearches = 0;
+  let gCost = 0;
   try {
     const res = await researchDossier(lead);
     dossier = res.dossier;
     citations = res.citations;
-    grokUsage = res.usage;
     grokModel = res.model ?? GROK_MODEL;
+    grokInTokens += res.usage.in_tokens;
+    grokOutTokens += res.usage.out_tokens;
+    grokSearches += res.usage.searches;
+    gCost += grokCost(res.usage, grokModel);
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Research failed." }, { status: 502 });
   }
@@ -183,13 +190,88 @@ export async function POST(request: Request) {
     inheritBrandFacts(dossier, parentDossier);
   }
 
+  // ── Chain flagship: DETERMINISTIC detect → seed → roster-stamp → pass-2 ───
+  // When pass-1 reveals a PARENT to be a chain, we ALWAYS, in THIS one request:
+  //   (a) seed its sibling locations,
+  //   (b) stamp chain_rostered_at immediately (never leave siblings created but
+  //       the flag unset — the intermittent-regression root cause), and
+  //   (c) run pass-2, a focused fact-enrich of the flagship's OWN facts, so it
+  //       reliably ends RICH instead of stuck in the thin pass-1 state.
+  // No client round-trip and no manual gateway click — that fragile handoff is
+  // what dropped pass-2 last run.
+  const isParent = !row.chain_parent_id;
+  const detectedChain = isParent && dossier.is_chain;
+  const alreadyRostered = Boolean(row.chain_rostered_at);
+  let seeded: Awaited<ReturnType<typeof seedChainLocations>> | null = null;
+  let rosteredNow = false;
+  let twoPass = false;
+  if (detectedChain && !alreadyRostered) {
+    seeded = await seedChainLocations(
+      ctx.db,
+      restaurantId,
+      dossier.name ?? row.name,
+      dossier.country ?? row.country ?? null,
+      dossier.chain_locations
+    );
+    // Stamp the roster flag NOW — its own step, right after seeding — so siblings
+    // are never left created-but-unflagged even if pass-2 throws below.
+    await ctx.db
+      .from("restaurants")
+      .update({ chain_rostered_at: new Date().toISOString() })
+      .eq("id", restaurantId);
+    rosteredNow = true;
+
+    // Pass 2: the chain is catalogued now, so spend the whole budget on THIS
+    // flagship's own facts rather than re-discovering the chain.
+    const flagshipLead: VenueLead = {
+      ...lead,
+      notes:
+        `${dossier.name ?? row.name} is a known multi-location barbecue chain whose locations are ALREADY catalogued. ` +
+        `Do NOT research, list, or spend any searches on its other locations. ` +
+        `Spend the entire budget on THIS flagship venue's own facts: opening hours, founders/pitmaster, ` +
+        `established date, specialities, cook method, wood/fuel, setting/vibe, website, and Instagram.`,
+    };
+    try {
+      const res2 = await researchDossier(flagshipLead);
+      // Keep pass-1's chain roster fields (pass-2 was told to ignore them and may
+      // return them empty).
+      dossier = {
+        ...res2.dossier,
+        is_chain: true,
+        chain_locations: dossier.chain_locations,
+        chain_locations_url: dossier.chain_locations_url ?? res2.dossier.chain_locations_url,
+      };
+      grokModel = res2.model ?? grokModel;
+      grokInTokens += res2.usage.in_tokens;
+      grokOutTokens += res2.usage.out_tokens;
+      grokSearches += res2.usage.searches;
+      gCost += grokCost(res2.usage, res2.model ?? grokModel);
+      twoPass = true;
+    } catch {
+      // Pass-2 failed — do NOT silently commit the thin pass-1 copy. The flag is
+      // already stamped and the siblings seeded, so re-running Enrich on the
+      // flagship takes the already-rostered path (a single focused facts pass).
+      return NextResponse.json(
+        {
+          error:
+            "Chain detected and its locations were seeded, but the flagship's facts pass failed. Re-run Enrich on the flagship to finish it.",
+          retry_pass2: true,
+          is_chain: true,
+          is_chain_parent: true,
+          chain_seeds: seeded?.added ?? [],
+        },
+        { status: 502 }
+      );
+    }
+  }
+
   let copy;
   try {
     copy = await writeVenueCopy(
       dossier,
       row.chain_parent_id
         ? { branchOf: dossier.name ?? row.name }
-        : dossier.is_chain || row.chain_rostered_at
+        : detectedChain || alreadyRostered
           ? { isFlagship: true }
           : undefined
     );
@@ -198,11 +280,12 @@ export async function POST(request: Request) {
   }
   const claudeModel = copy.model ?? CLAUDE_WRITER_MODEL;
 
-  // Exact cost from usage, priced off the models the APIs actually returned.
-  const gCost = grokCost(grokUsage, grokModel);
+  // Exact cost from usage across all passes. A two-pass flagship legitimately
+  // spends ~2×, so its ceiling is doubled — don't false-flag the accepted model.
   const cCost = claudeCost(copy.usage, claudeModel);
   const thisCost = round4(gCost + cCost);
-  const overCeiling = thisCost > CEILING;
+  const runCeiling = twoPass ? CEILING * 2 : CEILING;
+  const overCeiling = thisCost > runCeiling;
 
   const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
   const socials = mapSocials(dossier.other_socials);
@@ -285,15 +368,15 @@ export async function POST(request: Request) {
     dossier,
     enrichment_cost: round4(priorCost + thisCost),
     enrichment_cost_breakdown: {
-      grok_searches: grokUsage.searches,
-      grok_in_tokens: grokUsage.in_tokens,
-      grok_out_tokens: grokUsage.out_tokens,
+      grok_searches: grokSearches,
+      grok_in_tokens: grokInTokens,
+      grok_out_tokens: grokOutTokens,
       claude_in_tokens: copy.usage.in_tokens,
       claude_out_tokens: copy.usage.out_tokens,
       grok_cost: round4(gCost),
       claude_cost: round4(cCost),
-      search_cost: round4(grokUsage.searches * 0.005),
-      action: "enrich",
+      search_cost: round4(grokSearches * 0.005),
+      action: twoPass ? "enrich (2-pass)" : "enrich",
     },
     enrichment_model: `${grokModel} + ${claudeModel}`,
     enrichment_sources: sources.length ? sources : null,
@@ -313,7 +396,7 @@ export async function POST(request: Request) {
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
     ? overCeiling
-      ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${CEILING} ceiling.`
+      ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${runCeiling} ceiling.`
       : isSibling
         ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
         : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
@@ -340,23 +423,6 @@ export async function POST(request: Request) {
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
-  // Chain handling is PARENT-ONLY (§09.2.1). A sibling (row already carries a
-  // chain_parent_id) never runs chain detection, never seeds, never signals a
-  // chain back to the UI — it only writes its own venue's dossier/copy/cost.
-  const isParent = !row.chain_parent_id;
-  const isChain = isParent && dossier.is_chain;
-  const alreadyRostered = Boolean(row.chain_rostered_at);
-  const seeded =
-    isChain && !alreadyRostered
-      ? await seedChainLocations(
-          ctx.db,
-          restaurantId,
-          dossier.name ?? row.name,
-          country,
-          dossier.chain_locations
-        )
-      : null;
-
   return NextResponse.json({
     ok: true,
     mode,
@@ -371,14 +437,19 @@ export async function POST(request: Request) {
     copy: { hook: copy.hook, description: copy.description },
     cost: thisCost,
     over_ceiling: overCeiling,
+    two_pass: twoPass,
     // Chain signalling — parent only. Siblings report is_chain:false so the UI
-    // never re-opens the roster gateway for them (the loop fix).
-    is_chain: isChain,
+    // never re-opens the roster gateway for them (the loop fix). The flagship's
+    // pass-2 already ran server-side, so the gateway is now optional (find any
+    // extra branches beyond what pass-1 saw), not required for a rich flagship.
+    is_chain: detectedChain,
     is_chain_parent: isParent,
+    // Pre-request value: still surfaces the (now optional) roster gateway once.
     chain_already_rostered: alreadyRostered,
-    brand: isChain ? dossier.name ?? row.name : null,
-    chain_locations_url: isChain ? dossier.chain_locations_url : null,
-    // Honest counts from the quick-seed pass (roster gateway does the full one).
+    rostered_now: rosteredNow,
+    brand: detectedChain ? dossier.name ?? row.name : null,
+    chain_locations_url: detectedChain ? dossier.chain_locations_url : null,
+    // Honest counts from the seed pass (the full-roster gateway can find more).
     chain_seed_result: seeded,
     chain_seeds: seeded ? seeded.added : [],
   });

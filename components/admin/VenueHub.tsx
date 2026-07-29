@@ -217,24 +217,33 @@ export function VenueHub({
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
   // After the venues list re-renders: if we just acted on a venue, scroll IT
-  // back into view (it may have re-sorted) and flash it; otherwise just restore
-  // the raw scroll position.
+  // back into view (it may have RE-SORTED — often to the very top when a chain
+  // group jumps up) and flash it; otherwise just restore the raw scroll position.
   useEffect(() => {
     const acted = actedRef.current;
     const savedY = restoreScrollRef.current;
     if (acted) {
       actedRef.current = null;
       restoreScrollRef.current = null;
-      requestAnimationFrame(() => {
+      // The re-sorted row (and any freshly-inserted sibling group) may not be in
+      // the DOM on the first frame, and a competing layout shift can cancel a
+      // smooth scroll — so retry across a few frames and jump INSTANTLY wherever
+      // the row landed, top included.
+      let tries = 0;
+      const anchor = () => {
         const el = rowRefs.current.get(acted);
         if (el) {
-          el.scrollIntoView({ block: "center", behavior: "smooth" });
+          el.scrollIntoView({ block: "center", behavior: "auto" });
           setHighlightId(acted);
           window.setTimeout(() => setHighlightId((cur) => (cur === acted ? null : cur)), 2200);
+        } else if (tries < 10) {
+          tries++;
+          window.setTimeout(anchor, 50);
         } else if (savedY != null) {
           window.scrollTo({ top: savedY });
         }
-      });
+      };
+      requestAnimationFrame(anchor);
       return;
     }
     if (savedY != null) {
@@ -247,6 +256,18 @@ export function VenueHub({
     () => [...new Set(venues.map((v) => v.country).filter(Boolean) as string[])].sort(),
     [venues]
   );
+
+  const venueById = useMemo(() => new Map(venues.map((v) => [v.id, v])), [venues]);
+  // A sibling inherits its brand facts from the parent, so enriching it before
+  // the flagship is rich produces a thin outpost and wastes ~$0.02. "Rich" =
+  // the parent has been enriched and isn't flagged (a thin pass-1 flagship
+  // carries needs_attention). Non-siblings are always ready.
+  const parentReady = (v: HubVenue): boolean => {
+    if (!v.chainSeed || !v.chainParentId) return true;
+    const p = venueById.get(v.chainParentId);
+    return Boolean(p && p.enriched_at && !p.needs_attention);
+  };
+  const PARENT_FIRST_MSG = "Enrich the flagship first — this location inherits its brand facts.";
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -397,6 +418,13 @@ export function VenueHub({
   }
 
   async function single(v: HubVenue, kind: ActionKind) {
+    // Guard: don't spend on a sibling's enrich/rewrite while its flagship is
+    // still thin/unenriched — it would inherit nothing and come back thin.
+    if ((kind === "enrich" || kind === "rewrite") && !parentReady(v)) {
+      markActed(v.id);
+      setRowResult((p) => ({ ...p, [v.id]: { warn: PARENT_FIRST_MSG } }));
+      return;
+    }
     keepScroll();
     markActed(v.id);
     setRowResult((p) => ({ ...p, [v.id]: {} }));
@@ -541,20 +569,16 @@ export function VenueHub({
             scanning: false,
             rostered: true,
             seeded: [...g.seeded, ...newSeeds],
-            result: `Roster scanned — ${summary} (${fmtUsd(
-              data.cost ?? 0
-            )}). Now enriching the flagship's own facts…`,
+            result: `Roster scanned — ${summary} (${fmtUsd(data.cost ?? 0)}). The flagship was already enriched in its two-pass run; enrich each new branch when you're ready.`,
           }
         : g
     );
+    // The flagship's own facts pass (pass 2) already ran server-side during the
+    // enrich, so there's no auto re-enrich here — this optional scan only adds
+    // any branches beyond what the first pass saw.
+    markActed(venueId);
     keepScroll();
     router.refresh();
-
-    // Two-pass model: hand off automatically into the flagship's own
-    // fact-enrichment pass (chain now rostered → whole budget goes to facts),
-    // so the parent never sits in the thin "needs attention" state.
-    const parent = venues.find((v) => v.id === venueId);
-    if (parent) await single(parent, "enrich");
   }
 
   async function copyDecision(id: string, action: "approve" | "discard") {
@@ -762,6 +786,9 @@ export function VenueHub({
               const busy = rt === "running" || rt === "queued";
               const f = freshness(v.enriched_at);
               const needsEnrich = v.lat === 0 && v.lng === 0;
+              // A sibling whose flagship isn't rich yet: block its enrich/rewrite.
+              const pReady = parentReady(v);
+              const blockSibling = v.chainSeed && !pReady;
               return (
                 <Fragment key={v.id}>
                   <tr
@@ -793,15 +820,22 @@ export function VenueHub({
                           <span className="inline-flex items-center gap-1 rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-2 py-0.5 text-xs font-semibold text-brand-sienna-light">
                             Chain location · seed
                           </span>
-                          {/* Distinct ACTION button */}
+                          {/* Distinct ACTION button — blocked until the flagship
+                              is rich (the sibling inherits its brand facts). */}
                           <button
                             type="button"
                             onClick={() => single(v, "enrich")}
-                            disabled={busy}
+                            disabled={busy || blockSibling}
+                            title={blockSibling ? PARENT_FIRST_MSG : "Enrich this location"}
                             className="inline-flex items-center gap-1 rounded-md bg-brand-sienna px-2.5 py-1 text-xs font-bold uppercase text-text-inverse transition-colors hover:bg-brand-sienna/90 disabled:opacity-40"
                           >
                             <Sparkles className="h-3.5 w-3.5" />Enrich this location
                           </button>
+                        </div>
+                      )}
+                      {blockSibling && v.status === "pending" && !v.enriched_at && (
+                        <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400/90">
+                          <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{PARENT_FIRST_MSG}
                         </div>
                       )}
                       {v.hasPending && (
@@ -844,8 +878,8 @@ export function VenueHub({
                       {/* Compact, single-line actions (icon-only) so rows never
                           wrap/fatten at narrow widths. Titles carry the labels. */}
                       <div className="flex flex-nowrap items-center justify-end gap-1">
-                        <IconBtn title="Re-research + rewrite (Grok researches, Claude writes)" busy={busy} onClick={() => single(v, "enrich")}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
-                        <IconBtn title="Rewrite copy from saved research (Claude only)" busy={busy} onClick={() => single(v, "rewrite")}><PenLine className="h-3.5 w-3.5" /></IconBtn>
+                        <IconBtn title={blockSibling ? PARENT_FIRST_MSG : "Re-research + rewrite (Grok researches, Claude writes)"} busy={busy || blockSibling} onClick={() => single(v, "enrich")}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
+                        <IconBtn title={blockSibling ? PARENT_FIRST_MSG : "Rewrite copy from saved research (Claude only)"} busy={busy || blockSibling} onClick={() => single(v, "rewrite")}><PenLine className="h-3.5 w-3.5" /></IconBtn>
                         <IconBtn title={v.hasIG ? "IG ✓ — re-run Find IG" : "Find IG (handle + recent posts)"} busy={busy} onClick={() => single(v, "findig")}>
                           <Instagram className={`h-3.5 w-3.5 ${v.hasIG ? "text-emerald-400" : ""}`} />
                         </IconBtn>
