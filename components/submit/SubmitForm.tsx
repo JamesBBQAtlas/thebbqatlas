@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { BBQ_STYLES, STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
 import { createClient } from "@/lib/supabase/client";
 import { LocationPicker, type LocationData } from "@/components/submit/LocationPicker";
+import { normalizeWebsite, normalizeInstagram } from "@/lib/utils/normalize";
 import { cn } from "@/lib/utils/cn";
 
 export function SubmitForm() {
@@ -48,6 +49,16 @@ export function SubmitForm() {
       return;
     }
 
+    // Normalize the website leniently — accept "willsbbq.de", www/http/https,
+    // with/without a path — and only reject genuine nonsense.
+    const normalizedWebsite = normalizeWebsite(website);
+    if (website.trim() && !normalizedWebsite) {
+      setMessage("That website doesn't look right — try something like willsbbq.de");
+      setStatus("error");
+      return;
+    }
+    const normalizedInstagram = normalizeInstagram(instagram);
+
     setLoading(true);
     setStatus("idle");
     const {
@@ -64,9 +75,9 @@ export function SubmitForm() {
       country: location.country,
       lat: location.lat,
       lng: location.lng,
-      website: website || null,
+      website: normalizedWebsite,
       contact_email: contactEmail || null,
-      instagram_handle: instagram || null,
+      instagram_handle: normalizedInstagram,
       submitted_by: user?.id ?? null,
       moderation_status: "pending",
     };
@@ -172,10 +183,11 @@ export function SubmitForm() {
           <Label htmlFor="website">Website</Label>
           <Input
             id="website"
-            type="url"
+            type="text"
+            inputMode="url"
             value={website}
             onChange={(e) => setWebsite(e.target.value)}
-            placeholder="https://"
+            placeholder="willsbbq.de"
             className="mt-1"
           />
         </div>

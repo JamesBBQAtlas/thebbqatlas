@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendSubmissionReceived } from "@/lib/email/senders";
+import { emailFirstName } from "@/lib/email/recipient";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
 
   if (!target) return NextResponse.json({ ok: true, sent: false });
 
-  await sendSubmissionReceived({ to: target, venueName });
+  const name = await emailFirstName(admin, { userId: user?.id ?? null, email: target });
+  await sendSubmissionReceived({ to: target, venueName, name: name ?? undefined });
   return NextResponse.json({ ok: true, sent: true });
 }

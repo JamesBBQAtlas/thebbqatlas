@@ -6,6 +6,7 @@ import { restaurantSlug } from "@/lib/utils/slug";
 import { resolveCountryCode } from "@/lib/constants/countries";
 import { safeVenueImage } from "@/lib/restaurants/image";
 import { sendModerationOutcome } from "@/lib/email/senders";
+import { emailFirstName } from "@/lib/email/recipient";
 
 type ModType = "submission" | "review" | "photo";
 type Action = "approve" | "reject";
@@ -99,12 +100,17 @@ export async function POST(request: Request) {
           .eq("id", id);
         const to = await submitterEmail(admin, submission);
         if (to) {
+          const name = await emailFirstName(admin, {
+            userId: submission.submitted_by,
+            email: submission.contact_email ?? to,
+          });
           await sendModerationOutcome({
             to,
             venueName: submission.name,
             approved: false,
             kind,
             notes,
+            name: name ?? undefined,
           });
         }
         return NextResponse.json({ ok: true });
@@ -149,11 +155,16 @@ export async function POST(request: Request) {
         .eq("id", id);
       const to = await submitterEmail(admin, submission);
       if (to) {
+        const name = await emailFirstName(admin, {
+          userId: submission.submitted_by,
+          email: submission.contact_email ?? to,
+        });
         await sendModerationOutcome({
           to,
           venueName: submission.name,
           approved: true,
           kind,
+          name: name ?? undefined,
         });
       }
       return NextResponse.json({ ok: true });

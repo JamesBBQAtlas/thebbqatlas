@@ -6,6 +6,16 @@ const T = EMAIL_FROM.transactional;
 const M = EMAIL_FROM.marketing;
 
 /**
+ * First token of a name for greetings. Every transactional email greets by
+ * FIRST name (house voice) and must render cleanly when there's no name — the
+ * greeting drops the name entirely rather than showing "Welcome, ." (policy).
+ */
+const firstName = (name?: string | null): string | null => {
+  const t = (name ?? "").trim().split(/\s+/)[0];
+  return t || null;
+};
+
+/**
  * 1. Welcome on signup — approved house-voice copy (WELCOME-EMAIL.md, verbatim).
  * Transactional/functional: sent once on signup. Keeps the "what we'll never do"
  * block. Real one-click unsubscribe when a token is provided.
@@ -17,8 +27,10 @@ export function sendWelcome(opts: {
   unsubscribeToken?: string;
 }) {
   const u = EMAIL_SITE_URL;
-  const first = opts.name?.trim().split(/\s+/)[0];
-  const opener = first ? `Welcome, ${first}.` : "Welcome to The BBQ Atlas.";
+  const first = firstName(opts.name);
+  // No-name greeting reads cleanly in-voice (the next line already says "we'll
+  // keep this short", so we don't repeat it here).
+  const opener = first ? `Welcome, ${first}.` : "Welcome in.";
 
   const bodyHtml = `<p style="margin:0 0 14px;">${opener}</p>
     <p style="margin:0 0 14px;">We'll keep this short. Your time is better spent eating barbecue than reading email.</p>
@@ -86,9 +98,11 @@ We map barbecue. That's the whole website.`;
 /** 2. Submission received. */
 export function sendSubmissionReceived(opts: { to: string; venueName?: string; name?: string }) {
   const venue = opts.venueName?.trim();
-  const bodyHtml = `<p style="margin:0 0 14px;">Thanks for the submission${venue ? ` for <strong>${venue}</strong>` : ""} — we've received it.</p>
+  const first = firstName(opts.name);
+  const thanks = first ? `Thanks, ${first} —` : "Thanks —";
+  const bodyHtml = `<p style="margin:0 0 14px;">${thanks} we've received your submission${venue ? ` for <strong>${venue}</strong>` : ""}.</p>
     <p style="margin:0 0 14px;">Our team reviews every spot by hand to keep the Atlas honest. We'll be in touch once it's been looked at. Good barbecue deserves the care.</p>`;
-  const bodyText = `Thanks for the submission${venue ? ` for ${venue}` : ""} — we've received it.
+  const bodyText = `${thanks} we've received your submission${venue ? ` for ${venue}` : ""}.
 
 Our team reviews every spot by hand to keep the Atlas honest. We'll be in touch once it's been looked at.`;
   return sendEmail({
@@ -109,11 +123,14 @@ export function sendModerationOutcome(opts: {
   approved: boolean;
   kind?: string;
   notes?: string;
+  name?: string;
 }) {
   const venue = opts.venueName?.trim() || "your submission";
+  const first = firstName(opts.name);
   if (opts.approved) {
-    const bodyHtml = `<p style="margin:0 0 14px;">Good news — <strong>${venue}</strong> has been approved and is now on The BBQ Atlas. Thank you for helping the map grow.</p>`;
-    const bodyText = `Good news — ${venue} has been approved and is now on The BBQ Atlas. Thank you for helping the map grow.`;
+    const goodNews = first ? `Good news, ${first} —` : "Good news —";
+    const bodyHtml = `<p style="margin:0 0 14px;">${goodNews} <strong>${venue}</strong> has been approved and is now on The BBQ Atlas. Thank you for helping the map grow.</p>`;
+    const bodyText = `${goodNews} ${venue} has been approved and is now on The BBQ Atlas. Thank you for helping the map grow.`;
     return sendEmail({
       to: opts.to,
       from: T,
@@ -134,10 +151,11 @@ export function sendModerationOutcome(opts: {
     });
   }
   const reason = opts.notes?.trim();
-  const bodyHtml = `<p style="margin:0 0 14px;">Thanks for taking the time to submit ${venue === "your submission" ? "a spot" : `<strong>${venue}</strong>`}. After a look, we haven't been able to add it this time.</p>
+  const thanks = first ? `Thanks, ${first}, for taking the time` : "Thanks for taking the time";
+  const bodyHtml = `<p style="margin:0 0 14px;">${thanks} to submit ${venue === "your submission" ? "a spot" : `<strong>${venue}</strong>`}. After a look, we haven't been able to add it this time.</p>
     ${reason ? `<p style="margin:0 0 14px;color:#6f6152;">Note from our team: ${reason}</p>` : ""}
     <p style="margin:0 0 14px;">Please don't let it put you off — if anything changes, or you know another spot, we'd love to hear from you.</p>`;
-  const bodyText = `Thanks for taking the time to submit ${venue}. After a look, we haven't been able to add it this time.${reason ? `\n\nNote from our team: ${reason}` : ""}\n\nIf anything changes, or you know another spot, we'd love to hear from you.`;
+  const bodyText = `${thanks} to submit ${venue}. After a look, we haven't been able to add it this time.${reason ? `\n\nNote from our team: ${reason}` : ""}\n\nIf anything changes, or you know another spot, we'd love to hear from you.`;
   return sendEmail({
     to: opts.to,
     from: T,
@@ -150,11 +168,13 @@ export function sendModerationOutcome(opts: {
 }
 
 /** 4. Correction acknowledged. */
-export function sendCorrectionAck(opts: { to: string; venueName?: string }) {
+export function sendCorrectionAck(opts: { to: string; venueName?: string; name?: string }) {
   const venue = opts.venueName?.trim();
-  const bodyHtml = `<p style="margin:0 0 14px;">Thanks for flagging ${venue ? `an update for <strong>${venue}</strong>` : "a correction"} — we've received it.</p>
+  const first = firstName(opts.name);
+  const opener = first ? `Thanks, ${first}. You flagged` : "Thanks for flagging";
+  const bodyHtml = `<p style="margin:0 0 14px;">${opener} ${venue ? `an update for <strong>${venue}</strong>` : "a correction"} — we've received it.</p>
     <p style="margin:0 0 14px;">Keeping listings accurate is a big part of what makes the Atlas trustworthy. We'll review it and make any changes needed.</p>`;
-  const bodyText = `Thanks for flagging ${venue ? `an update for ${venue}` : "a correction"} — we've received it. We'll review it and make any changes needed.`;
+  const bodyText = `${opener} ${venue ? `an update for ${venue}` : "a correction"} — we've received it. We'll review it and make any changes needed.`;
   return sendEmail({
     to: opts.to,
     from: T,

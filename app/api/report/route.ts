@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendCorrectionAck } from "@/lib/email/senders";
+import { emailFirstName } from "@/lib/email/recipient";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 /**
@@ -77,7 +78,16 @@ export async function POST(request: Request) {
   // Acknowledge to the reporter if they left an email (transactional).
   const ackEmail = email?.trim();
   if (ackEmail && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(ackEmail)) {
-    await sendCorrectionAck({ to: ackEmail, venueName: target.name });
+    // Greet by first name if the reporter is a signed-in user; else nameless.
+    let userId: string | null = null;
+    try {
+      const authed = await createClient();
+      userId = (await authed.auth.getUser()).data.user?.id ?? null;
+    } catch {
+      /* anonymous reporter */
+    }
+    const name = await emailFirstName(admin, { userId, email: ackEmail });
+    await sendCorrectionAck({ to: ackEmail, venueName: target.name, name: name ?? undefined });
   }
 
   return NextResponse.json({ ok: true });

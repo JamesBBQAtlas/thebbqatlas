@@ -54,9 +54,12 @@ export default async function SettingsPage() {
             <div className="flex-1 space-y-4">
               <div>
                 <p className="u-eyebrow mb-1 text-[0.6875rem] text-text-muted">
-                  Display name
+                  What should we call you?
                 </p>
                 <DisplayNameForm initial={displayName} />
+                <p className="mt-1 text-xs text-text-muted">
+                  We&apos;ll greet you by your first name in emails. Change it to whatever you like — Jim&apos;s fine.
+                </p>
               </div>
               <UsernameForm initial={profile?.username ?? ""} />
               {profile?.username && (
