@@ -307,9 +307,12 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
   const { data, citations, usage, model } = await grokJSON<Partial<VenueDossier>>({
     system: DOSSIER_SYSTEM,
     user,
-    // Cost cap: a single bounded call, HARD search limit (default 3), no X-search
-    // sprawl. Later passes pass a smaller cap to fit the shared total budget.
-    maxSearchResults: 3,
+    // xAI bills web_search PER SEARCH CALL (flat ~$0.005), NOT per source — so 8
+    // results costs the same on the search line as 3 and only adds a fraction of
+    // a cent in Grok input tokens. Richer results per search → better dossier from
+    // one pass, and often FEWER searches (Grok stops once it has enough). This is
+    // a nudge toward fewer/richer searches, NOT a hard cap on the count.
+    maxSearchResults: 8,
     maxSearches: Math.max(1, Math.min(3, opts?.maxSearches ?? 3)),
     xSearch: false,
   });
