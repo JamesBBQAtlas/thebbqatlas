@@ -88,6 +88,24 @@ export default async function ModerationPage() {
       .in("id", targetIds);
     for (const t of targets ?? []) targetById.set(t.id, { name: t.name, slug: t.slug });
   }
+  // Resolve the venue each flagged submission may duplicate (for the flag link).
+  const dupIds = [
+    ...new Set(submissions.map((s) => s.possible_duplicate_of).filter(Boolean)),
+  ] as string[];
+  const dupTargets: Record<string, { name: string; slug: string }> = {};
+  if (dupIds.length) {
+    const { data: dupRows } = await db
+      .from("restaurants")
+      .select("id, name, slug")
+      .in("id", dupIds);
+    const byId = new Map((dupRows ?? []).map((r) => [r.id, { name: r.name, slug: r.slug }]));
+    for (const s of submissions) {
+      if (s.possible_duplicate_of && byId.has(s.possible_duplicate_of)) {
+        dupTargets[s.id] = byId.get(s.possible_duplicate_of)!;
+      }
+    }
+  }
+
   const corrections: CorrectionItem[] = correctionSubs.map((s) => ({
     id: s.id,
     kind: (s.submission_type ?? "correction") as "correction" | "closure",
@@ -158,6 +176,7 @@ export default async function ModerationPage() {
         claims={claims}
         reviews={reviews}
         photos={photos}
+        dupTargets={dupTargets}
       />
     </div>
   );

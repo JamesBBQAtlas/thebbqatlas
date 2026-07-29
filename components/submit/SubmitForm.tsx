@@ -23,6 +23,12 @@ export function SubmitForm() {
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  // Global dedupe guard (soft): possible existing matches + whether the user
+  // has chosen to submit anyway.
+  const [dupMatches, setDupMatches] = useState<
+    { id: string; name: string; city: string | null; slug: string | null; reason: string }[]
+  >([]);
+  const [dupAck, setDupAck] = useState(false);
   const supabase = createClient();
 
   const toggleStyle = (style: BbqStyle) => {
@@ -59,6 +65,33 @@ export function SubmitForm() {
     }
     const normalizedInstagram = normalizeInstagram(instagram);
 
+    // Soft duplicate check (§ global dedupe guard) — warn once, never block. If
+    // there's a likely match and the user hasn't acknowledged it, show the
+    // notice and let them "Submit anyway".
+    if (!dupAck) {
+      try {
+        const res = await fetch("/api/venues/check-duplicate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            address: location.address,
+            city: location.city,
+            lat: location.lat,
+            lng: location.lng,
+          }),
+        });
+        const data = await res.json().catch(() => ({ matches: [] }));
+        if (Array.isArray(data.matches) && data.matches.length > 0) {
+          setDupMatches(data.matches.slice(0, 3));
+          setDupAck(true); // next click submits anyway
+          return;
+        }
+      } catch {
+        /* dedupe is best-effort — never block submission */
+      }
+    }
+
     setLoading(true);
     setStatus("idle");
     const {
@@ -80,6 +113,14 @@ export function SubmitForm() {
       instagram_handle: normalizedInstagram,
       submitted_by: user?.id ?? null,
       moderation_status: "pending",
+      // If they submitted past a duplicate warning, tag it so the moderator sees
+      // the flag with the reason.
+      ...(dupMatches.length
+        ? {
+            possible_duplicate_of: dupMatches[0].id,
+            duplicate_reason: dupMatches[0].reason,
+          }
+        : {}),
     };
 
     let { error } = await supabase.from("submissions").insert(payload);
@@ -230,8 +271,46 @@ export function SubmitForm() {
         arms-length positioning and does not endorse submitted establishments.
       </label>
 
+      {/* Soft duplicate notice — never blocks; "Submit anyway" proceeds. */}
+      {dupMatches.length > 0 && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm">
+          <p className="font-semibold text-amber-300">
+            This looks like it may already be on the Atlas:
+          </p>
+          <ul className="mt-2 space-y-1">
+            {dupMatches.map((m) => (
+              <li key={m.id} className="text-amber-200/90">
+                {m.name}
+                {m.city ? `, ${m.city}` : ""}{" "}
+                <span className="text-amber-200/60">({m.reason})</span>
+                {m.slug && (
+                  <>
+                    {" — "}
+                    <a
+                      href={`/restaurants/${m.slug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold text-brand-gold underline"
+                    >
+                      View
+                    </a>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-amber-200/70">
+            If yours is a different place, go ahead and submit — a moderator will double-check.
+          </p>
+        </div>
+      )}
+
       <Button type="submit" disabled={loading} className="w-full md:w-auto">
-        {loading ? "Submitting..." : "Submit a Spot"}
+        {loading
+          ? "Submitting..."
+          : dupMatches.length > 0
+            ? "Submit anyway"
+            : "Submit a Spot"}
       </Button>
       {message && status === "error" && (
         <p className="text-sm text-red-400">{message}</p>

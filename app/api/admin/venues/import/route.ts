@@ -17,6 +17,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const csv = typeof body.csv === "string" ? body.csv : "";
+  const dryRun = Boolean(body.dryRun);
   if (!csv.trim()) {
     return NextResponse.json({ error: "No CSV provided." }, { status: 400 });
   }
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await importSeedRows(ctx.db, csv);
+    const result = await importSeedRows(ctx.db, csv, { dryRun });
     return NextResponse.json(result);
   } catch (e) {
     return NextResponse.json(

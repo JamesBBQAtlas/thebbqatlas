@@ -9,7 +9,7 @@ import { sendModerationOutcome } from "@/lib/email/senders";
 import { emailFirstName } from "@/lib/email/recipient";
 
 type ModType = "submission" | "review" | "photo";
-type Action = "approve" | "reject";
+type Action = "approve" | "reject" | "merge";
 
 /** Resolve who to email about a submission's outcome (best-effort). */
 async function submitterEmail(
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
   const action: Action = body.action;
   const notes: string | undefined = body.notes;
 
-  if (!id || (action !== "approve" && action !== "reject")) {
+  if (!id || (action !== "approve" && action !== "reject" && action !== "merge")) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 
@@ -92,6 +92,44 @@ export async function POST(request: Request) {
       }
 
       const kind = submission.submission_type ?? "new_venue";
+
+      // Merge (§ dedupe guard): fold any NEW facts from the submission into the
+      // existing venue it duplicates — filling gaps only, never overwriting
+      // curated data — then resolve the submission without creating a new row.
+      if (action === "merge") {
+        const targetId = submission.possible_duplicate_of;
+        if (!targetId) {
+          return NextResponse.json(
+            { error: "No linked venue to merge into." },
+            { status: 400 }
+          );
+        }
+        const { data: existing } = await admin
+          .from("restaurants")
+          .select("website, description, instagram_handle, instagram_url, hero_image_url")
+          .eq("id", targetId)
+          .single();
+        const patch: Record<string, unknown> = {};
+        if (!existing?.website && submission.website) patch.website = submission.website;
+        if (!existing?.instagram_handle && submission.instagram_handle) {
+          patch.instagram_handle = submission.instagram_handle;
+          patch.instagram_url = `https://www.instagram.com/${submission.instagram_handle}/`;
+        }
+        if (!existing?.hero_image_url && submission.hero_image_url) {
+          patch.hero_image_url = submission.hero_image_url;
+        }
+        if (Object.keys(patch).length) {
+          await admin.from("restaurants").update(patch).eq("id", targetId);
+        }
+        await admin
+          .from("submissions")
+          .update({
+            moderation_status: "approved",
+            admin_notes: notes ?? `Merged into existing venue ${targetId}`,
+          })
+          .eq("id", id);
+        return NextResponse.json({ ok: true, merged: true });
+      }
 
       if (action === "reject") {
         await admin

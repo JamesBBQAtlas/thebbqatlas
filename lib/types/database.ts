@@ -280,6 +280,8 @@ export interface Submission {
   created_at: string;
   submission_type?: SubmissionKind;
   target_restaurant_id?: string | null;
+  possible_duplicate_of?: string | null;
+  duplicate_reason?: string | null;
 }
 
 export interface SavedSpot {

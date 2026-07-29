@@ -11,6 +11,7 @@ import {
   Wrench,
   DoorClosed,
   BadgeCheck,
+  AlertTriangle,
 } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
@@ -77,10 +78,12 @@ function Actions({
   busy,
   onApprove,
   onReject,
+  approveLabel = "Approve",
 }: {
   busy: boolean;
   onApprove: () => void;
   onReject: () => void;
+  approveLabel?: string;
 }) {
   return (
     <div className="flex shrink-0 gap-2">
@@ -90,7 +93,7 @@ function Actions({
         disabled={busy}
         className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-3.5 py-2 text-xs font-bold uppercase tracking-[0.06em] text-text-inverse transition-colors hover:bg-brand-gold/90 disabled:opacity-40"
       >
-        <Check className="h-3.5 w-3.5" /> Approve
+        <Check className="h-3.5 w-3.5" /> {approveLabel}
       </button>
       <button
         type="button"
@@ -118,12 +121,15 @@ export function ModerationConsole({
   claims: initialClaims,
   reviews: initialReviews,
   photos: initialPhotos,
+  dupTargets = {},
 }: {
   submissions: Submission[];
   corrections: CorrectionItem[];
   claims: ClaimModItem[];
   reviews: ReviewItem[];
   photos: PhotoItem[];
+  /** submissionId → the venue it may duplicate (for the flag link). */
+  dupTargets?: Record<string, { name: string; slug: string }>;
 }) {
   const [tab, setTab] = useState<Tab>("submissions");
   const [subs, setSubs] = useState(initialSubs);
@@ -136,15 +142,16 @@ export function ModerationConsole({
   async function act(
     apiType: ApiType,
     id: string,
-    action: "approve" | "reject",
-    bucket: Bucket
+    action: "approve" | "reject" | "merge",
+    bucket: Bucket,
+    notes?: string
   ) {
     setBusy(id);
     try {
       const res = await fetch("/api/admin/moderate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: apiType, id, action }),
+        body: JSON.stringify({ type: apiType, id, action, notes }),
       });
       if (res.ok) {
         if (bucket === "subs") setSubs((p) => p.filter((s) => s.id !== id));
@@ -218,6 +225,26 @@ export function ModerationConsole({
                     <h3 className="font-heading text-lg font-bold text-text-primary">
                       {s.name}
                     </h3>
+                    {/* Possible-duplicate flag (§ global dedupe guard). */}
+                    {s.possible_duplicate_of && (
+                      <p className="mt-1.5 inline-flex flex-wrap items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        Possible duplicate of{" "}
+                        {dupTargets[s.id]?.slug ? (
+                          <a
+                            href={`/restaurants/${dupTargets[s.id].slug}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-semibold text-brand-gold underline"
+                          >
+                            {dupTargets[s.id].name}
+                          </a>
+                        ) : (
+                          <span className="font-semibold">an existing venue</span>
+                        )}
+                        {s.duplicate_reason ? ` — ${s.duplicate_reason}` : ""}
+                      </p>
+                    )}
                     <p className="mt-1 flex items-center gap-1.5 text-sm text-text-muted">
                       <MapPin className="h-3.5 w-3.5" />
                       {[s.address, s.city, s.country].filter(Boolean).join(", ")}
@@ -252,11 +279,26 @@ export function ModerationConsole({
                       · {fmtDate(s.created_at)}
                     </p>
                   </div>
-                  <Actions
-                    busy={busy === s.id}
-                    onApprove={() => act("submission", s.id, "approve", "subs")}
-                    onReject={() => act("submission", s.id, "reject", "subs")}
-                  />
+                  <div className="flex flex-col items-end gap-2">
+                    <Actions
+                      busy={busy === s.id}
+                      onApprove={() => act("submission", s.id, "approve", "subs")}
+                      onReject={() => act("submission", s.id, "reject", "subs")}
+                      approveLabel={s.possible_duplicate_of ? "Approve as new" : undefined}
+                    />
+                    {s.possible_duplicate_of && (
+                      <button
+                        type="button"
+                        disabled={busy === s.id}
+                        onClick={() =>
+                          act("submission", s.id, "merge", "subs", "Merged into the existing venue")
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-md border border-brand-gold/50 px-3 py-1.5 text-xs font-semibold text-brand-gold transition-colors hover:bg-brand-gold/10 disabled:opacity-40"
+                      >
+                        Merge into existing
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
