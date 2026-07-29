@@ -5,6 +5,7 @@ import { CLAUDE_WRITER_MODEL } from "@/lib/ai/claude";
 import {
   researchDossier,
   researchInstagram,
+  researchChainRoster,
   writeVenueCopy,
   inheritBrandFacts,
   missingCoreAnchors,
@@ -19,7 +20,7 @@ import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
-import { ensureFlagshipParent, recordIsFlagship } from "@/lib/admin/flagship";
+import { ensureFlagshipParent, recordIsFlagship, populateFlagship } from "@/lib/admin/flagship";
 import { composeAddress, preferFullerAddress } from "@/lib/admin/address";
 
 export const dynamic = "force-dynamic";
@@ -179,6 +180,11 @@ export async function POST(request: Request) {
   let grokOutTokens = 0;
   let grokSearches = 0;
   let gCost = 0;
+  // The ambiguous-flagship roster scan is a SEPARATE bounded op — tracked apart
+  // from the dossier search budget (so it doesn't trip the runaway guard) but
+  // still added to the honest cost meter.
+  let rosterSearches = 0;
+  let rosterCost = 0;
   const consulted = new Set<string>();
   const passLog: Array<Record<string, unknown>> = [];
   const searchesLeft = () => Math.max(0, MAX_TOTAL_SEARCHES - grokSearches);
@@ -303,48 +309,15 @@ export async function POST(request: Request) {
           .update({ chain_rostered_at: new Date().toISOString() })
           .eq("id", fr.flagshipId);
 
-        // Write the flagship's BRAND-level copy (Claude only — NO web search) so
-        // its page carries website + story, not an empty seed. Its OWN location
+        // Populate the flagship's brand-level page (Claude only — NO web search)
+        // so it carries website + story, not an empty seed. Its OWN location
         // specifics (hours, exact address) come when it's enriched later.
-        let fCopy: Awaited<ReturnType<typeof writeVenueCopy>> | null = null;
-        try {
-          fCopy = await writeVenueCopy(fr.flagshipDossier, { isFlagship: true });
-        } catch {
-          fCopy = null;
-        }
-        const fCopyCost = fCopy ? round4(claudeCost(fCopy.usage, fCopy.model ?? CLAUDE_WRITER_MODEL)) : 0;
-        const fStyle = matchBbqStyle(fr.flagshipDossier.bbq_style);
-        const fPrice = priceBandToLevel(fr.flagshipDossier.price_band);
-        const fIgHandle = fr.flagshipDossier.instagram ? normalizeHandle(fr.flagshipDossier.instagram) : null;
-        const fSocials = mapSocials(fr.flagshipDossier.other_socials);
-        const flagPatch: Record<string, unknown> = {
-          enriched_at: new Date().toISOString(),
+        const { cost: fCopyCost } = await populateFlagship(ctx.db, {
+          flagshipId: fr.flagshipId,
+          status: fr.status,
           dossier: fr.flagshipDossier,
-          enrichment_model: `${grokModel} + ${CLAUDE_WRITER_MODEL}`,
-          needs_attention: false,
-          attention_reason: null,
-        };
-        if (fr.flagshipDossier.website) flagPatch.website = fr.flagshipDossier.website;
-        if (fr.flagshipDossier.instagram) flagPatch.instagram_url = fr.flagshipDossier.instagram;
-        if (fIgHandle) flagPatch.instagram_handle = fIgHandle;
-        if (fStyle) flagPatch.style = fStyle;
-        if (fPrice) flagPatch.price_level = fPrice;
-        if (fSocials.x_url) flagPatch.x_url = fSocials.x_url;
-        if (fSocials.facebook_url) flagPatch.facebook_url = fSocials.facebook_url;
-        if (fSocials.tiktok_url) flagPatch.tiktok_url = fSocials.tiktok_url;
-        if (fSocials.youtube_url) flagPatch.youtube_url = fSocials.youtube_url;
-        const fHook = fCopy?.hook ?? null;
-        const fDesc = fCopy?.description ?? null;
-        if (fHook || fDesc) {
-          if (fr.status === "approved") {
-            // Don't silently change a live flagship's copy — hold it for approval.
-            flagPatch.pending_changes = { hook: fHook, description: fDesc };
-          } else {
-            if (fHook) flagPatch.hook = fHook;
-            if (fDesc) flagPatch.description = fDesc;
-          }
-        }
-        await ctx.db.from("restaurants").update(flagPatch).eq("id", fr.flagshipId);
+          grokModel,
+        });
 
         // Commit the BRANCH's own research (cost/dossier/sources/debug) and mark
         // it a CLEAN sibling — NO attention flag, NO copy written here.
@@ -393,17 +366,49 @@ export async function POST(request: Request) {
           { status: 500 }
         );
       }
-    } else {
-      // This record IS the flagship (confident match), OR the flagship couldn't be
-      // determined — either way it stays the parent. If unknown, it makes NO
-      // origin claim and is flagged for review.
-      flagshipUnknown = !fl;
+    } else if (recordFlagshipConfirmed) {
+      // AUTO PATH: this record IS the confirmed flagship — it stays the parent
+      // and (below) may claim origin.
       seeded = await seedChainLocations(ctx.db, restaurantId, brand, country, dossier.chain_locations);
       await ctx.db
         .from("restaurants")
         .update({ chain_rostered_at: new Date().toISOString() })
         .eq("id", restaurantId);
       rosteredNow = true;
+    } else {
+      // AMBIGUOUS FLAGSHIP — never dead-end. The origin couldn't be confidently
+      // determined, so: build the FULL roster (read the /locations page) so every
+      // branch exists as a seed, mark the whole chain "flagship not set", and let
+      // a human pick the original with one click. NO location claims origin.
+      flagshipUnknown = true;
+      // Bounded roster scan (its own small cap — kept OUT of the dossier search
+      // budget/runaway check, but counted in the honest cost meter).
+      let rosterLocs: { name: string | null; address: string | null; city: string | null }[] =
+        dossier.chain_locations.map((c) => ({ name: c.name, address: null, city: c.city }));
+      try {
+        const roster = await researchChainRoster({
+          brand,
+          url: dossier.chain_locations_url,
+          country,
+          maxSearches: 3,
+        });
+        rosterSearches += roster.usage.searches;
+        rosterCost += grokCost(roster.usage, roster.model ?? GROK_MODEL);
+        for (const u of roster.citations) if (u) consulted.add(u);
+        if (roster.locations.length) rosterLocs = roster.locations;
+      } catch {
+        // Fall back to whatever the dossier already listed.
+      }
+      seeded = await seedChainLocations(ctx.db, restaurantId, brand, country, rosterLocs);
+      await ctx.db
+        .from("restaurants")
+        .update({ chain_rostered_at: new Date().toISOString() })
+        .eq("id", restaurantId);
+      rosteredNow = true;
+      // Mark the whole chain (this temp parent + every seeded branch) "flagship
+      // not set" — the badge is suppressed and each member offers "Set as flagship".
+      await ctx.db.from("restaurants").update({ flagship_unset: true }).eq("id", restaurantId);
+      await ctx.db.from("restaurants").update({ flagship_unset: true }).eq("chain_parent_id", restaurantId);
     }
   }
 
@@ -466,8 +471,10 @@ export async function POST(request: Request) {
   // Exact cost from usage across all passes. A two-pass flagship legitimately
   // spends ~2×, so its ceiling is doubled — don't false-flag the accepted model.
   const cCost = claudeCost(copy.usage, claudeModel);
-  const thisCost = round4(gCost + cCost);
-  const runCeiling = twoPass ? CEILING * 2 : CEILING;
+  // The ambiguous-flagship roster scan is a separate bounded op — added to the
+  // honest total, and it lifts the ceiling for THIS run so it isn't false-flagged.
+  const thisCost = round4(gCost + cCost + rosterCost);
+  const runCeiling = (twoPass ? CEILING * 2 : CEILING) + (rosterCost > 0 ? 0.05 : 0);
   const overCeiling = thisCost > runCeiling;
 
   const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
@@ -560,10 +567,12 @@ export async function POST(request: Request) {
       claude_out_tokens: copy.usage.out_tokens,
       grok_cost: round4(gCost),
       claude_cost: round4(cCost),
-      search_cost: round4(grokSearches * 0.005),
-      total_searches: grokSearches,
+      roster_cost: round4(rosterCost),
+      roster_searches: rosterSearches,
+      search_cost: round4((grokSearches + rosterSearches) * 0.005),
+      total_searches: grokSearches + rosterSearches,
       passes: passLog.length,
-      action: twoPass ? "enrich (2-pass)" : "enrich",
+      action: flagshipUnknown ? "enrich + roster (flagship unset)" : twoPass ? "enrich (2-pass)" : "enrich",
     },
     enrichment_model: `${grokModel} + ${claudeModel}`,
     enrichment_sources: sources.length ? sources : null,
@@ -649,8 +658,14 @@ export async function POST(request: Request) {
     // extra branches beyond what pass-1 saw), not required for a rich flagship.
     is_chain: detectedChain,
     // If we reassigned, THIS record is now a branch — not the chain parent — so
-    // the roster gateway must not offer itself here.
-    is_chain_parent: isParent && !reassignedToFlagship,
+    // the roster gateway must not offer itself here. And an ambiguous chain
+    // already has its roster + the "Set as flagship" UI, so no gateway either.
+    is_chain_parent: isParent && !reassignedToFlagship && !flagshipUnknown,
+    // Ambiguous flagship: roster was built + chain marked "flagship not set".
+    flagship_unset: flagshipUnknown,
+    flagship_unset_message: flagshipUnknown
+      ? `Chain detected — the original couldn't be confidently identified. All ${(seeded?.added.length ?? 0) + (seeded?.updated.length ?? 0) + (seeded?.matchedParent ?? 0)} locations are listed; tap "Set as flagship" on the original to finish.`
+      : null,
     // Pre-request value: still surfaces the (now optional) roster gateway once.
     chain_already_rostered: alreadyRostered,
     rostered_now: rosteredNow,

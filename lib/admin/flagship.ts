@@ -1,7 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { composeAddress, normStreet, normCity } from "@/lib/admin/address";
-import { mergeDossierFacts, matchBbqStyle, type VenueDossier } from "@/lib/ai/enrich";
+import {
+  mergeDossierFacts,
+  matchBbqStyle,
+  priceBandToLevel,
+  mapSocials,
+  writeVenueCopy,
+  type VenueDossier,
+} from "@/lib/ai/enrich";
+import { normalizeHandle } from "@/lib/admin/seed-import";
+import { claudeCost, round4 } from "@/lib/ai/cost";
+import { CLAUDE_WRITER_MODEL } from "@/lib/ai/claude";
 
 /**
  * Chain "parent" = the TRUE flagship (the original location), NOT whichever
@@ -66,6 +76,65 @@ export function buildFlagshipDossier(
     is_chain: true,
     unknowns: [],
   };
+}
+
+/**
+ * Populate a flagship ROW from its brand-facts dossier — writes the flagship's
+ * brand-level copy (Claude only, NO web search) and sets website / Instagram /
+ * style / price / socials so the flagship page isn't an empty seed. Its OWN
+ * location specifics (exact hours/address) fill when it's enriched directly.
+ * A live (approved) flagship holds copy as pending_changes; a seed writes it to
+ * columns. Returns whether copy was written + the Claude cost.
+ */
+export async function populateFlagship(
+  db: SupabaseClient,
+  opts: { flagshipId: string; status: string; dossier: VenueDossier; grokModel: string }
+): Promise<{ copyWritten: boolean; cost: number }> {
+  const { flagshipId, status, dossier, grokModel } = opts;
+  let copy: Awaited<ReturnType<typeof writeVenueCopy>> | null = null;
+  try {
+    copy = await writeVenueCopy(dossier, { isFlagship: true });
+  } catch {
+    copy = null;
+  }
+  const cost = copy ? round4(claudeCost(copy.usage, copy.model ?? CLAUDE_WRITER_MODEL)) : 0;
+  const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
+  const socials = mapSocials(dossier.other_socials);
+  const style = matchBbqStyle(dossier.bbq_style);
+  const price = priceBandToLevel(dossier.price_band);
+  const hook = copy?.hook ?? null;
+  const desc = copy?.description ?? null;
+  const copyWritten = Boolean(hook || desc);
+
+  const patch: Record<string, unknown> = {
+    enriched_at: new Date().toISOString(),
+    dossier,
+    enrichment_model: `${grokModel} + ${CLAUDE_WRITER_MODEL}`,
+    needs_attention: !copyWritten,
+    attention_reason: copyWritten
+      ? null
+      : "Flagship set — enrich it to write its page (brand facts present, copy pending).",
+    flagship_unset: false,
+  };
+  if (dossier.website) patch.website = dossier.website;
+  if (dossier.instagram) patch.instagram_url = dossier.instagram;
+  if (igHandle) patch.instagram_handle = igHandle;
+  if (style) patch.style = style;
+  if (price) patch.price_level = price;
+  if (socials.x_url) patch.x_url = socials.x_url;
+  if (socials.facebook_url) patch.facebook_url = socials.facebook_url;
+  if (socials.tiktok_url) patch.tiktok_url = socials.tiktok_url;
+  if (socials.youtube_url) patch.youtube_url = socials.youtube_url;
+  if (copyWritten) {
+    if (status === "approved") {
+      patch.pending_changes = { hook, description: desc };
+    } else {
+      if (hook) patch.hook = hook;
+      if (desc) patch.description = desc;
+    }
+  }
+  await db.from("restaurants").update(patch).eq("id", flagshipId);
+  return { copyWritten, cost };
 }
 
 export interface FlagshipReassignResult {

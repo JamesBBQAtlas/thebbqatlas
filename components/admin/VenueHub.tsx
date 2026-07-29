@@ -49,6 +49,7 @@ export interface HubVenue {
   chainParentId: string | null;
   isChainParent: boolean;
   chainRostered: boolean;
+  flagshipUnset: boolean;
   lat: number;
   lng: number;
 }
@@ -495,6 +496,16 @@ export function VenueHub({
       router.refresh();
       return;
     }
+    // Ambiguous flagship: the roster was built and the chain marked "flagship not
+    // set". Surface the pick-one guidance (the row now shows "Set as flagship").
+    if (data.flagship_unset) {
+      setRowResult((p) => ({
+        ...p,
+        [v.id]: { warn: (data.flagship_unset_message ?? "Chain detected — pick the flagship.") + costNote },
+      }));
+      router.refresh();
+      return;
+    }
     // Chain detected on a PARENT enrich (§09.2). Siblings report is_chain:false,
     // so this never fires for them (loop fix). Skip the gateway if the chain has
     // already been rostered once.
@@ -607,6 +618,35 @@ export function VenueHub({
     // any branches beyond what the first pass saw.
     markActed(venueId);
     keepScroll();
+    router.refresh();
+  }
+
+  // Human picks the flagship for an ambiguous chain — one click sets the origin,
+  // populates it, and re-points the others as siblings.
+  async function setFlagship(v: HubVenue) {
+    keepScroll();
+    markActed(v.id);
+    setRowResult((p) => ({ ...p, [v.id]: {} }));
+    setState(v.id, "running");
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/venues/set-flagship", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: v.id }),
+      });
+    } catch {
+      setState(v.id, "idle");
+      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setState(v.id, "idle");
+    if (!res.ok) {
+      setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Failed" } }));
+      return;
+    }
+    setRowResult((p) => ({ ...p, [v.id]: { msg: data.message ?? "Flagship set ✓" } }));
     router.refresh();
   }
 
@@ -835,7 +875,9 @@ export function VenueHub({
                         {indent && <span className="mr-1 text-brand-sienna-light" aria-hidden="true">↳</span>}
                         {v.name}
                         {v.location_label && <span className="ml-1.5 text-xs font-normal text-brand-sienna-light">· {v.location_label}</span>}
-                        {!v.chainSeed && (v.isChainParent || v.chainRostered) && (
+                        {/* Confident FLAGSHIP badge — ONLY when the flagship is
+                            confirmed (never while it's unset/ambiguous). */}
+                        {!v.chainSeed && (v.isChainParent || v.chainRostered) && !v.flagshipUnset && (
                           <span
                             title="Flagship — the chain's home / original location"
                             className="ml-2 inline-flex items-center gap-1 rounded-full border border-brand-gold/50 bg-brand-gold/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-gold"
@@ -843,10 +885,34 @@ export function VenueHub({
                             <Crown className="h-3 w-3" />Flagship
                           </span>
                         )}
+                        {/* Ambiguous chain — NOT a confident flagship. */}
+                        {v.flagshipUnset && (
+                          <span
+                            title="Chain detected — the original couldn't be auto-identified. Pick the flagship."
+                            className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.04em] text-amber-400"
+                          >
+                            <AlertTriangle className="h-3 w-3" />Flagship not set
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-text-muted">{[v.city, v.country].filter(Boolean).join(", ")} · {v.styleLabel}</div>
                       {v.needs_attention && v.attention_reason && (
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
+                      )}
+                      {/* Ambiguous chain: one-click pick of the original on every
+                          member (temp parent + seeds). */}
+                      {v.flagshipUnset && (
+                        <div className="mt-1">
+                          <button
+                            type="button"
+                            onClick={() => setFlagship(v)}
+                            disabled={busy}
+                            title="Make this the chain's flagship / original location"
+                            className="inline-flex items-center gap-1 rounded-md border border-brand-gold/50 bg-brand-gold/10 px-2 py-0.5 text-xs font-bold uppercase tracking-[0.03em] text-brand-gold transition-colors hover:bg-brand-gold/20 disabled:opacity-40"
+                          >
+                            <Crown className="h-3 w-3" />Set as flagship
+                          </button>
+                        </div>
                       )}
                       {/* The "seed" label + big Enrich CTA show ONLY while this is
                           an un-enriched chain seed (pending AND never enriched).

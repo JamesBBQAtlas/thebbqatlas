@@ -564,6 +564,8 @@ export async function researchChainRoster(opts: {
   brand: string;
   url?: string | null;
   country?: string | null;
+  /** Tighten the web-search cap (default 5) to fit a shared budget. */
+  maxSearches?: number;
 }): Promise<{ locations: ChainBranch[]; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number }; model: string }> {
   const user = `Brand: ${opts.brand}${opts.country ? ` (${opts.country})` : ""}
 Locations page: ${opts.url || "(none found — do ONE search for the brand's official locations)"}
@@ -573,7 +575,7 @@ Return ONLY the JSON list of every branch.`;
     system: ROSTER_SYSTEM,
     user,
     maxSearchResults: 5,
-    maxSearches: 5,
+    maxSearches: Math.max(1, Math.min(5, opts.maxSearches ?? 5)),
     xSearch: false,
   });
   const raw = Array.isArray((data as { locations?: unknown }).locations)
