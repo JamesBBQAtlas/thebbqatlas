@@ -226,6 +226,14 @@ export interface VenueDossier {
   location_label: string | null;
   /** True if this business has more than one physical location. */
   is_chain: boolean;
+  /**
+   * The ORIGINAL / FIRST / flagship location of the chain (where the business
+   * began) — read from the About/Our-Story/origin page. This designates which
+   * location is the "home" record, independent of which one we enrich first, and
+   * is the ONLY location allowed to claim "where it all began". null if it can't
+   * be determined confidently (then no location may claim to be the original).
+   */
+  flagship_location: { city: string | null; address: string | null; established: string | null } | null;
   /** Other known locations of the chain (added as un-enriched seeds, never auto-enriched). */
   chain_locations: { name: string | null; city: string | null }[];
   /** The venue's OWN "Locations"/"Find us" page URL — the authoritative roster source. */
@@ -264,10 +272,11 @@ Field notes:
 - "name": the venue's clean name WITHOUT the city or branch baked in (e.g. "Joe's Kansas City Bar-B-Que", not "…Bar-B-Que Leawood").
 - "location_label": if this is ONE location of a multi-location business, the branch label only (e.g. "Leawood", "Olathe"); else null. Never fold it into "name".
 - "is_chain": true if this business has more than one physical location. "chain_locations": the OTHER known locations as {name, city} — a quick list ONLY from what you already saw, do NOT search for them (they are enriched separately later). [] if not a chain.
+- "flagship_location": for a multi-location chain, the ORIGINAL / FIRST / flagship location — where the business began. Prefer EXPLICIT signals on the About / Our Story / origin page ("our original location", "where it all began", "the first / flagship location", the founding city/address). Return {"city": ..., "address": ... (street if known, else null), "established": <founding year, e.g. "2014">} — or null if you cannot determine the original location CONFIDENTLY (do NOT guess; a wrong original is worse than none). For a single independent venue, null.
 - "chain_locations_url": if is_chain, the venue's OWN official "Locations"/"Stores"/"Find us" page URL (on their website) — the authoritative roster; else null. Just the URL; do NOT open/scan it here.
 - "lat"/"lng": decimal coordinates if you can verify them, else null.
 
-Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, opening_date, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, chain_locations, chain_locations_url, sources, unknowns.`;
+Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, opening_date, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, flagship_location, chain_locations, chain_locations_url, sources, unknowns.`;
 
 const asArray = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : [];
@@ -347,6 +356,18 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
       .slice(0, 6),
     location_label: asStr(data.location_label),
     is_chain: data.is_chain === true,
+    flagship_location: (() => {
+      const fl = data.flagship_location as
+        | { city?: unknown; address?: unknown; established?: unknown }
+        | null
+        | undefined;
+      if (!fl || typeof fl !== "object") return null;
+      const city = asStr(fl.city);
+      const address = asStr(fl.address);
+      const established = asStr(fl.established);
+      // Only meaningful if it names a place (city or address).
+      return city || address ? { city, address, established } : null;
+    })(),
     chain_locations: Array.isArray(data.chain_locations)
       ? data.chain_locations
           .filter((c) => c && typeof c === "object")

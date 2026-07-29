@@ -19,6 +19,7 @@ import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
+import { ensureFlagshipParent, recordIsFlagship } from "@/lib/admin/flagship";
 import { composeAddress, preferFullerAddress } from "@/lib/admin/address";
 
 export const dynamic = "force-dynamic";
@@ -221,64 +222,100 @@ export async function POST(request: Request) {
     inheritBrandFacts(dossier, parentDossier);
   }
 
-  // ── Chain flagship: DETERMINISTIC detect → seed → roster-stamp (→ pass-2) ──
-  // Seeding + the roster stamp are UNCONDITIONAL for a detected chain parent, so
-  // the flag is never left unset. Pass-2 (the flagship's own-facts pass) runs
-  // ONLY if pass-1 came back thin AND there's search budget left: a rich pass-1
-  // already stands (the known-good ~$0.026 single-pass result) and a thinner
-  // pass-2 must never clobber it — hence the fill-empty MERGE.
+  // ── Chain: the TRUE flagship is the parent, not enrichment order ───────────
+  // A parent record (chain_parent_id null) that pass-1 reveals to be a chain gets
+  // its hierarchy set by the ORIGINAL location (read from the About/origin page),
+  // NOT by which location we happened to enrich first. If we started from a
+  // BRANCH, the real flagship becomes the parent and this branch its sibling.
+  // Seeding + the roster stamp always happen, so the flag is never left unset.
   const isParent = !row.chain_parent_id;
   const detectedChain = isParent && dossier.is_chain;
   const alreadyRostered = Boolean(row.chain_rostered_at);
   let seeded: Awaited<ReturnType<typeof seedChainLocations>> | null = null;
   let rosteredNow = false;
   let twoPass = false;
+  let reassignedToFlagship = false;
+  let recordFlagshipConfirmed = false;
+  let flagshipUnknown = false;
+  let flagshipParentId: string | null = null;
   if (detectedChain && !alreadyRostered) {
-    seeded = await seedChainLocations(
-      ctx.db,
-      restaurantId,
-      dossier.name ?? row.name,
-      dossier.country ?? row.country ?? null,
-      dossier.chain_locations
-    );
-    // Stamp the roster flag NOW — its own step, right after seeding — so siblings
-    // are never left created-but-unflagged even if pass-2 throws below.
-    await ctx.db
-      .from("restaurants")
-      .update({ chain_rostered_at: new Date().toISOString() })
-      .eq("id", restaurantId);
-    rosteredNow = true;
+    const brand = dossier.name ?? row.name;
+    const country = dossier.country ?? row.country ?? null;
 
-    if (missingCoreAnchors(dossier) && searchesLeft() > 0) {
-      const flagshipLead: VenueLead = {
+    // We need the brand facts AND the flagship identity before deciding the
+    // hierarchy. If pass-1 was thin OR didn't name the original, do the focused
+    // About-page pass now (budget permitting) and MERGE fill-empty (never clobber).
+    if ((missingCoreAnchors(dossier) || !dossier.flagship_location) && searchesLeft() > 0) {
+      const aboutLead: VenueLead = {
         ...lead,
         notes:
-          `${dossier.name ?? row.name} is a known multi-location barbecue chain whose locations are ALREADY catalogued. ` +
-          `Do NOT research or spend searches on its other locations. ` +
-          `Read the brand's ABOUT / OUR STORY / HISTORY page or its HOMEPAGE for the founding/established date, founders/pitmaster, cook method, wood/fuel and signature specialities. ` +
-          `Then use this flagship's own location page for its hours, phone and address.`,
+          `${brand} is a multi-location barbecue chain. Read the brand's ABOUT / OUR STORY / HISTORY / origin page (and homepage) for: ` +
+          `the founding/established date, founders/pitmaster, cook method, wood/fuel and signature specialities, ` +
+          `AND which location is the ORIGINAL / first / flagship (its city and street address). ` +
+          `Do NOT spend searches on the other branches' pages.`,
       };
       try {
-        const res2 = await researchDossier(flagshipLead, { maxSearches: searchesLeft() });
-        // MERGE fill-empty — NEVER clobber the rich pass-1 with a thinner pass-2.
+        const res2 = await researchDossier(aboutLead, { maxSearches: searchesLeft() });
         dossier = mergeDossierFacts(dossier, res2.dossier);
-        recordPass("flagship_pass2", res2);
+        recordPass("chain_about", res2);
         twoPass = true;
       } catch {
-        // Pass-2 failed — the flag is already stamped + siblings seeded, so
-        // re-running Enrich takes the already-rostered path. Don't commit thin.
         return NextResponse.json(
           {
-            error:
-              "Chain detected and its locations were seeded, but the flagship's facts pass failed. Re-run Enrich on the flagship to finish it.",
+            error: "Chain detected, but the brand/flagship facts pass failed. Re-run Enrich to finish it.",
             retry_pass2: true,
             is_chain: true,
             is_chain_parent: true,
-            chain_seeds: seeded?.added ?? [],
           },
           { status: 502 }
         );
       }
+    }
+
+    const fl = dossier.flagship_location;
+    recordFlagshipConfirmed = recordIsFlagship(
+      { city: dossier.city ?? row.city, address: dossier.address ?? row.address, location_label: row.location_label },
+      fl
+    );
+
+    if (fl && !recordFlagshipConfirmed) {
+      // Started from a BRANCH — make the true flagship the parent and re-point
+      // this branch (and anything under it) to it.
+      try {
+        const fr = await ensureFlagshipParent(ctx.db, {
+          branchId: restaurantId,
+          brand,
+          country,
+          flagship: fl,
+          brandDossier: dossier,
+        });
+        flagshipParentId = fr.flagshipId;
+        reassignedToFlagship = true;
+        // Seed the rest of the roster UNDER THE FLAGSHIP (dedupes vs the branch +
+        // any siblings; skips the flagship's own venue).
+        seeded = await seedChainLocations(ctx.db, fr.flagshipId, brand, country, dossier.chain_locations);
+        await ctx.db
+          .from("restaurants")
+          .update({ chain_rostered_at: new Date().toISOString() })
+          .eq("id", fr.flagshipId);
+        rosteredNow = true;
+      } catch (e) {
+        return NextResponse.json(
+          { error: e instanceof Error ? e.message : "Flagship reassignment failed." },
+          { status: 500 }
+        );
+      }
+    } else {
+      // This record IS the flagship (confident match), OR the flagship couldn't be
+      // determined — either way it stays the parent. If unknown, it makes NO
+      // origin claim and is flagged for review.
+      flagshipUnknown = !fl;
+      seeded = await seedChainLocations(ctx.db, restaurantId, brand, country, dossier.chain_locations);
+      await ctx.db
+        .from("restaurants")
+        .update({ chain_rostered_at: new Date().toISOString() })
+        .eq("id", restaurantId);
+      rosteredNow = true;
     }
   }
 
@@ -315,16 +352,24 @@ export async function POST(request: Request) {
     }
   }
 
+  // Who is this copy FOR? A sibling (or a branch we just reassigned under the
+  // flagship) writes as a branch and may NEVER claim to be the original. Only a
+  // CONFIRMED flagship — or an already-rostered parent (which, post-reassignment,
+  // is always the flagship) — may write "where it all began". An indeterminate
+  // flagship writes generic chain copy (no origin claim).
+  const isSiblingRow = Boolean(row.chain_parent_id);
+  let writeOpts: { branchOf?: string | null; isFlagship?: boolean } | undefined;
+  if (isSiblingRow || reassignedToFlagship) {
+    writeOpts = { branchOf: dossier.name ?? row.name };
+  } else if (detectedChain) {
+    writeOpts = recordFlagshipConfirmed ? { isFlagship: true } : undefined;
+  } else if (alreadyRostered) {
+    writeOpts = { isFlagship: true };
+  }
+
   let copy;
   try {
-    copy = await writeVenueCopy(
-      dossier,
-      row.chain_parent_id
-        ? { branchOf: dossier.name ?? row.name }
-        : detectedChain || alreadyRostered
-          ? { isFlagship: true }
-          : undefined
-    );
+    copy = await writeVenueCopy(dossier, writeOpts);
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Copywriting failed." }, { status: 502 });
   }
@@ -447,22 +492,29 @@ export async function POST(request: Request) {
   // missing (no address) — NEVER because brand-level facts are absent (they're
   // inherited). The refuse-to-invent guardrail is untouched: the writer still
   // won't fabricate, we've simply supplied it real brand facts to work from.
-  const isSibling = Boolean(row.chain_parent_id);
+  // A reassigned branch is effectively a sibling for the attention check — its
+  // brand facts are inherited, so only its OWN location facts matter.
+  const effectivelySibling = Boolean(row.chain_parent_id) || reassignedToFlagship;
   const locationFactsMissing = !address;
   // If the search budget was blown (an API cap leak), stop trusting the result
   // and flag — never let a runaway pass through silently.
   const searchRunaway = grokSearches > MAX_TOTAL_SEARCHES;
   const attention =
-    overCeiling || searchRunaway || (isSibling ? locationFactsMissing : copy.needs_attention);
+    overCeiling ||
+    searchRunaway ||
+    flagshipUnknown ||
+    (effectivelySibling ? locationFactsMissing : copy.needs_attention);
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
     ? overCeiling
       ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${runCeiling} ceiling.`
       : searchRunaway
         ? `Search budget exceeded (${grokSearches} > ${MAX_TOTAL_SEARCHES}) — stopped and flagged; check enrichment_debug.`
-        : isSibling
-          ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
-          : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
+        : flagshipUnknown
+          ? "Chain detected but the original/flagship location couldn't be determined confidently — no location claims to be the original; review and set the flagship."
+          : effectivelySibling
+            ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
+            : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
     : null;
 
   // For an approved (live) venue, hold changes as pending — but only if there's
@@ -508,10 +560,16 @@ export async function POST(request: Request) {
     // pass-2 already ran server-side, so the gateway is now optional (find any
     // extra branches beyond what pass-1 saw), not required for a rich flagship.
     is_chain: detectedChain,
-    is_chain_parent: isParent,
+    // If we reassigned, THIS record is now a branch — not the chain parent — so
+    // the roster gateway must not offer itself here.
+    is_chain_parent: isParent && !reassignedToFlagship,
     // Pre-request value: still surfaces the (now optional) roster gateway once.
     chain_already_rostered: alreadyRostered,
     rostered_now: rosteredNow,
+    // Flagship designation — the true "home" record, independent of enrich order.
+    reassigned_to_flagship: reassignedToFlagship,
+    flagship_id: flagshipParentId,
+    flagship_unknown: flagshipUnknown,
     brand: detectedChain ? dossier.name ?? row.name : null,
     chain_locations_url: detectedChain ? dossier.chain_locations_url : null,
     // Honest counts from the seed pass (the full-roster gateway can find more).
