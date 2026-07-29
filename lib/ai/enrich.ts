@@ -244,16 +244,15 @@ export interface VenueDossier {
 
 const DOSSIER_SYSTEM = `You are a factual barbecue-venue researcher for The BBQ Atlas, with live web-search and browsing tools. Research ONE venue and return a strict, FACTS-ONLY dossier. You are the researcher, not the writer — produce NO marketing or descriptive copy.
 
-BE EFFICIENT — targeted, NOT exhaustive. This is a HARD COST CONTROL: at most 3 web searches total for this venue (the tool will be cut off after 3). Spend them where the facts you need actually live:
+BE EFFICIENT — THIS VENUE ONLY. HARD LIMIT: at most 3 web searches total, then STOP and return whatever facts you have. You are researching ONE venue's OWN facts and story. Do NOT enumerate a chain's other locations, and do NOT hunt for a chain's "original/flagship" — those are a SEPARATE step and must NOT consume searches here. Every search goes toward THIS venue.
 
-WHERE THE FACTS LIVE — read the RIGHT page for each fact:
-- BRAND-STORY facts (established/founding, founders/pitmaster, cook method, wood/fuel, specialities, what_it_is/character) live on the venue's ABOUT / OUR STORY / HISTORY page or its HOMEPAGE — read one of THOSE for them. They are almost NEVER on a per-location landing page.
-- THIS LOCATION's facts (address, hours, phone) live on the specific location page (e.g. "/austin", "/dallas").
-- A thin per-location landing stub (address + hours only) must NEVER be your ONLY source. If your first hit is a "/location" page, you have the address/hours — now OPEN the site's About/Our-Story/History page or its homepage (try the root domain) to get the founding, pitmaster, method and specialities BEFORE you stop.
-- CHAINS especially: the per-location page is a stub; the story is on the brand's About/homepage. Read BOTH — the About page for the brand-level facts and the location page for this location's specifics.
+WHERE THIS VENUE's facts live — read its OWN site (spend ~2–3 searches, no more):
+- Its HOMEPAGE and ABOUT / OUR STORY / HISTORY page — for the story facts (established/founding, founders/pitmaster, cook method, wood/fuel, specialities, what_it_is/character).
+- Its OWN contact/location page — for this venue's address, hours, phone.
+- Its INSTAGRAM — handle + a couple of recent public posts.
+One search of a map/listing is allowed ONLY if the site lacks an address or hours (plain facts only; never cite Google Maps). Query → read → move on. If a field isn't found within the 3-search budget, set it null and name it in "unknowns" — NEVER guess or invent.
 
-Prioritise: (1) the venue's ABOUT / OUR STORY / HISTORY page or homepage — for the brand story; (2) the specific location page — for this location's address/hours/phone; (3) ONE map/listing ONLY if the site lacks an address or hours (cross-check plain facts only — never cite Google Maps); (4) the venue's INSTAGRAM (handle + a couple of recent public posts).
-Query → read → move on. Do NOT open every link, but DO make sure you've read a story/about/homepage — not just a location stub — before setting the story fields null. If a field genuinely isn't found within the budget, set it null and name it in "unknowns". Never cite Google Maps as a source.
+CHAIN SIGNAL — cheap, costs NO extra search: if the venue's own site clearly serves MULTIPLE locations (e.g. it has a "Locations"/"Find us" nav link), set "is_chain": true and put that locations page's URL in "chain_locations_url" ONLY if the link is right there on the page you already read. Do NOT open or scan that page, do NOT list the other branches, do NOT identify an "original". Leave "chain_locations": [] and "flagship_location": null — a separate Build-roster step reads the locations page properly later.
 
 COPYRIGHT / SOURCING RULE: collect FACTS ONLY (facts aren't copyrightable). NEVER reproduce third-party expressive content — no review text, no editorial blurbs, no photos — from Google or anywhere. Do not scrape any site en masse. The dossier is raw facts + source URLs; all published copy is written fresh by us later.
 
@@ -271,9 +270,10 @@ Field notes:
 - "recent_instagram_posts": up to 6 recent PUBLIC Instagram post/reel permalinks from this venue, for an on-page photo section. [] if none found.
 - "name": the venue's clean name WITHOUT the city or branch baked in (e.g. "Joe's Kansas City Bar-B-Que", not "…Bar-B-Que Leawood").
 - "location_label": if this is ONE location of a multi-location business, the branch label only (e.g. "Leawood", "Olathe"); else null. Never fold it into "name".
-- "is_chain": true if this business has more than one physical location. "chain_locations": the OTHER known locations as {name, city} — a quick list ONLY from what you already saw, do NOT search for them (they are enriched separately later). [] if not a chain.
-- "flagship_location": for a multi-location chain, the ORIGINAL / FIRST / flagship location — where the business began. Prefer EXPLICIT signals on the About / Our Story / origin page ("our original location", "where it all began", "the first / flagship location", the founding city/address). Return {"city": ..., "address": ... (street if known, else null), "established": <founding year, e.g. "2014">} — or null if you cannot determine the original location CONFIDENTLY (do NOT guess; a wrong original is worse than none). For a single independent venue, null.
-- "chain_locations_url": if is_chain, the venue's OWN official "Locations"/"Stores"/"Find us" page URL (on their website) — the authoritative roster; else null. Just the URL; do NOT open/scan it here.
+- "is_chain": true ONLY as a cheap signal that the business appears to run more than one physical location (e.g. a "Locations" nav link on its site) — do NOT search to confirm. false for a single independent venue.
+- "chain_locations": ALWAYS [] here — never enumerate other branches (a separate step does that).
+- "flagship_location": ALWAYS null here — never hunt for the original (a separate step + a human decide that).
+- "chain_locations_url": the URL of the site's "Locations"/"Find us" page IF that link is visible on a page you already read; else null. Do NOT open or scan it.
 - "lat"/"lng": decimal coordinates if you can verify them, else null.
 
 Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, opening_date, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, flagship_location, chain_locations, chain_locations_url, sources, unknowns.`;
@@ -631,7 +631,7 @@ Output ONLY JSON: {"hook": "...", "description": "..."} — or {"needs_attention
  */
 export async function writeVenueCopy(
   dossier: VenueDossier,
-  opts?: { branchOf?: string | null; isFlagship?: boolean }
+  opts?: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite?: boolean }
 ): Promise<VenueCopy> {
   const label = dossier.location_label || dossier.city || "this";
   // For one location of a chain: the brand-level facts are SHARED across every
@@ -643,7 +643,12 @@ export async function writeVenueCopy(
     : opts?.isFlagship
       ? `\n\nThis is the FLAGSHIP / original record for a multi-location barbecue business — the brand's home. Its "established" year is the business's founding, and you may write it as where the whole thing began. Other locations are covered separately.`
       : "";
-  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}
+  // The writer is NON-NEGOTIABLE on the enrich path: even a sparse dossier must
+  // yield honest house-voice copy — never an empty/needs_attention refusal.
+  const writeMandate = opts?.alwaysWrite
+    ? `\n\nIMPORTANT — you MUST write copy: ALWAYS return a hook and a 2-3 sentence description built from the facts present. Do NOT return needs_attention and do NOT leave hook/description empty. Even a spare venue deserves honest copy — write plainly from what IS known (its name, city, what_it_is, style, and any facts given), and simply say less where facts are missing. Still NEVER invent a fact, dish, date, or person.`
+    : "";
+  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}${writeMandate}
 
 DOSSIER:
 ${JSON.stringify(dossier)}
@@ -667,10 +672,14 @@ Return ONLY the JSON described in your instructions.`;
 
   const description = asStr(data.description);
   const hook = asStr(data.hook);
+  // In alwaysWrite mode the writer must produce copy: only flag attention if it
+  // returned genuinely NOTHING (both empty) despite the mandate.
   const flaggedThin = data.needs_attention === true || (!description && !hook);
   const dossierThin =
     !dossier.what_it_is && !dossier.website && !dossier.instagram;
-  const needs_attention = flaggedThin || (dossierThin && !description);
+  const needs_attention = opts?.alwaysWrite
+    ? !description && !hook
+    : flaggedThin || (dossierThin && !description);
 
   return {
     hook,

@@ -271,12 +271,17 @@ export async function POST(request: Request) {
   // the original. Only a CONFIRMED flagship (one the operator has picked) may
   // write "where it all began". Everything else — including a chain_candidate
   // that hasn't had a flagship picked — writes plain single-venue copy.
+  // alwaysWrite: the writer is PROTECTED — it always produces house-voice copy
+  // from the facts on hand, even if research came back thin. A single-venue
+  // enrich must never return empty copy.
   const isSiblingRow = Boolean(row.chain_parent_id);
-  let writeOpts: { branchOf?: string | null; isFlagship?: boolean } | undefined;
+  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean } = {
+    alwaysWrite: true,
+  };
   if (isSiblingRow) {
-    writeOpts = { branchOf: dossier.name ?? row.name };
+    writeOpts.branchOf = dossier.name ?? row.name;
   } else if (isConfirmedFlagship) {
-    writeOpts = { isFlagship: true };
+    writeOpts.isFlagship = true;
   }
 
   let copy;
