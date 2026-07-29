@@ -7,8 +7,6 @@ import {
   researchInstagram,
   writeVenueCopy,
   inheritBrandFacts,
-  missingCoreAnchors,
-  mergeDossierFacts,
   matchBbqStyle,
   priceBandToLevel,
   mapSocials,
@@ -180,7 +178,6 @@ export async function POST(request: Request) {
   let gCost = 0;
   const consulted = new Set<string>();
   const passLog: Array<Record<string, unknown>> = [];
-  const searchesLeft = () => Math.max(0, MAX_TOTAL_SEARCHES - grokSearches);
   const recordPass = (
     label: string,
     res: {
@@ -235,37 +232,13 @@ export async function POST(request: Request) {
   // Looks chain-like but its roster hasn't been built yet → offer "Build roster".
   const chainCandidate = isParent && dossier.is_chain && !alreadyRostered;
 
-  // ── Retry-on-thin: fire AT MOST ONCE, only within the search budget ────────
-  // If a parent/standalone dossier still lacks core anchors, the research likely
-  // read a per-location stub, not the About/story page. ONE more steered search
-  // — never a loop, never past the budget — MERGED fill-empty. Siblings inherit
-  // brand facts, so this is parents/standalone only.
-  let retriedThin = false;
-  if (!row.chain_parent_id && missingCoreAnchors(dossier) && searchesLeft() > 0) {
-    const site = dossier.website ?? lead.website ?? null;
-    let root: string | null = null;
-    try {
-      if (site) root = new URL(site).origin;
-    } catch {
-      root = null;
-    }
-    const retryLead: VenueLead = {
-      ...lead,
-      website: site ?? undefined,
-      notes:
-        `Read ${dossier.name ?? row.name}'s OWN About / Our Story / History page or its HOMEPAGE` +
-        (root ? ` — start at ${root}` : "") +
-        ` for the FOUNDING/established year, PITMASTER/owner(s), COOK METHOD and WOOD/FUEL, and signature SPECIALITIES. These live on the story/homepage, NOT a per-location stub.`,
-    };
-    try {
-      const retry = await researchDossier(retryLead, { maxSearches: searchesLeft() });
-      dossier = mergeDossierFacts(dossier, retry.dossier);
-      recordPass("retry_thin", retry);
-      retriedThin = true;
-    } catch {
-      // Keep what we have — the honest "needs attention" flag is the final fallback.
-    }
-  }
+  // NO retry-on-thin. The single-venue enrich makes EXACTLY ONE search-enabled
+  // Grok call — that is the real, structural cap on our side (the number of
+  // search-enabled calls is fixed at 1; there is no second pass to double the
+  // count). If pass 1 came back thin, we hand what we have to the writer, which
+  // runs in `alwaysWrite` mode and produces concise honest copy from the facts
+  // present — a thin venue getting three tight sentences is the correct outcome,
+  // not a trigger for more searching.
 
   // Who is this copy FOR? A sibling writes as a branch and may NEVER claim to be
   // the original. Only a CONFIRMED flagship (one the operator has picked) may
@@ -392,7 +365,7 @@ export async function POST(request: Request) {
       search_cost: round4(grokSearches * 0.005),
       total_searches: grokSearches,
       passes: passLog.length,
-      action: retriedThin ? "enrich (retry)" : "enrich",
+      action: "enrich",
     },
     enrichment_model: `${grokModel} + ${claudeModel}`,
     enrichment_sources: sources.length ? sources : null,
@@ -468,7 +441,6 @@ export async function POST(request: Request) {
     copy: { hook: copy.hook, description: copy.description },
     cost: thisCost,
     over_ceiling: overCeiling,
-    retried_thin: retriedThin,
     sources_count: sources.length,
     // Step 1 detection ONLY: a soft "looks like a chain — build roster?" flag.
     // No siblings created, no flagship picked. Building the roster is the operator's
