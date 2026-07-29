@@ -18,6 +18,7 @@ import {
 } from "@/lib/ai/enrich";
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { geocodeAddress } from "@/lib/geo/geocode";
+import { canonicalCountry } from "@/lib/constants/countries";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
 import { ensureFlagshipParent, recordIsFlagship, populateFlagship } from "@/lib/admin/flagship";
@@ -551,7 +552,9 @@ export async function POST(request: Request) {
     if (country_code) proposed.country_code = country_code;
   }
   if (city) proposed.city = city;
-  if (country) proposed.country = country;
+  // Canonical country name (one chip per country; stops the USA/United States,
+  // Mexico/México split re-appearing as we enrich).
+  if (country) proposed.country = canonicalCountry(country);
 
   // Metadata always commits (cost, dossier, model). needs_attention flags the
   // draft copy or a cost overrun.

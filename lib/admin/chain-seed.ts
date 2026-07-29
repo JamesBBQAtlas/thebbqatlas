@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { composeAddress, normStreet, normCity } from "@/lib/admin/address";
+import { canonicalCountry } from "@/lib/constants/countries";
 
 /** A location to seed: a branch label/name, optional street address, and city. */
 export interface SeedLocation {
@@ -128,7 +129,7 @@ export async function seedChainLocations(
         lng: 0,
         address: composed,
         city: loc.city || "",
-        country: country || "",
+        country: canonicalCountry(country),
         price_level: 2,
         hero_image_url: "",
         hero_source: "none",

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { mergeDossierFacts, missingCoreAnchors, type VenueDossier } from "@/lib/ai/enrich";
 import { populateFlagship } from "@/lib/admin/flagship";
+import { revalidateVenues } from "@/lib/cache/venues";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -135,6 +136,7 @@ export async function POST(request: Request) {
     grokModel: "set-flagship",
   });
 
+  revalidateVenues();
   return NextResponse.json({
     ok: true,
     flagship_id: chosen.id,

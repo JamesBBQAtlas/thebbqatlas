@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { BBQ_STYLES } from "@/lib/constants/styles";
+import { revalidateVenues } from "@/lib/cache/venues";
 
 export const dynamic = "force-dynamic";
 
@@ -65,5 +66,6 @@ export async function POST(request: Request) {
     .update(patch)
     .eq("id", restaurantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  revalidateVenues();
   return NextResponse.json({ ok: true, ...patch });
 }

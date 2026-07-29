@@ -12,6 +12,58 @@ export function flagEmoji(code?: string | null): string {
   );
 }
 
+/**
+ * Canonical country NAME per country — one value each, so the directory shows a
+ * single chip per country and counts add up. Variants (USA / U.S. / America,
+ * México, UK / Britain, UAE, …) all collapse to the standard English name. Both
+ * the seed data and the enrichment/roster output are normalised through this, so
+ * it can't re-split as we enrich.
+ */
+const COUNTRY_CANONICAL: Record<string, string> = {
+  usa: "United States",
+  us: "United States",
+  "united states": "United States",
+  "united states of america": "United States",
+  america: "United States",
+  "u s": "United States",
+  "u s a": "United States",
+  uk: "United Kingdom",
+  "united kingdom": "United Kingdom",
+  "great britain": "United Kingdom",
+  britain: "United Kingdom",
+  england: "United Kingdom",
+  scotland: "United Kingdom",
+  wales: "United Kingdom",
+  "northern ireland": "United Kingdom",
+  mexico: "Mexico",
+  uae: "United Arab Emirates",
+  "united arab emirates": "United Arab Emirates",
+  korea: "South Korea",
+  "south korea": "South Korea",
+  "republic of korea": "South Korea",
+  "the netherlands": "Netherlands",
+  holland: "Netherlands",
+};
+
+/**
+ * Normalise a free-text country to its single canonical name. Diacritics and
+ * punctuation are stripped for matching ("México" → "Mexico"); an unknown value
+ * is returned trimmed so we never lose data.
+ */
+export function canonicalCountry(country: string | null | undefined): string {
+  if (!country) return "";
+  const raw = country.trim();
+  if (!raw) return "";
+  const key = raw
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[.,]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return COUNTRY_CANONICAL[key] ?? raw;
+}
+
 /** Display name overrides for the stored short country text, where useful. */
 export const COUNTRY_DISPLAY: Record<string, string> = {
   US: "United States",

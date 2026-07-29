@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { composeAddress, normStreet, normCity } from "@/lib/admin/address";
+import { canonicalCountry } from "@/lib/constants/countries";
 import {
   mergeDossierFacts,
   matchBbqStyle,
@@ -214,7 +215,7 @@ export async function ensureFlagshipParent(
         lng: 0,
         address: composed,
         city: flagship.city || "",
-        country: country || "",
+        country: canonicalCountry(country),
         price_level: 2,
         hero_image_url: "",
         hero_source: "none",

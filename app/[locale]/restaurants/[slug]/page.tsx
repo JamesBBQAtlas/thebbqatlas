@@ -20,6 +20,7 @@ import {
 import { resolveCountryCode, countryName } from "@/lib/constants/countries";
 import { haversineKm } from "@/lib/utils/geo";
 import { FlagIcon } from "@/components/ui/FlagIcon";
+import { SocialIcon, SOCIAL_LABELS, type SocialKind } from "@/components/ui/SocialIcon";
 import { TrackedLink } from "@/components/monetization/TrackedLink";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
 import { CheckInButton } from "@/components/restaurants/CheckInButton";
@@ -161,13 +162,15 @@ export default async function RestaurantPage({ params }: Props) {
   const menu = groupOfferings(restaurant.offerings);
   const alcohol = restaurant.alcohol as AlcoholPolicy | null;
 
-  const socials = [
-    { label: "Instagram", href: restaurant.instagram_url },
-    { label: "X", href: restaurant.x_url },
-    { label: "Facebook", href: restaurant.facebook_url },
-    { label: "TikTok", href: restaurant.tiktok_url },
-    { label: "YouTube", href: restaurant.youtube_url },
-  ].filter((s): s is { label: string; href: string } => Boolean(s.href));
+  const socials = (
+    [
+      { kind: "instagram", label: SOCIAL_LABELS.instagram, href: restaurant.instagram_url },
+      { kind: "x", label: SOCIAL_LABELS.x, href: restaurant.x_url },
+      { kind: "facebook", label: SOCIAL_LABELS.facebook, href: restaurant.facebook_url },
+      { kind: "tiktok", label: SOCIAL_LABELS.tiktok, href: restaurant.tiktok_url },
+      { kind: "youtube", label: SOCIAL_LABELS.youtube, href: restaurant.youtube_url },
+    ] as const
+  ).filter((s): s is { kind: SocialKind; label: string; href: string } => Boolean(s.href));
 
   // Venue imagery hierarchy (copyright-safe): (1) an approved uploaded photo
   // from our moderated media system; else (2) the official Instagram embed (its
@@ -647,9 +650,12 @@ export default async function RestaurantPage({ params }: Props) {
                     href={s.href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="rounded-full border border-border-default px-3.5 py-1.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+                    aria-label={s.label}
+                    title={s.label}
+                    className="inline-flex items-center gap-2 rounded-full border border-border-default px-3.5 py-1.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
                   >
-                    {s.label}
+                    <SocialIcon kind={s.kind} className="h-4 w-4" />
+                    <span>{s.label}</span>
                   </a>
                 ))}
               </div>

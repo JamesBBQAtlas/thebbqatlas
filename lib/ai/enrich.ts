@@ -412,9 +412,11 @@ export const BRAND_LEVEL_DOSSIER_FIELDS = [
 /**
  * Seed a chain SIBLING's dossier with its parent's verified brand-level facts,
  * filling ONLY the fields the sibling's own (location-focused) research left
- * empty. Location-specific facts — address, hours, phone, coordinates, this
- * branch's own socials/label — are NEVER touched. Mutates and returns the
- * sibling dossier. A sibling with no parent dossier is returned unchanged.
+ * empty. A chain shares ONE brand Instagram/socials, so those are inherited too
+ * (never make the operator run "Find IG" per branch for a handle we already
+ * have). Location-specific facts — address, hours, phone, coordinates, label —
+ * are NEVER touched. Mutates and returns the sibling dossier; a sibling with no
+ * parent dossier is returned unchanged.
  */
 export function inheritBrandFacts(
   sibling: VenueDossier,
@@ -430,11 +432,13 @@ export function inheritBrandFacts(
     "wood_fuel",
     "price_band",
     "setting_vibe",
+    // Brand socials — one shared Instagram/handle across every outpost.
+    "instagram",
   ] as const;
   for (const f of strFields) {
     if (!sibling[f] && parent[f]) sibling[f] = parent[f] as never;
   }
-  const arrFields = ["specialities", "also_known_as", "awards_press"] as const;
+  const arrFields = ["specialities", "also_known_as", "awards_press", "other_socials"] as const;
   for (const f of arrFields) {
     const cur = sibling[f];
     const src = parent[f];

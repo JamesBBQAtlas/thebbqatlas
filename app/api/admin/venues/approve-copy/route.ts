@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
+import { revalidateVenues } from "@/lib/cache/venues";
 
 export const dynamic = "force-dynamic";
 
@@ -42,5 +43,7 @@ export async function POST(request: Request) {
     .update(patch)
     .eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+  // Approving changes live copy/fields — refresh the public read path now.
+  if (action === "approve") revalidateVenues();
   return NextResponse.json({ ok: true, action });
 }

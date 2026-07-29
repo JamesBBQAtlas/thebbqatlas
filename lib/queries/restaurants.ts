@@ -1,6 +1,13 @@
+import { unstable_cache } from "next/cache";
 import { createAnonClient } from "@/lib/supabase/anon";
 import type { Restaurant, SignatureDish, Review } from "@/lib/types/database";
 import { FALLBACK_RESTAURANTS } from "@/lib/data/fallback-restaurants";
+
+/** Cache tag for every public read of approved venues — busted on any admin
+ *  edit that changes live data (publish, approve, enrich commit, set-flagship,
+ *  hero) so the directory/map/venue pages refresh within seconds, not on the
+ *  1-hour ISR window. See lib/cache/venues.ts. */
+export const VENUES_TAG = "venues";
 
 async function getSupabaseRestaurants(): Promise<Restaurant[] | null> {
   try {
@@ -23,8 +30,15 @@ async function getSupabaseRestaurants(): Promise<Restaurant[] | null> {
   }
 }
 
+// On-demand-revalidatable data cache: the DB read is tagged `venues`, so an
+// admin publish/edit that calls revalidateTag("venues") refreshes it at once.
+const getSupabaseRestaurantsCached = unstable_cache(getSupabaseRestaurants, ["approved-restaurants"], {
+  tags: [VENUES_TAG],
+  revalidate: 3600,
+});
+
 export async function getRestaurants(): Promise<Restaurant[]> {
-  const data = await getSupabaseRestaurants();
+  const data = await getSupabaseRestaurantsCached();
   return data ?? FALLBACK_RESTAURANTS;
 }
 
@@ -33,35 +47,45 @@ export async function getFeaturedRestaurants(limit = 3): Promise<Restaurant[]> {
   return all.filter((r) => r.is_featured).slice(0, limit);
 }
 
+// The DB half of the slug lookup, tagged `venues` so a publish/edit refreshes
+// the venue page within seconds (not on the 1-hour ISR window).
+const getRestaurantBySlugCached = unstable_cache(
+  async (slug: string): Promise<Restaurant | null> => {
+    try {
+      const supabase = createAnonClient();
+      const { data } = await supabase
+        .from("restaurants")
+        .select("*")
+        .eq("slug", slug)
+        .eq("status", "approved")
+        .single();
+      if (data) return data as Restaurant;
+    } catch {
+      // fall through
+    }
+    // Prefix match: "franklin-barbecue" → "franklin-barbecue-austin"
+    try {
+      const supabase = createAnonClient();
+      const { data } = await supabase
+        .from("restaurants")
+        .select("*")
+        .like("slug", `${slug}-%`)
+        .eq("status", "approved")
+        .limit(1)
+        .single();
+      if (data) return data as Restaurant;
+    } catch {
+      // fall through
+    }
+    return null;
+  },
+  ["restaurant-by-slug"],
+  { tags: [VENUES_TAG], revalidate: 3600 }
+);
+
 export async function getRestaurantBySlug(slug: string): Promise<Restaurant | null> {
-  try {
-    const supabase = createAnonClient();
-    const { data } = await supabase
-      .from("restaurants")
-      .select("*")
-      .eq("slug", slug)
-      .eq("status", "approved")
-      .single();
-    if (data) return data as Restaurant;
-  } catch {
-    // fallback
-  }
-
-  // Prefix match: "franklin-barbecue" → "franklin-barbecue-austin"
-  try {
-    const supabase = createAnonClient();
-    const { data } = await supabase
-      .from("restaurants")
-      .select("*")
-      .like("slug", `${slug}-%`)
-      .eq("status", "approved")
-      .limit(1)
-      .single();
-    if (data) return data as Restaurant;
-  } catch {
-    // fallback
-  }
-
+  const data = await getRestaurantBySlugCached(slug);
+  if (data) return data;
   // Fallback data: exact then prefix
   return (
     FALLBACK_RESTAURANTS.find((r) => r.slug === slug) ??

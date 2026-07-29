@@ -3,6 +3,8 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { uniqueRestaurantSlug, resolveOrCreateBrand } from "@/lib/admin/venues";
 import { BBQ_STYLES } from "@/lib/constants/styles";
+import { revalidateVenues } from "@/lib/cache/venues";
+import { canonicalCountry } from "@/lib/constants/countries";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -83,7 +85,7 @@ export async function POST(request: Request) {
       ? Math.round(v.price_level)
       : 2;
   const city = (v.city || geo.city || "").trim();
-  const country = (v.country || geo.country || "").trim();
+  const country = canonicalCountry(v.country || geo.country || "");
   const slug = await uniqueRestaurantSlug(
     ctx.db,
     v.location_label ? `${name} ${v.location_label}` : name
@@ -167,6 +169,7 @@ export async function POST(request: Request) {
     // ignore — provenance is secondary
   }
 
+  if (data.status === "approved") revalidateVenues();
   return NextResponse.json({ id: data.id, slug: data.slug, status: data.status });
 }
 
@@ -203,5 +206,7 @@ export async function PATCH(request: Request) {
     .update({ status })
     .eq("id", restaurantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Publishing/unpublishing changes what the public site shows — refresh now.
+  revalidateVenues();
   return NextResponse.json({ ok: true, status });
 }
