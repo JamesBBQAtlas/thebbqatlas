@@ -187,7 +187,11 @@ export async function POST(request: Request) {
   try {
     copy = await writeVenueCopy(
       dossier,
-      row.chain_parent_id ? { branchOf: dossier.name ?? row.name } : undefined
+      row.chain_parent_id
+        ? { branchOf: dossier.name ?? row.name }
+        : dossier.is_chain || row.chain_rostered_at
+          ? { isFlagship: true }
+          : undefined
     );
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Copywriting failed." }, { status: 502 });

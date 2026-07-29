@@ -203,7 +203,13 @@ export interface VenueDossier {
   instagram: string | null;
   other_socials: string[];
   hours: Record<string, string> | null;
+  /** When the overall BUSINESS/BRAND was founded (brand-level; inherited by
+   *  chain siblings). e.g. "2014". */
   established: string | null;
+  /** When THIS specific location/branch opened, if different from the brand's
+   *  founding (location-level; NEVER inherited). A branch that opened years
+   *  after the brand must not read as "open since [founding year]". */
+  opening_date: string | null;
   founders_pitmaster: string | null;
   bbq_style: string | null;
   specialities: string[];
@@ -242,6 +248,8 @@ For anything you cannot verify within the budget, use null (or [] for lists) and
 
 Field notes:
 - "what_it_is": ONE factual line (e.g. "Central Texas barbecue joint and butcher shop"). Not a description.
+- "established": when the overall BUSINESS/BRAND was founded — its origin year (e.g. "2014"). This is a brand-level fact.
+- "opening_date": when THIS SPECIFIC location/branch opened, ONLY if you can verify it AND it differs from the brand's founding (e.g. a 2019 branch of a brand founded in 2014). For a single independent venue, or the original/flagship location, leave this null (its opening IS the brand's founding). NEVER guess.
 - "hours": an object keyed mon,tue,wed,thu,fri,sat,sun with strings like "11:00-20:00" or "Closed", or null. Note "sells out early"/variable in "ordering_notes".
 - "bbq_style": the real-world style in plain words (e.g. "Central Texas", "Carolina", "Kansas City", "asado", "Korean", "braai").
 - "price_band": one of £, ££, £££, ££££ or null.
@@ -254,7 +262,7 @@ Field notes:
 - "chain_locations_url": if is_chain, the venue's OWN official "Locations"/"Stores"/"Find us" page URL (on their website) — the authoritative roster; else null. Just the URL; do NOT open/scan it here.
 - "lat"/"lng": decimal coordinates if you can verify them, else null.
 
-Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, chain_locations, chain_locations_url, sources, unknowns.`;
+Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, opening_date, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, chain_locations, chain_locations_url, sources, unknowns.`;
 
 const asArray = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : [];
@@ -310,6 +318,7 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
     other_socials: asArray(data.other_socials),
     hours,
     established: asStr(data.established),
+    opening_date: asStr(data.opening_date),
     founders_pitmaster: asStr(data.founders_pitmaster),
     bbq_style: asStr(data.bbq_style),
     specialities: asArray(data.specialities),
@@ -514,6 +523,8 @@ const COPY_SYSTEM = `You are the staff writer for The BBQ Atlas. Write in ONE ho
 
 Input: a verified facts dossier (JSON) for one venue. Write (1) a one-line HOOK and (2) a 2-3 short-paragraph DESCRIPTION using ONLY facts in the dossier. If \`unknowns\` lists something, write around it — never invent a fact, dish, date, or person. No ratings/scores. NEVER name Ron Swanson, the TV show he appeared in, its characters, or any of its places/features — that sensibility inspires us, but the source is never mentioned in the output. Keep proper nouns and figures accurate. Structured fields (address/phone/hours) are not yours — leave them factual. If the dossier is too thin to write with a genuine point of view, return {"needs_attention": true, "reason": "..."} instead of padding.
 
+DATES — read carefully. "established" is when the BRAND/business was founded (its origin). "opening_date" is when THIS PARTICULAR location opened. For a multi-location business these can differ: a branch may have opened years after the brand was founded. NEVER write that a specific branch has operated "since [established year]" unless that IS this location's own opening. Attribute a founding year to the business/brand ("the barbecue joint the Blacks started in 2014"), and use "opening_date" for when a given branch arrived ("this outpost opened in 2019"). If "opening_date" is null and this is a branch, don't state when this location opened at all.
+
 Write in the venue's OWN locale's English, matching the dossier's "country": a US venue uses US spelling and vocabulary ("gas station", not "petrol station"; "sidewalk", "fries"), a UK/Ireland venue uses UK English, etc. Be consistent within the piece.
 
 Match the register of these two reference examples:
@@ -532,7 +543,7 @@ Output ONLY JSON: {"hook": "...", "description": "..."} — or {"needs_attention
  */
 export async function writeVenueCopy(
   dossier: VenueDossier,
-  opts?: { branchOf?: string | null }
+  opts?: { branchOf?: string | null; isFlagship?: boolean }
 ): Promise<VenueCopy> {
   const label = dossier.location_label || dossier.city || "this";
   // For one location of a chain: the brand-level facts are SHARED across every
@@ -540,8 +551,10 @@ export async function writeVenueCopy(
   // identity through the lens of THIS specific branch — never a blurb that would
   // fit any other location (§0 "never clone a blurb").
   const branchNote = opts?.branchOf
-    ? `\n\nThis venue is the ${label} location of ${opts.branchOf}, a multi-location barbecue business. The dossier's brand-level facts — style, pitmaster/founders, history, cook method, wood/fuel, specialities, character — are SHARED across every outpost; treat them as real, known facts and convey that shared identity. But write copy that is SPECIFIC to THIS ${label} location: give it its own opening and angle, weaving in what's distinct here (its address, city, hours, setting) so the piece could not be mistaken for another branch. Do NOT invent any location-specific fact you weren't given.`
-    : "";
+    ? `\n\nThis venue is the ${label} location of ${opts.branchOf}, a multi-location barbecue business — NOT the original. The dossier's brand-level facts — style, pitmaster/founders, history, cook method, wood/fuel, specialities, character — are SHARED across every outpost; treat them as real, known facts and convey that shared identity. But write copy that is SPECIFIC to THIS ${label} location: give it its own opening and angle, weaving in what's distinct here (its address, city, hours, setting) so the piece could not be mistaken for another branch. The "established" year is the BRAND's founding, not this branch's — do NOT imply this outpost has existed that long; only "opening_date" tells you when THIS location opened. Do NOT invent any location-specific fact you weren't given.`
+    : opts?.isFlagship
+      ? `\n\nThis is the FLAGSHIP / original record for a multi-location barbecue business — the brand's home. Its "established" year is the business's founding, and you may write it as where the whole thing began. Other locations are covered separately.`
+      : "";
   const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}
 
 DOSSIER:

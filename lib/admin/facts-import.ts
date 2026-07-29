@@ -61,6 +61,7 @@ export function rowToDossier(row: Record<string, string>): VenueDossier {
     other_socials: list(row["other_socials"]),
     hours: null, // sheet hours are free text; captured in ordering_notes below
     established: g("established"),
+    opening_date: g("opening_date", "location_opened"),
     founders_pitmaster: g("founders_pitmaster", "pitmaster_owner"),
     bbq_style: g("bbq_style"),
     specialities: list(row["specialities"]),
