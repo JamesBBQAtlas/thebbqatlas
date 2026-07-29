@@ -129,9 +129,12 @@ export default async function ListingsPage() {
     await Promise.all([
       db
         .from("restaurants")
-        .select(
-          "id, name, slug, city, country, style, category, enriched_at, status, address, price_level, website, phone, hours, instagram_url, instagram_handle, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, lat, lng, hero_image_url, hero_source, hook, description, pending_changes, enrichment_cost, enrichment_cost_breakdown, chain_parent_id, chain_rostered_at, dossier, needs_attention, attention_reason, location_label, created_at, brand_id"
-        )
+        .select("*")
+        // Stable order so a status change (enrich/approve/roster) never re-sorts a
+        // row under the operator — the hub groups by chain but keeps this order.
+        // (select("*") also picks up flagship_unset / chain_candidate, which the
+        // old explicit column list omitted — that's why "Build roster" never showed.)
+        .order("created_at", { ascending: true })
         .limit(2000),
       count(db, "check_ins"),
       count(db, "saved_spots"),

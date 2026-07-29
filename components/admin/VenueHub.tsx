@@ -236,7 +236,9 @@ export function VenueHub({
       const anchor = () => {
         const el = rowRefs.current.get(acted);
         if (el) {
-          el.scrollIntoView({ block: "center", behavior: "auto" });
+          // "nearest" scrolls the minimum needed — if the row is already visible
+          // (the common case now that order is stable), the viewport does NOT move.
+          el.scrollIntoView({ block: "nearest", behavior: "auto" });
           setHighlightId(acted);
           window.setTimeout(() => setHighlightId((cur) => (cur === acted ? null : cur)), 2200);
         } else if (tries < 10) {
@@ -588,7 +590,8 @@ export function VenueHub({
   async function buildRoster(v: HubVenue) {
     keepScroll();
     markActed(v.id);
-    setRowResult((p) => ({ ...p, [v.id]: {} }));
+    // Live feedback so the operator never stares at an unchanged screen.
+    setRowResult((p) => ({ ...p, [v.id]: { msg: `Scanning ${v.name} locations…` } }));
     setState(v.id, "running");
     let res: Response;
     try {
@@ -597,21 +600,28 @@ export function VenueHub({
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: v.id }) },
         240_000
       );
-    } catch {
+    } catch (e) {
       setState(v.id, "idle");
-      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      const timedOut = e instanceof DOMException && e.name === "AbortError";
+      setRowResult((p) => ({
+        ...p,
+        [v.id]: { err: timedOut ? "Roster scan timed out — try again." : "Roster scan failed — try again." },
+      }));
       return;
     }
     const data = await res.json().catch(() => ({}));
     setState(v.id, "idle");
     if (!res.ok) {
-      setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Roster scan failed" } }));
+      setRowResult((p) => ({ ...p, [v.id]: { err: `Roster scan failed — ${data.error ?? "try again"}` } }));
       return;
     }
-    const summary = data.summary ?? `${data.found ?? 0} found · ${data.added ?? 0} new`;
+    const found = data.found ?? 0;
+    const added = data.added ?? 0;
     setRowResult((p) => ({
       ...p,
-      [v.id]: { warn: `Roster built — ${summary}. Flagship not set — pick the original with “Set as flagship”.` },
+      [v.id]: {
+        warn: `Found ${found} location${found === 1 ? "" : "s"} (${added} new) — flagship not set. Pick the original with “Set as flagship”.`,
+      },
     }));
     router.refresh();
   }
@@ -897,6 +907,16 @@ export function VenueHub({
                             className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.04em] text-amber-400"
                           >
                             <AlertTriangle className="h-3 w-3" />Flagship not set
+                          </span>
+                        )}
+                        {/* At-a-glance CHAIN indicator for the no-badge states: a
+                            chain candidate (roster not built) or a sibling seed. */}
+                        {(v.chainCandidate || v.chainSeed) && !v.flagshipUnset && (
+                          <span
+                            title={v.chainSeed ? "One location of a chain" : "Looks like a chain — a roster can be built"}
+                            className="ml-2 inline-flex items-center gap-1 rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-sienna-light"
+                          >
+                            <Store className="h-3 w-3" />Chain
                           </span>
                         )}
                       </div>
