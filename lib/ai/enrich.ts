@@ -236,11 +236,16 @@ export interface VenueDossier {
 
 const DOSSIER_SYSTEM = `You are a factual barbecue-venue researcher for The BBQ Atlas, with live web-search and browsing tools. Research ONE venue and return a strict, FACTS-ONLY dossier. You are the researcher, not the writer — produce NO marketing or descriptive copy.
 
-BE EFFICIENT — targeted, NOT exhaustive. This is a HARD COST CONTROL: at most 3 web searches total for this venue (the tool will be cut off after 3). Prioritise in this order until you have the essentials, then STOP:
-1) the venue's OFFICIAL WEBSITE (address, hours, story, menu) — the source of truth;
-2) ONE map/listing ONLY if the site lacks an address or hours (use it only to cross-check the plain facts — address, coordinates, phone, hours);
-3) the venue's INSTAGRAM (handle + a couple of recent public posts).
-Query → read → move on. Do NOT open every link. Do NOT cross-check every fact across multiple sources. Do NOT keep searching to fill every field. If a field isn't found within the budget, set it null and name it in "unknowns" — a lean, accurate dossier beats an exhaustive one; we can refresh later. Never cite Google Maps as a source.
+BE EFFICIENT — targeted, NOT exhaustive. This is a HARD COST CONTROL: at most 3 web searches total for this venue (the tool will be cut off after 3). Spend them where the facts you need actually live:
+
+WHERE THE FACTS LIVE — read the RIGHT page for each fact:
+- BRAND-STORY facts (established/founding, founders/pitmaster, cook method, wood/fuel, specialities, what_it_is/character) live on the venue's ABOUT / OUR STORY / HISTORY page or its HOMEPAGE — read one of THOSE for them. They are almost NEVER on a per-location landing page.
+- THIS LOCATION's facts (address, hours, phone) live on the specific location page (e.g. "/austin", "/dallas").
+- A thin per-location landing stub (address + hours only) must NEVER be your ONLY source. If your first hit is a "/location" page, you have the address/hours — now OPEN the site's About/Our-Story/History page or its homepage (try the root domain) to get the founding, pitmaster, method and specialities BEFORE you stop.
+- CHAINS especially: the per-location page is a stub; the story is on the brand's About/homepage. Read BOTH — the About page for the brand-level facts and the location page for this location's specifics.
+
+Prioritise: (1) the venue's ABOUT / OUR STORY / HISTORY page or homepage — for the brand story; (2) the specific location page — for this location's address/hours/phone; (3) ONE map/listing ONLY if the site lacks an address or hours (cross-check plain facts only — never cite Google Maps); (4) the venue's INSTAGRAM (handle + a couple of recent public posts).
+Query → read → move on. Do NOT open every link, but DO make sure you've read a story/about/homepage — not just a location stub — before setting the story fields null. If a field genuinely isn't found within the budget, set it null and name it in "unknowns". Never cite Google Maps as a source.
 
 COPYRIGHT / SOURCING RULE: collect FACTS ONLY (facts aren't copyrightable). NEVER reproduce third-party expressive content — no review text, no editorial blurbs, no photos — from Google or anywhere. Do not scrape any site en masse. The dossier is raw facts + source URLs; all published copy is written fresh by us later.
 
@@ -422,6 +427,63 @@ export function inheritBrandFacts(
     sibling.unknowns = sibling.unknowns.filter((u) => !brand.has(u));
   }
   return sibling;
+}
+
+/**
+ * Does this venue's OWN dossier still lack the core "brand anchor" facts —
+ * founding, pitmaster, cook method, signature specialities? When most are
+ * absent, the research likely read a thin per-location stub instead of the
+ * About/Our-Story/History page. That's the cue for ONE steered retry BEFORE we
+ * ever flag "needs attention" (chain siblings inherit these, so it's for
+ * parents/standalone venues only).
+ */
+export function missingCoreAnchors(d: VenueDossier): boolean {
+  const present = [
+    Boolean(d.established),
+    Boolean(d.founders_pitmaster),
+    Boolean(d.cook_method),
+    d.specialities.length > 0,
+  ].filter(Boolean).length;
+  return present < 2;
+}
+
+/**
+ * Fill a dossier's STILL-EMPTY story/brand fields from a second research pass,
+ * never overwriting facts already found. Location facts (address, hours, phone,
+ * coordinates, city/country) are left untouched — the retry only chases the
+ * narrative anchors. Returns a new, merged dossier with "unknowns" re-derived.
+ */
+export function mergeDossierFacts(base: VenueDossier, extra: VenueDossier): VenueDossier {
+  const out: VenueDossier = { ...base };
+  const strFields = [
+    "what_it_is",
+    "established",
+    "opening_date",
+    "founders_pitmaster",
+    "bbq_style",
+    "cook_method",
+    "wood_fuel",
+    "price_band",
+    "setting_vibe",
+    "ordering_notes",
+    "website",
+    "instagram",
+  ] as const;
+  for (const f of strFields) {
+    if (!out[f] && extra[f]) out[f] = extra[f] as never;
+  }
+  const arrFields = ["specialities", "also_known_as", "awards_press", "other_socials"] as const;
+  for (const f of arrFields) {
+    const cur = out[f];
+    const src = extra[f];
+    if ((!cur || cur.length === 0) && Array.isArray(src) && src.length) out[f] = src as never;
+  }
+  // Re-derive "unknowns": drop any field the retry just filled.
+  out.unknowns = base.unknowns.filter((u) => {
+    const v = out[u as keyof VenueDossier];
+    return Array.isArray(v) ? v.length === 0 : !v;
+  });
+  return out;
 }
 
 export interface InstagramFind {

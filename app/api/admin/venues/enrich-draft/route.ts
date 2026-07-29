@@ -7,6 +7,8 @@ import {
   researchInstagram,
   writeVenueCopy,
   inheritBrandFacts,
+  missingCoreAnchors,
+  mergeDossierFacts,
   matchBbqStyle,
   priceBandToLevel,
   mapSocials,
@@ -161,22 +163,27 @@ export async function POST(request: Request) {
 
   // ---- full mode: bounded dossier + Haiku copy ---------------------------
   let dossier: VenueDossier;
-  let citations: string[];
   let grokModel = GROK_MODEL;
-  // Research usage accumulates across passes (a chain flagship runs two).
+  // Research usage accumulates across passes (a chain flagship runs two, plus a
+  // possible retry-on-thin). ALL consulted URLs are captured so any future thin
+  // result is diagnosable at a glance from enrichment_sources.
   let grokInTokens = 0;
   let grokOutTokens = 0;
   let grokSearches = 0;
   let gCost = 0;
+  const consulted = new Set<string>();
+  const trackSources = (d: VenueDossier, cites: string[]) => {
+    for (const u of [...cites, ...d.sources]) if (u) consulted.add(u);
+  };
   try {
     const res = await researchDossier(lead);
     dossier = res.dossier;
-    citations = res.citations;
     grokModel = res.model ?? GROK_MODEL;
     grokInTokens += res.usage.in_tokens;
     grokOutTokens += res.usage.out_tokens;
     grokSearches += res.usage.searches;
     gCost += grokCost(res.usage, grokModel);
+    trackSources(res.dossier, res.citations);
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Research failed." }, { status: 502 });
   }
@@ -228,8 +235,9 @@ export async function POST(request: Request) {
       notes:
         `${dossier.name ?? row.name} is a known multi-location barbecue chain whose locations are ALREADY catalogued. ` +
         `Do NOT research, list, or spend any searches on its other locations. ` +
-        `Spend the entire budget on THIS flagship venue's own facts: opening hours, founders/pitmaster, ` +
-        `established date, specialities, cook method, wood/fuel, setting/vibe, website, and Instagram.`,
+        `Read the brand's ABOUT / OUR STORY / HISTORY page or its HOMEPAGE for the founding/established date, founders/pitmaster, cook method, wood/fuel and signature specialities — these are NOT on a per-location page. ` +
+        `Then use this flagship's own location page for its hours, phone and address. ` +
+        `Spend the entire budget on THIS flagship's own facts and story, not the chain's other branches.`,
     };
     try {
       const res2 = await researchDossier(flagshipLead);
@@ -246,6 +254,7 @@ export async function POST(request: Request) {
       grokOutTokens += res2.usage.out_tokens;
       grokSearches += res2.usage.searches;
       gCost += grokCost(res2.usage, res2.model ?? grokModel);
+      trackSources(res2.dossier, res2.citations);
       twoPass = true;
     } catch {
       // Pass-2 failed — do NOT silently commit the thin pass-1 copy. The flag is
@@ -262,6 +271,48 @@ export async function POST(request: Request) {
         },
         { status: 502 }
       );
+    }
+  }
+
+  // ── Retry-on-thin: read the About/story page before flagging "needs attention"
+  // If this venue's OWN dossier still lacks the core anchors (founding, pitmaster,
+  // method, specialities), the research probably read a thin per-location stub
+  // rather than the About/Our-Story/History page. Do ONE steered retry — pointed
+  // at the site's story/homepage — and fill only the still-empty story fields.
+  // Siblings inherit brand facts, so this is for parents/standalone venues only,
+  // and there's ceiling headroom (the two-pass ceiling is doubled).
+  let retriedThin = false;
+  if (!row.chain_parent_id && missingCoreAnchors(dossier)) {
+    const site = dossier.website ?? lead.website ?? null;
+    let root: string | null = null;
+    try {
+      if (site) root = new URL(site).origin;
+    } catch {
+      root = null;
+    }
+    const retryLead: VenueLead = {
+      ...lead,
+      website: site ?? undefined,
+      notes:
+        `Read ${dossier.name ?? row.name}'s OWN About / Our Story / History page or its HOMEPAGE` +
+        (root ? ` — start at ${root} (try ${root}/about, ${root}/our-story, ${root}/history)` : "") +
+        `. Find the FOUNDING/established year, the PITMASTER/owner(s), the COOK METHOD and WOOD/FUEL, and the signature SPECIALITIES. These live on the story/about/homepage, NOT a per-location landing page — do NOT settle for a location stub.`,
+    };
+    try {
+      const retry = await researchDossier(retryLead);
+      dossier = mergeDossierFacts(dossier, retry.dossier);
+      grokModel = retry.model ?? grokModel;
+      grokInTokens += retry.usage.in_tokens;
+      grokOutTokens += retry.usage.out_tokens;
+      grokSearches += retry.usage.searches;
+      gCost += grokCost(retry.usage, retry.model ?? grokModel);
+      trackSources(retry.dossier, retry.citations);
+      retriedThin = true;
+      // A retry legitimately spends more; grant the doubled ceiling headroom.
+      twoPass = true;
+    } catch {
+      // Keep what we have — the honest "needs attention" flag remains the final
+      // fallback when the About/story genuinely can't be reached.
     }
   }
 
@@ -289,7 +340,9 @@ export async function POST(request: Request) {
 
   const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
   const socials = mapSocials(dossier.other_socials);
-  const sources = [...new Set([...dossier.sources, ...citations])];
+  // Every URL consulted across all passes (pass-1, flagship pass-2, retry-on-thin)
+  // — so a future thin result is diagnosable at a glance, not one lone stub URL.
+  const sources = [...new Set([...consulted, ...dossier.sources])];
   const igPosts = [
     ...(dossier.best_photo_post_url ? [dossier.best_photo_post_url] : []),
     ...dossier.recent_instagram_posts,
@@ -438,6 +491,8 @@ export async function POST(request: Request) {
     cost: thisCost,
     over_ceiling: overCeiling,
     two_pass: twoPass,
+    retried_thin: retriedThin,
+    sources_count: sources.length,
     // Chain signalling — parent only. Siblings report is_chain:false so the UI
     // never re-opens the roster gateway for them (the loop fix). The flagship's
     // pass-2 already ran server-side, so the gateway is now optional (find any
