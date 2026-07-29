@@ -108,7 +108,10 @@ export function normCity(city: string | null | undefined): string {
   if (!s) return "";
   s = s
     .replace(/,?\s*(united states|usa|u\.s\.a\.|u\.s\.)\s*$/i, "")
-    .replace(/,?\s*[a-z]{2}\s*$/i, "") // trailing 2-letter state
+    // Trailing 2-letter STATE code — only when it's a separate token (comma or
+    // space before it), so we don't chop the last 2 letters off a city name
+    // ("Fort Worth" must NOT become "Fort Wor").
+    .replace(/[,\s]+[a-z]{2}\.?\s*$/i, "")
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
