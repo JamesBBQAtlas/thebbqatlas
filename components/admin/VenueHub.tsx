@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Sparkles,
@@ -45,6 +45,7 @@ export interface HubVenue {
   cost: number;
   lastRunCost: number;
   chainSeed: boolean;
+  chainParentId: string | null;
   isChainParent: boolean;
   chainRostered: boolean;
   lat: number;
@@ -193,6 +194,21 @@ export function VenueHub({
   } | null>(null);
   const pauseRef = useRef(false);
   const stopRef = useRef(false);
+  // Hold the scroll position across a router.refresh() re-render so an enrich
+  // doesn't jump the list away from the venue you just acted on.
+  const restoreScrollRef = useRef<number | null>(null);
+  const keepScroll = () => {
+    if (typeof window !== "undefined") restoreScrollRef.current = window.scrollY;
+  };
+
+  // Restore the saved scroll position after the venues list re-renders.
+  useEffect(() => {
+    if (restoreScrollRef.current != null) {
+      const y = restoreScrollRef.current;
+      restoreScrollRef.current = null;
+      requestAnimationFrame(() => window.scrollTo({ top: y }));
+    }
+  }, [venues]);
 
   const countries = useMemo(
     () => [...new Set(venues.map((v) => v.country).filter(Boolean) as string[])].sort(),
@@ -213,6 +229,28 @@ export function VenueHub({
       return true;
     });
   }, [venues, q, statusF, country, photoF, igF, staleF]);
+
+  // Group a chain's sibling seeds directly beneath their parent so a detected
+  // chain reads as one block ("parent + its N seeds"), not scattered rows.
+  const grouped = useMemo(() => {
+    const seedsByParent = new Map<string, HubVenue[]>();
+    for (const v of shown) {
+      if (v.chainSeed && v.chainParentId) {
+        const arr = seedsByParent.get(v.chainParentId) ?? [];
+        arr.push(v);
+        seedsByParent.set(v.chainParentId, arr);
+      }
+    }
+    const parentIds = new Set(shown.filter((v) => !v.chainSeed).map((v) => v.id));
+    const out: { v: HubVenue; indent: boolean }[] = [];
+    for (const v of shown) {
+      if (v.chainSeed && v.chainParentId && parentIds.has(v.chainParentId)) continue; // placed under parent
+      out.push({ v, indent: v.chainSeed && Boolean(v.chainParentId) });
+      const kids = seedsByParent.get(v.id);
+      if (kids) for (const k of kids) out.push({ v: k, indent: true });
+    }
+    return out;
+  }, [shown]);
 
   const metrics = useMemo(() => {
     const m = {
@@ -312,6 +350,7 @@ export function VenueHub({
     }
     setRunning(false);
     setPaused(false);
+    keepScroll();
     router.refresh();
   }
 
@@ -325,6 +364,7 @@ export function VenueHub({
   }
 
   async function single(v: HubVenue, kind: ActionKind) {
+    keepScroll();
     setRowResult((p) => ({ ...p, [v.id]: {} }));
     setState(v.id, "running");
     let res: Response;
@@ -467,14 +507,24 @@ export function VenueHub({
             scanning: false,
             rostered: true,
             seeded: [...g.seeded, ...newSeeds],
-            result: `Roster scanned — ${summary} (${fmtUsd(data.cost ?? 0)}).`,
+            result: `Roster scanned — ${summary} (${fmtUsd(
+              data.cost ?? 0
+            )}). Now enriching the flagship's own facts…`,
           }
         : g
     );
+    keepScroll();
     router.refresh();
+
+    // Two-pass model: hand off automatically into the flagship's own
+    // fact-enrichment pass (chain now rostered → whole budget goes to facts),
+    // so the parent never sits in the thin "needs attention" state.
+    const parent = venues.find((v) => v.id === venueId);
+    if (parent) await single(parent, "enrich");
   }
 
   async function copyDecision(id: string, action: "approve" | "discard") {
+    keepScroll();
     setState(id, "running");
     let res: Response;
     try {
@@ -650,9 +700,11 @@ export function VenueHub({
         <PenLine className="inline h-3 w-3 align-[-2px]" /> Rewrite (re-word from saved research) ·{" "}
         <Instagram className="inline h-3 w-3 align-[-2px]" /> Find IG ·{" "}
         <ImageIcon className="inline h-3 w-3 align-[-2px]" /> Hero ·{" "}
-        <Eye className="inline h-3 w-3 align-[-2px]" /> Preview the copy that will publish. On a
+        <Eye className="inline h-3 w-3 align-[-2px]" /> Preview ·{" "}
+        <Check className="inline h-3 w-3 align-[-2px]" /> Publish ·{" "}
+        <X className="inline h-3 w-3 align-[-2px]" /> Decline/Unpublish. On a
         live venue, new copy waits as <span className="text-brand-gold">pending copy</span> until
-        you Approve it.
+        you Approve it. (Hover any icon for its label.)
       </p>
 
       {/* Table */}
@@ -670,17 +722,18 @@ export function VenueHub({
             </tr>
           </thead>
           <tbody>
-            {shown.map((v) => {
+            {grouped.map(({ v, indent }) => {
               const rt = status[v.id]?.state;
               const busy = rt === "running" || rt === "queued";
               const f = freshness(v.enriched_at);
               const needsEnrich = v.lat === 0 && v.lng === 0;
               return (
                 <Fragment key={v.id}>
-                  <tr className="border-t border-border-subtle bg-surface-0 align-top">
+                  <tr className={`border-t border-border-subtle align-top ${indent ? "bg-surface-1/30" : "bg-surface-0"}`}>
                     <td className="px-3 py-3"><input type="checkbox" checked={selected.has(v.id)} onChange={() => toggle(v.id)} className="mt-1 h-4 w-4 accent-[#D4AF37]" aria-label={`Select ${v.name}`} /></td>
-                    <td className="px-3 py-3">
+                    <td className={`px-3 py-3 ${indent ? "border-l-2 border-brand-sienna/40 pl-4" : ""}`}>
                       <div className="font-semibold text-text-primary">
+                        {indent && <span className="mr-1 text-brand-sienna-light" aria-hidden="true">↳</span>}
                         {v.name}
                         {v.location_label && <span className="ml-1.5 text-xs font-normal text-brand-sienna-light">· {v.location_label}</span>}
                       </div>
@@ -745,28 +798,30 @@ export function VenueHub({
                       )}
                     </td>
                     <td className="px-3 py-3">
-                      <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      {/* Compact, single-line actions (icon-only) so rows never
+                          wrap/fatten at narrow widths. Titles carry the labels. */}
+                      <div className="flex flex-nowrap items-center justify-end gap-1">
                         <IconBtn title="Re-research + rewrite (Grok researches, Claude writes)" busy={busy} onClick={() => single(v, "enrich")}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
                         <IconBtn title="Rewrite copy from saved research (Claude only)" busy={busy} onClick={() => single(v, "rewrite")}><PenLine className="h-3.5 w-3.5" /></IconBtn>
                         <IconBtn title={v.hasIG ? "IG ✓ — re-run Find IG" : "Find IG (handle + recent posts)"} busy={busy} onClick={() => single(v, "findig")}>
                           <Instagram className={`h-3.5 w-3.5 ${v.hasIG ? "text-emerald-400" : ""}`} />
                         </IconBtn>
                         <IconBtn title="Hero image" onClick={() => setHeroOpen(heroOpen === v.id ? null : v.id)}><ImageIcon className="h-3.5 w-3.5" /></IconBtn>
-                        <button type="button" onClick={() => setPreview(previewFromRow(v))} title="Read the copy that will publish" className="inline-flex items-center gap-1 rounded-md border border-border-strong px-2.5 py-1.5 text-xs font-semibold text-text-primary transition-colors hover:border-brand-gold/60 hover:text-brand-gold">
-                          <Eye className="h-3.5 w-3.5" />Preview
+                        <button type="button" onClick={() => setPreview(previewFromRow(v))} title="Preview the copy that will publish" className="inline-flex shrink-0 items-center rounded-md border border-border-strong p-1.5 text-text-primary transition-colors hover:border-brand-gold/60 hover:text-brand-gold">
+                          <Eye className="h-3.5 w-3.5" />
                         </button>
                         {v.status !== "approved" ? (
                           <>
-                            <button type="button" onClick={() => single(v, "publish")} disabled={busy || needsEnrich} title={needsEnrich ? "Enrich first (no map location)" : "Publish"} className="inline-flex items-center gap-1 rounded-md bg-brand-gold px-2.5 py-1.5 text-xs font-bold uppercase text-text-inverse disabled:opacity-40">
-                              <Check className="h-3.5 w-3.5" />Publish
+                            <button type="button" onClick={() => single(v, "publish")} disabled={busy || needsEnrich} title={needsEnrich ? "Enrich first (no map location)" : "Publish"} className="inline-flex shrink-0 items-center rounded-md bg-brand-gold p-1.5 text-text-inverse disabled:opacity-40">
+                              <Check className="h-3.5 w-3.5" />
                             </button>
-                            <button type="button" onClick={() => single(v, "reject")} disabled={busy} title="Decline — remove from the queue" className="inline-flex items-center gap-1 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-muted transition-colors hover:border-destructive hover:text-destructive disabled:opacity-40">
-                              <X className="h-3.5 w-3.5" />Decline
+                            <button type="button" onClick={() => single(v, "reject")} disabled={busy} title="Decline — remove from the queue" className="inline-flex shrink-0 items-center rounded-md border border-border-default p-1.5 text-text-muted transition-colors hover:border-destructive hover:text-destructive disabled:opacity-40">
+                              <X className="h-3.5 w-3.5" />
                             </button>
                           </>
                         ) : (
-                          <button type="button" onClick={() => single(v, "reject")} disabled={busy} title="Unpublish — pull this venue from the live site" className="inline-flex items-center gap-1 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-muted transition-colors hover:border-destructive hover:text-destructive disabled:opacity-40">
-                            <X className="h-3.5 w-3.5" />Unpublish
+                          <button type="button" onClick={() => single(v, "reject")} disabled={busy} title="Unpublish — pull this venue from the live site" className="inline-flex shrink-0 items-center rounded-md border border-border-default p-1.5 text-text-muted transition-colors hover:border-destructive hover:text-destructive disabled:opacity-40">
+                            <X className="h-3.5 w-3.5" />
                           </button>
                         )}
                       </div>

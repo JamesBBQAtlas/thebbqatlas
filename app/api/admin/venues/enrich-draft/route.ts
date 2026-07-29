@@ -71,6 +71,14 @@ export async function POST(request: Request) {
       `Find THIS specific branch's street address, opening hours, and phone` +
       (parentWebsite ? ` — start from ${parentWebsite} and its Locations/Find-us page.` : ".") +
       ` It is definitely a chain; do not spend searches re-confirming that.`;
+  } else if (row.chain_rostered_at) {
+    // Two-pass model (pass 2): the chain is already rostered, so spend the whole
+    // budget on THIS flagship's own facts instead of re-discovering the chain.
+    branchNote =
+      `${row.name} is a known multi-location barbecue chain whose locations are ALREADY catalogued. ` +
+      `Do NOT research, list, or spend any searches on its other locations. ` +
+      `Spend the entire budget on THIS flagship venue's own facts: opening hours, founders/pitmaster, ` +
+      `established date, specialities, cook method, wood/fuel, setting/vibe, website, and Instagram.`;
   }
 
   const lead: VenueLead = {

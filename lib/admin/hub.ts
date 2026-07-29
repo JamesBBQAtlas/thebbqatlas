@@ -67,6 +67,7 @@ export function toHubVenue(r: Restaurant): HubVenue {
       return (Number(bd.grok_cost) || 0) + (Number(bd.claude_cost) || 0);
     })(),
     chainSeed: Boolean(r.chain_parent_id),
+    chainParentId: r.chain_parent_id ?? null,
     // Parent-of-a-chain flag (for the "part of a chain" preview note); siblings
     // are chainSeed, not isChainParent.
     isChainParent: !r.chain_parent_id && Boolean((r.dossier as { is_chain?: boolean } | null)?.is_chain),

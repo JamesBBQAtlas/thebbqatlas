@@ -112,5 +112,12 @@ export function normCity(city: string | null | undefined): string {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+  // Expand common city abbreviations so "Ft. Worth" == "Fort Worth" and
+  // "St. Louis" == "Saint Louis" (prevents same-city seed duplicates).
+  const cityAbbr: Record<string, string> = { ft: "fort", mt: "mount", st: "saint" };
+  s = s
+    .split(" ")
+    .map((w) => cityAbbr[w] ?? w)
+    .join(" ");
   return s;
 }
