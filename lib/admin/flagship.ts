@@ -72,6 +72,12 @@ export interface FlagshipReassignResult {
   flagshipId: string;
   created: boolean;
   flagshipCity: string | null;
+  /** The flagship's status ("pending" for a freshly-created seed) — decides
+   *  whether brand copy goes straight to columns or waits as pending_changes. */
+  status: string;
+  /** The brand-facts dossier now on the flagship, so the caller can write the
+   *  flagship's brand-level copy + columns (no extra web search). */
+  flagshipDossier: VenueDossier;
 }
 
 /**
@@ -100,7 +106,7 @@ export async function ensureFlagshipParent(
   // branch we started from). Match on physical address first, then city/label.
   const { data: candidates } = await db
     .from("restaurants")
-    .select("id, city, address, location_label, dossier")
+    .select("id, status, city, address, location_label, dossier")
     .eq("name", brand);
   const existing = (candidates ?? []).find((r) => {
     if (r.id === branchId) return false;
@@ -114,13 +120,16 @@ export async function ensureFlagshipParent(
 
   let flagshipId: string;
   let created = false;
+  let status = "pending";
+  let resultDossier = flagshipDossier;
   if (existing) {
     flagshipId = existing.id as string;
+    status = (existing.status as string) ?? "pending";
     // Fill-empty MERGE the brand facts onto the existing flagship — never clobber
     // its own good data, but guarantee it carries the brand facts for inheritance.
     const base = (existing.dossier as VenueDossier | null) ?? null;
-    const merged = base ? mergeDossierFacts(base, flagshipDossier) : flagshipDossier;
-    await db.from("restaurants").update({ chain_parent_id: null, dossier: merged }).eq("id", flagshipId);
+    resultDossier = base ? mergeDossierFacts(base, flagshipDossier) : flagshipDossier;
+    await db.from("restaurants").update({ chain_parent_id: null, dossier: resultDossier }).eq("id", flagshipId);
   } else {
     const slug = await uniqueRestaurantSlug(db, `${brand} ${flagship.city ?? "flagship"}`);
     const composed = composeAddress({ street: flagship.address, city: flagship.city });
@@ -162,5 +171,5 @@ export async function ensureFlagshipParent(
   await db.from("restaurants").update({ chain_parent_id: flagshipId }).eq("chain_parent_id", branchId);
   await db.from("restaurants").update({ chain_parent_id: null }).eq("id", flagshipId);
 
-  return { flagshipId, created, flagshipCity: flagship.city };
+  return { flagshipId, created, flagshipCity: flagship.city, status, flagshipDossier: resultDossier };
 }

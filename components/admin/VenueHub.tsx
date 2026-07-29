@@ -16,6 +16,7 @@ import {
   Eye,
   X,
   Store,
+  Crown,
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
@@ -286,22 +287,42 @@ export function VenueHub({
 
   // Group a chain's sibling seeds directly beneath their parent so a detected
   // chain reads as one block ("parent + its N seeds"), not scattered rows.
+  //
+  // STABILITY (Fix 3): the list order is the underlying created_at order, and a
+  // group is ANCHORED at the EARLIEST original position among its members. So a
+  // status change never re-sorts a row, and when a brand-new (late-created)
+  // flagship parent appears after a branch-first enrich, the group stays put at
+  // the branch's original spot instead of jumping to the bottom. New siblings
+  // insert beneath the parent, in place.
   const grouped = useMemo(() => {
+    const pos = new Map(shown.map((v, i) => [v.id, i]));
+    const shownIds = new Set(shown.map((v) => v.id));
     const seedsByParent = new Map<string, HubVenue[]>();
+    const topLevel: HubVenue[] = [];
     for (const v of shown) {
-      if (v.chainSeed && v.chainParentId) {
+      if (v.chainSeed && v.chainParentId && shownIds.has(v.chainParentId)) {
         const arr = seedsByParent.get(v.chainParentId) ?? [];
         arr.push(v);
         seedsByParent.set(v.chainParentId, arr);
+      } else {
+        // Parents, standalones, and orphan seeds (whose parent isn't shown).
+        topLevel.push(v);
       }
     }
-    const parentIds = new Set(shown.filter((v) => !v.chainSeed).map((v) => v.id));
+    const anchor = (v: HubVenue) => {
+      let a = pos.get(v.id) ?? 0;
+      const kids = seedsByParent.get(v.id);
+      if (kids) for (const k of kids) a = Math.min(a, pos.get(k.id) ?? a);
+      return a;
+    };
     const out: { v: HubVenue; indent: boolean }[] = [];
-    for (const v of shown) {
-      if (v.chainSeed && v.chainParentId && parentIds.has(v.chainParentId)) continue; // placed under parent
+    for (const v of [...topLevel].sort((x, y) => anchor(x) - anchor(y))) {
       out.push({ v, indent: v.chainSeed && Boolean(v.chainParentId) });
       const kids = seedsByParent.get(v.id);
-      if (kids) for (const k of kids) out.push({ v: k, indent: true });
+      if (kids) {
+        kids.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
+        for (const k of kids) out.push({ v: k, indent: true });
+      }
     }
     return out;
   }, [shown]);
@@ -466,6 +487,14 @@ export function VenueHub({
     }
     // enrich or rewrite
     const costNote = typeof data.cost === "number" ? ` · ${fmtUsd(data.cost)}` : "";
+    // Branch-first discovery: we enriched a branch, the true flagship was created
+    // & populated with the brand facts, and this row was demoted to a clean
+    // sibling. Show the helpful next-step message — no preview, no attention flag.
+    if (data.branch_first_discovery) {
+      setRowResult((p) => ({ ...p, [v.id]: { msg: (data.message ?? "Flagship identified.") + costNote } }));
+      router.refresh();
+      return;
+    }
     // Chain detected on a PARENT enrich (§09.2). Siblings report is_chain:false,
     // so this never fires for them (loop fix). Skip the gateway if the chain has
     // already been rostered once.
@@ -806,6 +835,14 @@ export function VenueHub({
                         {indent && <span className="mr-1 text-brand-sienna-light" aria-hidden="true">↳</span>}
                         {v.name}
                         {v.location_label && <span className="ml-1.5 text-xs font-normal text-brand-sienna-light">· {v.location_label}</span>}
+                        {!v.chainSeed && (v.isChainParent || v.chainRostered) && (
+                          <span
+                            title="Flagship — the chain's home / original location"
+                            className="ml-2 inline-flex items-center gap-1 rounded-full border border-brand-gold/50 bg-brand-gold/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-gold"
+                          >
+                            <Crown className="h-3 w-3" />Flagship
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-text-muted">{[v.city, v.country].filter(Boolean).join(", ")} · {v.styleLabel}</div>
                       {v.needs_attention && v.attention_reason && (

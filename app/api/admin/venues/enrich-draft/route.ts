@@ -279,8 +279,14 @@ export async function POST(request: Request) {
     );
 
     if (fl && !recordFlagshipConfirmed) {
-      // Started from a BRANCH — make the true flagship the parent and re-point
-      // this branch (and anything under it) to it.
+      // ── BRANCH-FIRST DISCOVERY (bounded) ──────────────────────────────────
+      // We started from a branch. We've already read the About/origin page and
+      // gathered the brand facts (≤6 searches). Now: create/populate the true
+      // flagship as the parent, seed the roster under it, and DEMOTE this branch
+      // to a clean sibling — then STOP. We do NOT also write this branch's own
+      // copy in the same call (that's done cheaply later when it's enriched as a
+      // sibling). This keeps the branch-first path inside the search budget and
+      // guarantees the flagship is never left an empty seed.
       try {
         const fr = await ensureFlagshipParent(ctx.db, {
           branchId: restaurantId,
@@ -289,8 +295,6 @@ export async function POST(request: Request) {
           flagship: fl,
           brandDossier: dossier,
         });
-        flagshipParentId = fr.flagshipId;
-        reassignedToFlagship = true;
         // Seed the rest of the roster UNDER THE FLAGSHIP (dedupes vs the branch +
         // any siblings; skips the flagship's own venue).
         seeded = await seedChainLocations(ctx.db, fr.flagshipId, brand, country, dossier.chain_locations);
@@ -298,7 +302,91 @@ export async function POST(request: Request) {
           .from("restaurants")
           .update({ chain_rostered_at: new Date().toISOString() })
           .eq("id", fr.flagshipId);
-        rosteredNow = true;
+
+        // Write the flagship's BRAND-level copy (Claude only — NO web search) so
+        // its page carries website + story, not an empty seed. Its OWN location
+        // specifics (hours, exact address) come when it's enriched later.
+        let fCopy: Awaited<ReturnType<typeof writeVenueCopy>> | null = null;
+        try {
+          fCopy = await writeVenueCopy(fr.flagshipDossier, { isFlagship: true });
+        } catch {
+          fCopy = null;
+        }
+        const fCopyCost = fCopy ? round4(claudeCost(fCopy.usage, fCopy.model ?? CLAUDE_WRITER_MODEL)) : 0;
+        const fStyle = matchBbqStyle(fr.flagshipDossier.bbq_style);
+        const fPrice = priceBandToLevel(fr.flagshipDossier.price_band);
+        const fIgHandle = fr.flagshipDossier.instagram ? normalizeHandle(fr.flagshipDossier.instagram) : null;
+        const fSocials = mapSocials(fr.flagshipDossier.other_socials);
+        const flagPatch: Record<string, unknown> = {
+          enriched_at: new Date().toISOString(),
+          dossier: fr.flagshipDossier,
+          enrichment_model: `${grokModel} + ${CLAUDE_WRITER_MODEL}`,
+          needs_attention: false,
+          attention_reason: null,
+        };
+        if (fr.flagshipDossier.website) flagPatch.website = fr.flagshipDossier.website;
+        if (fr.flagshipDossier.instagram) flagPatch.instagram_url = fr.flagshipDossier.instagram;
+        if (fIgHandle) flagPatch.instagram_handle = fIgHandle;
+        if (fStyle) flagPatch.style = fStyle;
+        if (fPrice) flagPatch.price_level = fPrice;
+        if (fSocials.x_url) flagPatch.x_url = fSocials.x_url;
+        if (fSocials.facebook_url) flagPatch.facebook_url = fSocials.facebook_url;
+        if (fSocials.tiktok_url) flagPatch.tiktok_url = fSocials.tiktok_url;
+        if (fSocials.youtube_url) flagPatch.youtube_url = fSocials.youtube_url;
+        const fHook = fCopy?.hook ?? null;
+        const fDesc = fCopy?.description ?? null;
+        if (fHook || fDesc) {
+          if (fr.status === "approved") {
+            // Don't silently change a live flagship's copy — hold it for approval.
+            flagPatch.pending_changes = { hook: fHook, description: fDesc };
+          } else {
+            if (fHook) flagPatch.hook = fHook;
+            if (fDesc) flagPatch.description = fDesc;
+          }
+        }
+        await ctx.db.from("restaurants").update(flagPatch).eq("id", fr.flagshipId);
+
+        // Commit the BRANCH's own research (cost/dossier/sources/debug) and mark
+        // it a CLEAN sibling — NO attention flag, NO copy written here.
+        const branchGrokCost = round4(gCost);
+        const branchPatch: Record<string, unknown> = {
+          enriched_at: new Date().toISOString(),
+          dossier,
+          enrichment_cost: round4(priorCost + branchGrokCost),
+          enrichment_cost_breakdown: {
+            grok_searches: grokSearches,
+            grok_in_tokens: grokInTokens,
+            grok_out_tokens: grokOutTokens,
+            grok_cost: branchGrokCost,
+            search_cost: round4(grokSearches * 0.005),
+            total_searches: grokSearches,
+            passes: passLog.length,
+            action: "branch-first discovery",
+          },
+          enrichment_model: grokModel,
+          enrichment_sources: consulted.size ? [...consulted] : null,
+          enrichment_debug: { passes: passLog, total_searches: grokSearches },
+          needs_attention: false,
+          attention_reason: null,
+        };
+        await ctx.db.from("restaurants").update(branchPatch).eq("id", restaurantId);
+
+        return NextResponse.json({
+          ok: true,
+          mode,
+          name: brand,
+          branch_first_discovery: true,
+          reassigned_to_flagship: true,
+          flagship_id: fr.flagshipId,
+          flagship_city: fr.flagshipCity,
+          flagship_created: fr.created,
+          is_chain: true,
+          is_chain_parent: false,
+          needs_attention: false,
+          message: `Flagship ${fr.flagshipCity ?? "location"} identified and populated with the brand facts — enrich the flagship to finish its page, then the siblings.`,
+          cost: round4(branchGrokCost + fCopyCost),
+          chain_seeds: seeded?.added ?? [],
+        });
       } catch (e) {
         return NextResponse.json(
           { error: e instanceof Error ? e.message : "Flagship reassignment failed." },
