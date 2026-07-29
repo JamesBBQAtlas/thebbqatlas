@@ -1,6 +1,6 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { sendWelcome } from "./senders";
-import { resolveDisplayName, firstNameOf } from "@/lib/account/name";
+import { emailFirstNameFrom } from "@/lib/email/recipient";
 
 /**
  * Run once when a new user first authenticates: record any marketing consent
@@ -47,11 +47,16 @@ export async function syncSignup(db: SupabaseClient, user: User): Promise<void> 
         display_name?: string;
         unsubscribe_token?: string;
       };
-      // Greet by first name, resolved from the OAuth profile (full_name/name)
-      // rather than the email prefix.
+      // Greet by first name per the email policy: display_name → OAuth name →
+      // NO name (never the email prefix). null → the template greets nameless.
       await sendWelcome({
         to: user.email,
-        name: firstNameOf(resolveDisplayName(user, row.display_name)),
+        name:
+          emailFirstNameFrom({
+            displayName: row.display_name,
+            email: user.email,
+            metadata: user.user_metadata as Record<string, unknown> | null,
+          }) ?? undefined,
         userId: user.id,
         unsubscribeToken: row.unsubscribe_token,
       });
