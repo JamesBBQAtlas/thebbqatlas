@@ -104,6 +104,12 @@ const ACTIONS: { kind: ActionKind; label: string; icon: typeof Sparkles }[] = [
   { kind: "reject", label: "Reject", icon: X },
 ];
 
+// The slim floating bar carries only the three research actions — the ones you
+// reach for while scanning a long list. Publish/Reject stay in the top bar.
+const FLOAT_ACTIONS = ACTIONS.filter(
+  (a) => a.kind === "enrich" || a.kind === "rewrite" || a.kind === "findig"
+);
+
 // Enrichment (Grok research + Claude write) is genuinely slow — up to a couple
 // of minutes — so give it a generous client timeout that still recovers a hung
 // request instead of spinning "Working…" forever.
@@ -200,13 +206,40 @@ export function VenueHub({
   const keepScroll = () => {
     if (typeof window !== "undefined") restoreScrollRef.current = window.scrollY;
   };
+  // The venue we just acted on. After the refresh it can RE-SORT to a new spot,
+  // so raw scroll-restore leaves you looking at an unrelated row — instead we
+  // anchor to this venue (and its sibling group) and flash it briefly.
+  const actedRef = useRef<string | null>(null);
+  const markActed = (id: string) => {
+    actedRef.current = id;
+  };
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  const [highlightId, setHighlightId] = useState<string | null>(null);
 
-  // Restore the saved scroll position after the venues list re-renders.
+  // After the venues list re-renders: if we just acted on a venue, scroll IT
+  // back into view (it may have re-sorted) and flash it; otherwise just restore
+  // the raw scroll position.
   useEffect(() => {
-    if (restoreScrollRef.current != null) {
-      const y = restoreScrollRef.current;
+    const acted = actedRef.current;
+    const savedY = restoreScrollRef.current;
+    if (acted) {
+      actedRef.current = null;
       restoreScrollRef.current = null;
-      requestAnimationFrame(() => window.scrollTo({ top: y }));
+      requestAnimationFrame(() => {
+        const el = rowRefs.current.get(acted);
+        if (el) {
+          el.scrollIntoView({ block: "center", behavior: "smooth" });
+          setHighlightId(acted);
+          window.setTimeout(() => setHighlightId((cur) => (cur === acted ? null : cur)), 2200);
+        } else if (savedY != null) {
+          window.scrollTo({ top: savedY });
+        }
+      });
+      return;
+    }
+    if (savedY != null) {
+      restoreScrollRef.current = null;
+      requestAnimationFrame(() => window.scrollTo({ top: savedY }));
     }
   }, [venues]);
 
@@ -365,6 +398,7 @@ export function VenueHub({
 
   async function single(v: HubVenue, kind: ActionKind) {
     keepScroll();
+    markActed(v.id);
     setRowResult((p) => ({ ...p, [v.id]: {} }));
     setState(v.id, "running");
     let res: Response;
@@ -525,6 +559,7 @@ export function VenueHub({
 
   async function copyDecision(id: string, action: "approve" | "discard") {
     keepScroll();
+    markActed(id);
     setState(id, "running");
     let res: Response;
     try {
@@ -729,7 +764,15 @@ export function VenueHub({
               const needsEnrich = v.lat === 0 && v.lng === 0;
               return (
                 <Fragment key={v.id}>
-                  <tr className={`border-t border-border-subtle align-top ${indent ? "bg-surface-1/30" : "bg-surface-0"}`}>
+                  <tr
+                    ref={(el) => {
+                      if (el) rowRefs.current.set(v.id, el);
+                      else rowRefs.current.delete(v.id);
+                    }}
+                    className={`border-t border-border-subtle align-top transition-colors duration-500 ${indent ? "bg-surface-1/30" : "bg-surface-0"} ${
+                      highlightId === v.id ? "ring-2 ring-inset ring-brand-gold/70 !bg-brand-gold/10" : ""
+                    }`}
+                  >
                     <td className="px-3 py-3"><input type="checkbox" checked={selected.has(v.id)} onChange={() => toggle(v.id)} className="mt-1 h-4 w-4 accent-[#D4AF37]" aria-label={`Select ${v.name}`} /></td>
                     <td className={`px-3 py-3 ${indent ? "border-l-2 border-brand-sienna/40 pl-4" : ""}`}>
                       <div className="font-semibold text-text-primary">
@@ -840,6 +883,53 @@ export function VenueHub({
           </tbody>
         </table>
       </div>
+
+      {/* Slim FLOATING bulk-action bar — so with rows selected at the bottom of a
+          long list, the bulk actions are reachable without scrolling to the top.
+          Deliberately slim (a pill), and the list stays fully visible behind it. */}
+      {(selCount > 0 || running) && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+          <div className="pointer-events-auto flex max-w-[95vw] items-center gap-1.5 overflow-x-auto rounded-full border border-border-strong bg-surface-0/95 px-3 py-2 shadow-2xl backdrop-blur supports-[backdrop-filter]:bg-surface-0/80">
+            {running ? (
+              <>
+                <span className="whitespace-nowrap px-1 text-xs font-semibold text-text-secondary">
+                  {progress.kind}: {progress.done + progress.attention}/{progress.total}
+                  {progress.attention ? ` · ${progress.attention} attn` : ""}
+                </span>
+                <button type="button" onClick={() => { pauseRef.current = !pauseRef.current; setPaused(pauseRef.current); }} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border-default px-2.5 py-1 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold">
+                  {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{paused ? "Resume" : "Pause"}
+                </button>
+                <button type="button" onClick={() => { stopRef.current = true; pauseRef.current = false; setPaused(false); }} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-destructive/60 px-2.5 py-1 text-xs font-semibold text-destructive hover:bg-destructive/10">
+                  <Square className="h-3.5 w-3.5" />Stop
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="whitespace-nowrap px-1 text-xs font-bold text-text-primary">{selCount} selected</span>
+                <span className="h-4 w-px shrink-0 bg-border-subtle" />
+                {FLOAT_ACTIONS.map((a) => {
+                  const est = estimateCost(a.kind, selCount);
+                  return (
+                    <button
+                      key={a.kind}
+                      type="button"
+                      onClick={() => requestBatch(a.kind)}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border-default px-2.5 py-1 text-xs font-bold uppercase tracking-[0.03em] text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+                    >
+                      <a.icon className="h-3.5 w-3.5" />{a.label}
+                      {est > 0 && <span className="font-normal normal-case text-text-muted">· {fmtUsd(est)}</span>}
+                    </button>
+                  );
+                })}
+                <span className="h-4 w-px shrink-0 bg-border-subtle" />
+                <button type="button" onClick={clearSel} title="Clear selection" className="inline-flex shrink-0 items-center rounded-full p-1 text-text-muted transition-colors hover:text-text-primary">
+                  <X className="h-4 w-4" />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {preview &&
         (() => {

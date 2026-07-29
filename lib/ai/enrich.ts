@@ -349,6 +349,72 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
   return { dossier, citations, usage, model };
 }
 
+/**
+ * Brand-level dossier fields — facts that belong to the CHAIN, not to any one
+ * outpost (its history, who runs it, how it cooks, what it's known for, its
+ * character). Every location of the chain shares them, so a sibling inherits
+ * them from its parent rather than making its own (bounded) research re-derive
+ * brand identity it could never verify per-branch.
+ */
+export const BRAND_LEVEL_DOSSIER_FIELDS = [
+  "what_it_is",
+  "established",
+  "founders_pitmaster",
+  "bbq_style",
+  "cook_method",
+  "wood_fuel",
+  "price_band",
+  "setting_vibe",
+  "specialities",
+  "also_known_as",
+  "awards_press",
+] as const;
+
+/**
+ * Seed a chain SIBLING's dossier with its parent's verified brand-level facts,
+ * filling ONLY the fields the sibling's own (location-focused) research left
+ * empty. Location-specific facts — address, hours, phone, coordinates, this
+ * branch's own socials/label — are NEVER touched. Mutates and returns the
+ * sibling dossier. A sibling with no parent dossier is returned unchanged.
+ */
+export function inheritBrandFacts(
+  sibling: VenueDossier,
+  parent: Partial<VenueDossier> | null | undefined
+): VenueDossier {
+  if (!parent) return sibling;
+  const strFields = [
+    "what_it_is",
+    "established",
+    "founders_pitmaster",
+    "bbq_style",
+    "cook_method",
+    "wood_fuel",
+    "price_band",
+    "setting_vibe",
+  ] as const;
+  for (const f of strFields) {
+    if (!sibling[f] && parent[f]) sibling[f] = parent[f] as never;
+  }
+  const arrFields = ["specialities", "also_known_as", "awards_press"] as const;
+  for (const f of arrFields) {
+    const cur = sibling[f];
+    const src = parent[f];
+    if ((!cur || cur.length === 0) && Array.isArray(src) && src.length) {
+      sibling[f] = src as never;
+    }
+  }
+  // A sibling is, by definition, one location of a chain.
+  sibling.is_chain = true;
+  // Brand-level facts are now known (inherited or already present), so drop them
+  // from "unknowns" — the writer must treat them as real facts, not gaps to
+  // write around.
+  if (sibling.unknowns.length) {
+    const brand = new Set<string>(BRAND_LEVEL_DOSSIER_FIELDS as readonly string[]);
+    sibling.unknowns = sibling.unknowns.filter((u) => !brand.has(u));
+  }
+  return sibling;
+}
+
 export interface InstagramFind {
   instagram: string | null;
   recent_instagram_posts: string[];
@@ -464,8 +530,19 @@ Output ONLY JSON: {"hook": "...", "description": "..."} — or {"needs_attention
  * Claude writing leg: dossier → house-voice copy. Runs on Haiku with a capped
  * output for cost (~$0.004/venue); falls back to Grok only if Claude is off.
  */
-export async function writeVenueCopy(dossier: VenueDossier): Promise<VenueCopy> {
-  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".
+export async function writeVenueCopy(
+  dossier: VenueDossier,
+  opts?: { branchOf?: string | null }
+): Promise<VenueCopy> {
+  const label = dossier.location_label || dossier.city || "this";
+  // For one location of a chain: the brand-level facts are SHARED across every
+  // outpost (inherited from the parent), so the writer must convey that shared
+  // identity through the lens of THIS specific branch — never a blurb that would
+  // fit any other location (§0 "never clone a blurb").
+  const branchNote = opts?.branchOf
+    ? `\n\nThis venue is the ${label} location of ${opts.branchOf}, a multi-location barbecue business. The dossier's brand-level facts — style, pitmaster/founders, history, cook method, wood/fuel, specialities, character — are SHARED across every outpost; treat them as real, known facts and convey that shared identity. But write copy that is SPECIFIC to THIS ${label} location: give it its own opening and angle, weaving in what's distinct here (its address, city, hours, setting) so the piece could not be mistaken for another branch. Do NOT invent any location-specific fact you weren't given.`
+    : "";
+  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}
 
 DOSSIER:
 ${JSON.stringify(dossier)}

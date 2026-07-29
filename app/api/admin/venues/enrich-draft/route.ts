@@ -6,6 +6,7 @@ import {
   researchDossier,
   researchInstagram,
   writeVenueCopy,
+  inheritBrandFacts,
   matchBbqStyle,
   priceBandToLevel,
   mapSocials,
@@ -57,18 +58,25 @@ export async function POST(request: Request) {
   // search budget re-discovering that the brand is a chain instead of finding
   // this location's address/hours/phone (the Joe's-Olathe thin-dossier case).
   let parentWebsite: string | null = null;
+  let parentDossier: VenueDossier | null = null;
   let branchNote: string | undefined;
   if (row.chain_parent_id) {
     const { data: parent } = await ctx.db
       .from("restaurants")
-      .select("website")
+      .select("website, dossier")
       .eq("id", row.chain_parent_id)
       .single();
     parentWebsite = parent?.website ?? null;
+    parentDossier = (parent?.dossier as VenueDossier | null) ?? null;
     const label = row.location_label || row.city || "this";
+    // The sibling inherits the parent's brand-level facts (below), so its
+    // research only chases THIS branch's own location facts — never the brand
+    // identity it could never verify per-outpost.
     branchNote =
       `This is the ${label} location of ${row.name}, a known multi-location barbecue chain. ` +
-      `Find THIS specific branch's street address, opening hours, and phone` +
+      `The brand's history, pitmaster, style and specialities are already known — do NOT research them. ` +
+      `Find ONLY THIS specific branch's own facts: its street address, opening hours, phone, opening date, ` +
+      `and anything unique to this ${label} location` +
       (parentWebsite ? ` — start from ${parentWebsite} and its Locations/Find-us page.` : ".") +
       ` It is definitely a chain; do not spend searches re-confirming that.`;
   } else if (row.chain_rostered_at) {
@@ -166,9 +174,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Research failed." }, { status: 502 });
   }
 
+  // Chain SIBLING: seed the dossier with the parent's verified brand-level facts
+  // (history, pitmaster, style, cook method, wood/fuel, specialities, character)
+  // BEFORE writing copy — those belong to the brand, not this outpost, so the
+  // writer composes from the shared identity + this location's own specifics
+  // instead of refusing on absent brand facts it correctly won't invent.
+  if (row.chain_parent_id && parentDossier) {
+    inheritBrandFacts(dossier, parentDossier);
+  }
+
   let copy;
   try {
-    copy = await writeVenueCopy(dossier);
+    copy = await writeVenueCopy(
+      dossier,
+      row.chain_parent_id ? { branchOf: dossier.name ?? row.name } : undefined
+    );
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Copywriting failed." }, { status: 502 });
   }
@@ -277,12 +297,22 @@ export async function POST(request: Request) {
   // Flag attention for ANY venue (draft OR approved) when the cost overran or
   // the dossier was too thin — and always CLEAR the flag on a clean run so a
   // successful re-enrich un-flags a previously-flagged venue.
-  const attention = overCeiling || copy.needs_attention;
+  //
+  // A chain SIBLING inherits its brand-level facts from the parent, so its
+  // "needs attention" must fire ONLY when THIS outpost's own location facts are
+  // missing (no address) — NEVER because brand-level facts are absent (they're
+  // inherited). The refuse-to-invent guardrail is untouched: the writer still
+  // won't fabricate, we've simply supplied it real brand facts to work from.
+  const isSibling = Boolean(row.chain_parent_id);
+  const locationFactsMissing = !address;
+  const attention = overCeiling || (isSibling ? locationFactsMissing : copy.needs_attention);
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
     ? overCeiling
       ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${CEILING} ceiling.`
-      : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
+      : isSibling
+        ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
+        : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
     : null;
 
   // For an approved (live) venue, hold changes as pending — but only if there's
