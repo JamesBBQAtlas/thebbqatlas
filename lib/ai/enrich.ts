@@ -276,9 +276,12 @@ const asStr = (v: unknown): string | null =>
 const asNum = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
 
-/** Grok research leg: one venue → one strict, facts-only dossier. */
+/** Grok research leg: one venue → one strict, facts-only dossier. `maxSearches`
+ *  lets the caller tighten the per-call web-search cap (default 3) so a later
+ *  pass fits inside a shared total-search budget. */
 export async function researchDossier(
-  lead: VenueLead
+  lead: VenueLead,
+  opts?: { maxSearches?: number }
 ): Promise<{ dossier: VenueDossier; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number }; model: string }> {
   const known = Object.entries(lead)
     .filter(([, v]) => v && String(v).trim())
@@ -295,9 +298,10 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
   const { data, citations, usage, model } = await grokJSON<Partial<VenueDossier>>({
     system: DOSSIER_SYSTEM,
     user,
-    // Cost cap: a single bounded call, HARD 3-search limit, no X-search sprawl.
+    // Cost cap: a single bounded call, HARD search limit (default 3), no X-search
+    // sprawl. Later passes pass a smaller cap to fit the shared total budget.
     maxSearchResults: 3,
-    maxSearches: 3,
+    maxSearches: Math.max(1, Math.min(3, opts?.maxSearches ?? 3)),
     xSearch: false,
   });
 
@@ -448,37 +452,30 @@ export function missingCoreAnchors(d: VenueDossier): boolean {
 }
 
 /**
- * Fill a dossier's STILL-EMPTY story/brand fields from a second research pass,
- * never overwriting facts already found. Location facts (address, hours, phone,
- * coordinates, city/country) are left untouched — the retry only chases the
- * narrative anchors. Returns a new, merged dossier with "unknowns" re-derived.
+ * MERGE two dossiers, FILL-EMPTY only — a later pass can add facts an earlier
+ * pass missed, but must NEVER null out a field the earlier pass already found.
+ * This is the anti-clobber rule: reading the homepage on pass-1 and then a thin
+ * pass-2/retry must not wipe the good pass-1 facts. `base` wins every non-empty
+ * field; `extra` only fills gaps. is_chain is OR'd; "unknowns" is re-derived.
+ * Returns a new dossier (inputs untouched).
  */
 export function mergeDossierFacts(base: VenueDossier, extra: VenueDossier): VenueDossier {
   const out: VenueDossier = { ...base };
-  const strFields = [
-    "what_it_is",
-    "established",
-    "opening_date",
-    "founders_pitmaster",
-    "bbq_style",
-    "cook_method",
-    "wood_fuel",
-    "price_band",
-    "setting_vibe",
-    "ordering_notes",
-    "website",
-    "instagram",
-  ] as const;
-  for (const f of strFields) {
-    if (!out[f] && extra[f]) out[f] = extra[f] as never;
+  for (const key of Object.keys(out) as (keyof VenueDossier)[]) {
+    if (key === "unknowns") continue; // re-derived below
+    if (key === "is_chain") {
+      out.is_chain = base.is_chain || extra.is_chain;
+      continue;
+    }
+    const cur = out[key];
+    const ext = extra[key];
+    if (Array.isArray(cur)) {
+      if (cur.length === 0 && Array.isArray(ext) && ext.length) out[key] = ext as never;
+    } else if (cur === null || cur === undefined || cur === "") {
+      if (ext !== null && ext !== undefined && ext !== "") out[key] = ext as never;
+    }
   }
-  const arrFields = ["specialities", "also_known_as", "awards_press", "other_socials"] as const;
-  for (const f of arrFields) {
-    const cur = out[f];
-    const src = extra[f];
-    if ((!cur || cur.length === 0) && Array.isArray(src) && src.length) out[f] = src as never;
-  }
-  // Re-derive "unknowns": drop any field the retry just filled.
+  // Re-derive "unknowns": drop any field now filled (by base or the merge).
   out.unknowns = base.unknowns.filter((u) => {
     const v = out[u as keyof VenueDossier];
     return Array.isArray(v) ? v.length === 0 : !v;

@@ -25,6 +25,11 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const CEILING = 0.04;
+// Hard backstop on TOTAL web searches across ALL passes of one enrich (pass-1 +
+// optional flagship pass-2 + the single retry-on-thin). The $-ceiling is the
+// secondary guard; this bounds the search COUNT itself so a parse/extraction
+// failure can never rack up a runaway tally.
+const MAX_TOTAL_SEARCHES = 6;
 
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
@@ -162,50 +167,66 @@ export async function POST(request: Request) {
   }
 
   // ---- full mode: bounded dossier + Haiku copy ---------------------------
+  // Research runs in at most a few bounded passes sharing ONE hard total-search
+  // budget, so a parse/extraction failure can NEVER run to a runaway count. Every
+  // pass FILL-EMPTY MERGES into the accumulated dossier — a later, thinner pass
+  // may ADD missing facts but must NEVER clobber facts an earlier pass found (the
+  // wholesale-replace clobber was the empty-but-expensive regression).
   let dossier: VenueDossier;
   let grokModel = GROK_MODEL;
-  // Research usage accumulates across passes (a chain flagship runs two, plus a
-  // possible retry-on-thin). ALL consulted URLs are captured so any future thin
-  // result is diagnosable at a glance from enrichment_sources.
   let grokInTokens = 0;
   let grokOutTokens = 0;
   let grokSearches = 0;
   let gCost = 0;
   const consulted = new Set<string>();
-  const trackSources = (d: VenueDossier, cites: string[]) => {
-    for (const u of [...cites, ...d.sources]) if (u) consulted.add(u);
-  };
-  try {
-    const res = await researchDossier(lead);
-    dossier = res.dossier;
-    grokModel = res.model ?? GROK_MODEL;
+  const passLog: Array<Record<string, unknown>> = [];
+  const searchesLeft = () => Math.max(0, MAX_TOTAL_SEARCHES - grokSearches);
+  const recordPass = (
+    label: string,
+    res: {
+      dossier: VenueDossier;
+      citations: string[];
+      usage: { in_tokens: number; out_tokens: number; searches: number };
+      model: string;
+    }
+  ) => {
+    grokModel = res.model ?? grokModel;
     grokInTokens += res.usage.in_tokens;
     grokOutTokens += res.usage.out_tokens;
     grokSearches += res.usage.searches;
-    gCost += grokCost(res.usage, grokModel);
-    trackSources(res.dossier, res.citations);
+    gCost += grokCost(res.usage, res.model ?? grokModel);
+    for (const u of [...res.citations, ...res.dossier.sources]) if (u) consulted.add(u);
+    // Raw per-pass diagnostics — exactly what THIS pass returned, so a "read the
+    // pages but extracted nothing" result is inspectable vs what got stored.
+    passLog.push({
+      pass: label,
+      searches: res.usage.searches,
+      out_tokens: res.usage.out_tokens,
+      model: res.model,
+      dossier: res.dossier,
+    });
+  };
+
+  try {
+    const res = await researchDossier(lead);
+    dossier = res.dossier;
+    recordPass("pass1", res);
   } catch (err) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Research failed." }, { status: 502 });
   }
 
-  // Chain SIBLING: seed the dossier with the parent's verified brand-level facts
-  // (history, pitmaster, style, cook method, wood/fuel, specialities, character)
-  // BEFORE writing copy — those belong to the brand, not this outpost, so the
-  // writer composes from the shared identity + this location's own specifics
-  // instead of refusing on absent brand facts it correctly won't invent.
+  // Chain SIBLING inherits parent brand facts BEFORE writing copy — those belong
+  // to the brand, not this outpost.
   if (row.chain_parent_id && parentDossier) {
     inheritBrandFacts(dossier, parentDossier);
   }
 
-  // ── Chain flagship: DETERMINISTIC detect → seed → roster-stamp → pass-2 ───
-  // When pass-1 reveals a PARENT to be a chain, we ALWAYS, in THIS one request:
-  //   (a) seed its sibling locations,
-  //   (b) stamp chain_rostered_at immediately (never leave siblings created but
-  //       the flag unset — the intermittent-regression root cause), and
-  //   (c) run pass-2, a focused fact-enrich of the flagship's OWN facts, so it
-  //       reliably ends RICH instead of stuck in the thin pass-1 state.
-  // No client round-trip and no manual gateway click — that fragile handoff is
-  // what dropped pass-2 last run.
+  // ── Chain flagship: DETERMINISTIC detect → seed → roster-stamp (→ pass-2) ──
+  // Seeding + the roster stamp are UNCONDITIONAL for a detected chain parent, so
+  // the flag is never left unset. Pass-2 (the flagship's own-facts pass) runs
+  // ONLY if pass-1 came back thin AND there's search budget left: a rich pass-1
+  // already stands (the known-good ~$0.026 single-pass result) and a thinner
+  // pass-2 must never clobber it — hence the fill-empty MERGE.
   const isParent = !row.chain_parent_id;
   const detectedChain = isParent && dossier.is_chain;
   const alreadyRostered = Boolean(row.chain_rostered_at);
@@ -228,61 +249,46 @@ export async function POST(request: Request) {
       .eq("id", restaurantId);
     rosteredNow = true;
 
-    // Pass 2: the chain is catalogued now, so spend the whole budget on THIS
-    // flagship's own facts rather than re-discovering the chain.
-    const flagshipLead: VenueLead = {
-      ...lead,
-      notes:
-        `${dossier.name ?? row.name} is a known multi-location barbecue chain whose locations are ALREADY catalogued. ` +
-        `Do NOT research, list, or spend any searches on its other locations. ` +
-        `Read the brand's ABOUT / OUR STORY / HISTORY page or its HOMEPAGE for the founding/established date, founders/pitmaster, cook method, wood/fuel and signature specialities — these are NOT on a per-location page. ` +
-        `Then use this flagship's own location page for its hours, phone and address. ` +
-        `Spend the entire budget on THIS flagship's own facts and story, not the chain's other branches.`,
-    };
-    try {
-      const res2 = await researchDossier(flagshipLead);
-      // Keep pass-1's chain roster fields (pass-2 was told to ignore them and may
-      // return them empty).
-      dossier = {
-        ...res2.dossier,
-        is_chain: true,
-        chain_locations: dossier.chain_locations,
-        chain_locations_url: dossier.chain_locations_url ?? res2.dossier.chain_locations_url,
+    if (missingCoreAnchors(dossier) && searchesLeft() > 0) {
+      const flagshipLead: VenueLead = {
+        ...lead,
+        notes:
+          `${dossier.name ?? row.name} is a known multi-location barbecue chain whose locations are ALREADY catalogued. ` +
+          `Do NOT research or spend searches on its other locations. ` +
+          `Read the brand's ABOUT / OUR STORY / HISTORY page or its HOMEPAGE for the founding/established date, founders/pitmaster, cook method, wood/fuel and signature specialities. ` +
+          `Then use this flagship's own location page for its hours, phone and address.`,
       };
-      grokModel = res2.model ?? grokModel;
-      grokInTokens += res2.usage.in_tokens;
-      grokOutTokens += res2.usage.out_tokens;
-      grokSearches += res2.usage.searches;
-      gCost += grokCost(res2.usage, res2.model ?? grokModel);
-      trackSources(res2.dossier, res2.citations);
-      twoPass = true;
-    } catch {
-      // Pass-2 failed — do NOT silently commit the thin pass-1 copy. The flag is
-      // already stamped and the siblings seeded, so re-running Enrich on the
-      // flagship takes the already-rostered path (a single focused facts pass).
-      return NextResponse.json(
-        {
-          error:
-            "Chain detected and its locations were seeded, but the flagship's facts pass failed. Re-run Enrich on the flagship to finish it.",
-          retry_pass2: true,
-          is_chain: true,
-          is_chain_parent: true,
-          chain_seeds: seeded?.added ?? [],
-        },
-        { status: 502 }
-      );
+      try {
+        const res2 = await researchDossier(flagshipLead, { maxSearches: searchesLeft() });
+        // MERGE fill-empty — NEVER clobber the rich pass-1 with a thinner pass-2.
+        dossier = mergeDossierFacts(dossier, res2.dossier);
+        recordPass("flagship_pass2", res2);
+        twoPass = true;
+      } catch {
+        // Pass-2 failed — the flag is already stamped + siblings seeded, so
+        // re-running Enrich takes the already-rostered path. Don't commit thin.
+        return NextResponse.json(
+          {
+            error:
+              "Chain detected and its locations were seeded, but the flagship's facts pass failed. Re-run Enrich on the flagship to finish it.",
+            retry_pass2: true,
+            is_chain: true,
+            is_chain_parent: true,
+            chain_seeds: seeded?.added ?? [],
+          },
+          { status: 502 }
+        );
+      }
     }
   }
 
-  // ── Retry-on-thin: read the About/story page before flagging "needs attention"
-  // If this venue's OWN dossier still lacks the core anchors (founding, pitmaster,
-  // method, specialities), the research probably read a thin per-location stub
-  // rather than the About/Our-Story/History page. Do ONE steered retry — pointed
-  // at the site's story/homepage — and fill only the still-empty story fields.
-  // Siblings inherit brand facts, so this is for parents/standalone venues only,
-  // and there's ceiling headroom (the two-pass ceiling is doubled).
+  // ── Retry-on-thin: fire AT MOST ONCE, only within the search budget ────────
+  // If a parent/standalone dossier still lacks core anchors, the research likely
+  // read a per-location stub, not the About/story page. ONE more steered search
+  // — never a loop, never past the budget — MERGED fill-empty. Siblings inherit
+  // brand facts, so this is parents/standalone only.
   let retriedThin = false;
-  if (!row.chain_parent_id && missingCoreAnchors(dossier)) {
+  if (!row.chain_parent_id && missingCoreAnchors(dossier) && searchesLeft() > 0) {
     const site = dossier.website ?? lead.website ?? null;
     let root: string | null = null;
     try {
@@ -295,24 +301,17 @@ export async function POST(request: Request) {
       website: site ?? undefined,
       notes:
         `Read ${dossier.name ?? row.name}'s OWN About / Our Story / History page or its HOMEPAGE` +
-        (root ? ` — start at ${root} (try ${root}/about, ${root}/our-story, ${root}/history)` : "") +
-        `. Find the FOUNDING/established year, the PITMASTER/owner(s), the COOK METHOD and WOOD/FUEL, and the signature SPECIALITIES. These live on the story/about/homepage, NOT a per-location landing page — do NOT settle for a location stub.`,
+        (root ? ` — start at ${root}` : "") +
+        ` for the FOUNDING/established year, PITMASTER/owner(s), COOK METHOD and WOOD/FUEL, and signature SPECIALITIES. These live on the story/homepage, NOT a per-location stub.`,
     };
     try {
-      const retry = await researchDossier(retryLead);
+      const retry = await researchDossier(retryLead, { maxSearches: searchesLeft() });
       dossier = mergeDossierFacts(dossier, retry.dossier);
-      grokModel = retry.model ?? grokModel;
-      grokInTokens += retry.usage.in_tokens;
-      grokOutTokens += retry.usage.out_tokens;
-      grokSearches += retry.usage.searches;
-      gCost += grokCost(retry.usage, retry.model ?? grokModel);
-      trackSources(retry.dossier, retry.citations);
+      recordPass("retry_thin", retry);
       retriedThin = true;
-      // A retry legitimately spends more; grant the doubled ceiling headroom.
-      twoPass = true;
+      twoPass = true; // used the doubled-ceiling headroom
     } catch {
-      // Keep what we have — the honest "needs attention" flag remains the final
-      // fallback when the About/story genuinely can't be reached.
+      // Keep what we have — the honest "needs attention" flag is the final fallback.
     }
   }
 
@@ -429,10 +428,15 @@ export async function POST(request: Request) {
       grok_cost: round4(gCost),
       claude_cost: round4(cCost),
       search_cost: round4(grokSearches * 0.005),
+      total_searches: grokSearches,
+      passes: passLog.length,
       action: twoPass ? "enrich (2-pass)" : "enrich",
     },
     enrichment_model: `${grokModel} + ${claudeModel}`,
     enrichment_sources: sources.length ? sources : null,
+    // Per-pass raw dossiers + usage, so a "read the pages but extracted nothing"
+    // result is diagnosable (what each pass returned vs what got stored).
+    enrichment_debug: { passes: passLog, total_searches: grokSearches },
   };
   // Flag attention for ANY venue (draft OR approved) when the cost overran or
   // the dossier was too thin — and always CLEAR the flag on a clean run so a
@@ -445,14 +449,20 @@ export async function POST(request: Request) {
   // won't fabricate, we've simply supplied it real brand facts to work from.
   const isSibling = Boolean(row.chain_parent_id);
   const locationFactsMissing = !address;
-  const attention = overCeiling || (isSibling ? locationFactsMissing : copy.needs_attention);
+  // If the search budget was blown (an API cap leak), stop trusting the result
+  // and flag — never let a runaway pass through silently.
+  const searchRunaway = grokSearches > MAX_TOTAL_SEARCHES;
+  const attention =
+    overCeiling || searchRunaway || (isSibling ? locationFactsMissing : copy.needs_attention);
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
     ? overCeiling
       ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${runCeiling} ceiling.`
-      : isSibling
-        ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
-        : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
+      : searchRunaway
+        ? `Search budget exceeded (${grokSearches} > ${MAX_TOTAL_SEARCHES}) — stopped and flagged; check enrichment_debug.`
+        : isSibling
+          ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
+          : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
     : null;
 
   // For an approved (live) venue, hold changes as pending — but only if there's
