@@ -579,7 +579,9 @@ Return ONLY the JSON list of every branch.`;
     system: ROSTER_SYSTEM,
     user,
     maxSearchResults: 5,
-    maxSearches: Math.max(1, Math.min(5, opts.maxSearches ?? 5)),
+    // Roster is the approved token-spend step — allow up to 8 searches so the
+    // /locations page is read fully (no more missing branches).
+    maxSearches: Math.max(1, Math.min(8, opts.maxSearches ?? 5)),
     xSearch: false,
   });
   const raw = Array.isArray((data as { locations?: unknown }).locations)

@@ -1,19 +1,42 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
-import { mergeDossierFacts, missingCoreAnchors, type VenueDossier } from "@/lib/ai/enrich";
-import { populateFlagship } from "@/lib/admin/flagship";
 import { revalidateVenues } from "@/lib/cache/venues";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+export const maxDuration = 60;
 
 /**
- * Human picks the flagship for an AMBIGUOUS chain (one the research couldn't
- * auto-resolve). The chosen location becomes the parent, carries the brand facts
- * (reused from whichever member gathered them during discovery), gets its
- * brand-level page written (Claude only, NO web search), and every other member
- * re-points to it and unlocks for the normal cheap sibling inheritance.
+ * Step 3 — the operator picks the flagship for a chain in the "flagship not set"
+ * state. This does the RELIABLE, deterministic part only:
+ *   - the chosen location becomes the parent (chain_parent_id = null,
+ *     flagship_unset = false, rostered);
+ *   - every other member re-points to it as a sibling and unlocks;
+ *   - the brand's known Instagram/socials are pre-filled onto the siblings as
+ *     EDITABLE DEFAULTS (fill-empty — a sibling that runs its own account keeps it).
+ * The flagship's own page is then written by the trusted enrich path (the client
+ * auto-enriches it), NOT by a guess here — only a confirmed flagship may claim
+ * "where it all began".
  */
+interface MemberRow {
+  id: string;
+  status: string | null;
+  instagram_url: string | null;
+  instagram_handle: string | null;
+  x_url: string | null;
+  facebook_url: string | null;
+  tiktok_url: string | null;
+  youtube_url: string | null;
+}
+
+const SOCIAL_COLS = [
+  "instagram_url",
+  "instagram_handle",
+  "x_url",
+  "facebook_url",
+  "tiktok_url",
+  "youtube_url",
+] as const;
+
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
   if (!ctx) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -24,126 +47,82 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "restaurantId required." }, { status: 400 });
   }
 
+  const cols = "id, name, city, status, chain_parent_id, " + SOCIAL_COLS.join(", ");
+
   const { data: chosen, error: loadErr } = await ctx.db
     .from("restaurants")
-    .select("id, name, city, address, status, chain_parent_id, dossier")
+    .select(cols)
     .eq("id", restaurantId)
     .single();
   if (loadErr || !chosen) {
     return NextResponse.json({ error: "Venue not found." }, { status: 404 });
   }
+  const chosenRow = chosen as unknown as MemberRow & {
+    name: string;
+    city: string | null;
+    chain_parent_id: string | null;
+  };
 
   // The chain group is rooted at the current temp parent (this row, or its parent
   // if this row is a seed under one). Members = root + all rows under the root.
-  const rootId = (chosen.chain_parent_id as string | null) ?? (chosen.id as string);
-  const { data: underRoot } = await ctx.db
-    .from("restaurants")
-    .select("id, name, city, address, status, dossier")
-    .eq("chain_parent_id", rootId);
-  const { data: rootRow } = await ctx.db
-    .from("restaurants")
-    .select("id, name, city, address, status, dossier")
-    .eq("id", rootId)
-    .single();
+  const rootId = chosenRow.chain_parent_id ?? chosenRow.id;
+  const { data: underRoot } = await ctx.db.from("restaurants").select(cols).eq("chain_parent_id", rootId);
+  const { data: rootRow } = await ctx.db.from("restaurants").select(cols).eq("id", rootId).single();
   const members = [
     ...(rootRow ? [rootRow] : []),
     ...(underRoot ?? []),
-  ] as unknown as Array<{ id: string; dossier: VenueDossier | null }>;
+  ] as unknown as MemberRow[];
 
-  // Reuse the brand facts already gathered during discovery: the richest member
-  // dossier (the temp parent that did the discovery usually carries them).
-  let brandDossier: VenueDossier | null = null;
-  for (const m of members) {
-    const d = m.dossier;
-    if (d && !missingCoreAnchors(d)) {
-      brandDossier = d;
-      break;
+  // The brand's known socials — from whichever member already has them (usually
+  // the Step-1-enriched started venue). Used as editable defaults for siblings.
+  const brandSocials: Record<string, string> = {};
+  for (const col of SOCIAL_COLS) {
+    for (const m of members) {
+      const v = m[col];
+      if (v) {
+        brandSocials[col] = v;
+        break;
+      }
     }
   }
-  if (!brandDossier) brandDossier = (chosen.dossier as VenueDossier | null) ?? null;
-
-  // Build the chosen flagship's dossier: keep ITS own location facts (from its
-  // row / dossier), fill in the brand facts. Never clobber.
-  const chosenBase: VenueDossier | null = (chosen.dossier as VenueDossier | null) ?? null;
-  const seedFromRow: VenueDossier = {
-    name: (chosen.name as string) ?? null,
-    also_known_as: [],
-    what_it_is: null,
-    address: (chosen.address as string) ?? null,
-    city: (chosen.city as string) ?? null,
-    region_state: null,
-    country: null,
-    postcode: null,
-    lat: null,
-    lng: null,
-    phone: null,
-    website: null,
-    instagram: null,
-    other_socials: [],
-    hours: null,
-    established: null,
-    opening_date: null,
-    flagship_location: null,
-    founders_pitmaster: null,
-    bbq_style: null,
-    specialities: [],
-    cook_method: null,
-    wood_fuel: null,
-    price_band: null,
-    awards_press: [],
-    setting_vibe: null,
-    ordering_notes: null,
-    best_photo_post_url: null,
-    recent_instagram_posts: [],
-    location_label: null,
-    is_chain: true,
-    chain_locations: [],
-    chain_locations_url: null,
-    sources: [],
-    unknowns: [],
-  };
-  const base = chosenBase ? { ...chosenBase, is_chain: true } : seedFromRow;
-  const finalDossier: VenueDossier = brandDossier ? mergeDossierFacts(base, brandDossier) : base;
-  finalDossier.is_chain = true;
 
   const nowIso = new Date().toISOString();
 
-  // Reassign the hierarchy: chosen becomes the parent; every OTHER member points
-  // to it. Clear the "flagship not set" flag across the whole group.
+  // Chosen becomes the CONFIRMED flagship parent.
   await ctx.db
     .from("restaurants")
-    .update({ chain_parent_id: null, chain_rostered_at: nowIso, flagship_unset: false })
-    .eq("id", chosen.id);
-  for (const m of members) {
-    if (m.id === chosen.id) continue;
-    // Demote to a sibling and clear the now-stale "flagship not set" attention.
-    await ctx.db
-      .from("restaurants")
-      .update({
-        chain_parent_id: chosen.id,
-        flagship_unset: false,
-        needs_attention: false,
-        attention_reason: null,
-      })
-      .eq("id", m.id);
-  }
+    .update({
+      chain_parent_id: null,
+      chain_rostered_at: nowIso,
+      flagship_unset: false,
+      chain_candidate: false,
+    })
+    .eq("id", chosenRow.id);
 
-  // Populate the chosen flagship's brand-level page (Claude only — NO web search).
-  const { copyWritten } = await populateFlagship(ctx.db, {
-    flagshipId: chosen.id as string,
-    status: (chosen.status as string) ?? "pending",
-    dossier: finalDossier,
-    grokModel: "set-flagship",
-  });
+  // Every other member → sibling. Pre-fill brand socials as EDITABLE DEFAULTS
+  // (fill-empty only), clear the stale "flagship not set" attention.
+  for (const m of members) {
+    if (m.id === chosenRow.id) continue;
+    const patch: Record<string, unknown> = {
+      chain_parent_id: chosenRow.id,
+      flagship_unset: false,
+      needs_attention: false,
+      attention_reason: null,
+    };
+    for (const col of SOCIAL_COLS) {
+      if (!m[col] && brandSocials[col]) patch[col] = brandSocials[col];
+    }
+    await ctx.db.from("restaurants").update(patch).eq("id", m.id);
+  }
 
   revalidateVenues();
   return NextResponse.json({
     ok: true,
-    flagship_id: chosen.id,
-    flagship_name: chosen.name,
-    copy_written: copyWritten,
-    message: copyWritten
-      ? `${chosen.name}${chosen.city ? ` (${chosen.city})` : ""} set as the flagship — its page is written and the other locations are now siblings.`
-      : `${chosen.name}${chosen.city ? ` (${chosen.city})` : ""} set as the flagship — enrich it to write its page; the other locations are now siblings.`,
+    flagship_id: chosenRow.id,
+    flagship_name: chosenRow.name,
+    // Tell the client to enrich the flagship via the trusted path — it's now a
+    // confirmed flagship, so its copy may reference "where it all began".
+    enrich_flagship: true,
+    message: `${chosenRow.name}${chosenRow.city ? ` (${chosenRow.city})` : ""} set as the flagship — enriching its page now; the other locations are siblings with the brand socials pre-filled.`,
   });
 }

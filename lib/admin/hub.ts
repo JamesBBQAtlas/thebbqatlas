@@ -73,6 +73,7 @@ export function toHubVenue(r: Restaurant): HubVenue {
     isChainParent: !r.chain_parent_id && Boolean((r.dossier as { is_chain?: boolean } | null)?.is_chain),
     chainRostered: Boolean(r.chain_rostered_at),
     flagshipUnset: Boolean((r as { flagship_unset?: boolean }).flagship_unset),
+    chainCandidate: Boolean((r as { chain_candidate?: boolean }).chain_candidate),
     lat: r.lat,
     lng: r.lng,
   };

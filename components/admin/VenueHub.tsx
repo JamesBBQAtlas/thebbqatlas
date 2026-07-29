@@ -50,6 +50,7 @@ export interface HubVenue {
   isChainParent: boolean;
   chainRostered: boolean;
   flagshipUnset: boolean;
+  chainCandidate: boolean;
   lat: number;
   lng: number;
 }
@@ -491,48 +492,9 @@ export function VenueHub({
     // Branch-first discovery: we enriched a branch, the true flagship was created
     // & populated with the brand facts, and this row was demoted to a clean
     // sibling. Show the helpful next-step message — no preview, no attention flag.
-    if (data.branch_first_discovery) {
-      setRowResult((p) => ({ ...p, [v.id]: { msg: (data.message ?? "Flagship identified.") + costNote } }));
-      router.refresh();
-      return;
-    }
-    // Ambiguous flagship: the roster was built and the chain marked "flagship not
-    // set". Surface the pick-one guidance (the row now shows "Set as flagship").
-    if (data.flagship_unset) {
-      setRowResult((p) => ({
-        ...p,
-        [v.id]: { warn: (data.flagship_unset_message ?? "Chain detected — pick the flagship.") + costNote },
-      }));
-      router.refresh();
-      return;
-    }
-    // Chain detected on a PARENT enrich (§09.2). Siblings report is_chain:false,
-    // so this never fires for them (loop fix). Skip the gateway if the chain has
-    // already been rostered once.
-    const sr = data.chain_seed_result as
-      | { found: number; added: unknown[]; updated: unknown[]; matchedParent: number }
-      | null
-      | undefined;
-    const seeds: { label: string; city: string | null }[] = Array.isArray(data.chain_seeds)
-      ? data.chain_seeds
-      : [];
-    if (kind === "enrich" && data.is_chain && data.is_chain_parent && !data.chain_already_rostered) {
-      setChainGateway({
-        venueId: v.id,
-        brand: data.brand ?? v.name,
-        chainLocationsUrl: data.chain_locations_url ?? null,
-        seeded: seeds,
-        scanning: false,
-        rostered: false,
-        result: null,
-      });
-    }
-    const chainNote =
-      kind === "enrich" && data.is_chain
-        ? sr
-          ? ` · chain — ${sr.found} found · ${sr.added.length} new · ${sr.updated.length + sr.matchedParent} already present`
-          : ` · part of a chain`
-        : "";
+    // Step 1: plain single-venue enrich detected the venue LOOKS like a chain.
+    // Soft note only — nothing is created or crowned; the row shows "Build roster".
+    const chainNote = data.chain_candidate ? ` · looks like a chain — Build roster to add its locations` : "";
 
     // Dossier too thin → no copy written. Don't pop an empty Preview; show the
     // reason as an amber warning on the row (it also persists on the row after
@@ -621,8 +583,42 @@ export function VenueHub({
     router.refresh();
   }
 
-  // Human picks the flagship for an ambiguous chain — one click sets the origin,
-  // populates it, and re-points the others as siblings.
+  // Step 2 — Build roster: read the brand's /locations page and add every branch
+  // as a seed in the "flagship not set" state. Claims nothing; nothing re-sorts.
+  async function buildRoster(v: HubVenue) {
+    keepScroll();
+    markActed(v.id);
+    setRowResult((p) => ({ ...p, [v.id]: {} }));
+    setState(v.id, "running");
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(
+        "/api/admin/venues/chain-roster",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: v.id }) },
+        240_000
+      );
+    } catch {
+      setState(v.id, "idle");
+      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setState(v.id, "idle");
+    if (!res.ok) {
+      setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Roster scan failed" } }));
+      return;
+    }
+    const summary = data.summary ?? `${data.found ?? 0} found · ${data.added ?? 0} new`;
+    setRowResult((p) => ({
+      ...p,
+      [v.id]: { warn: `Roster built — ${summary}. Flagship not set — pick the original with “Set as flagship”.` },
+    }));
+    router.refresh();
+  }
+
+  // Step 3 — operator picks the flagship. Sets the origin + re-points siblings
+  // (brand socials pre-filled as editable defaults), then enriches the flagship
+  // via the trusted single-venue path so only a confirmed flagship claims origin.
   async function setFlagship(v: HubVenue) {
     keepScroll();
     markActed(v.id);
@@ -641,12 +637,21 @@ export function VenueHub({
       return;
     }
     const data = await res.json().catch(() => ({}));
-    setState(v.id, "idle");
     if (!res.ok) {
+      setState(v.id, "idle");
       setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Failed" } }));
       return;
     }
     setRowResult((p) => ({ ...p, [v.id]: { msg: data.message ?? "Flagship set ✓" } }));
+    // The chosen row is now a confirmed flagship — enrich it via the trusted path.
+    if (data.enrich_flagship) {
+      const fv = venueById.get(String(data.flagship_id ?? v.id));
+      if (fv) {
+        await single(fv, "enrich");
+        return;
+      }
+    }
+    setState(v.id, "idle");
     router.refresh();
   }
 
@@ -875,9 +880,9 @@ export function VenueHub({
                         {indent && <span className="mr-1 text-brand-sienna-light" aria-hidden="true">↳</span>}
                         {v.name}
                         {v.location_label && <span className="ml-1.5 text-xs font-normal text-brand-sienna-light">· {v.location_label}</span>}
-                        {/* Confident FLAGSHIP badge — ONLY when the flagship is
-                            confirmed (never while it's unset/ambiguous). */}
-                        {!v.chainSeed && (v.isChainParent || v.chainRostered) && !v.flagshipUnset && (
+                        {/* Confident FLAGSHIP badge — ONLY on a CONFIRMED flagship
+                            (rostered AND flagship set). Never while flagship_unset. */}
+                        {!v.chainSeed && v.chainRostered && !v.flagshipUnset && (
                           <span
                             title="Flagship — the chain's home / original location"
                             className="ml-2 inline-flex items-center gap-1 rounded-full border border-brand-gold/50 bg-brand-gold/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-gold"
@@ -899,8 +904,24 @@ export function VenueHub({
                       {v.needs_attention && v.attention_reason && (
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
                       )}
-                      {/* Ambiguous chain: one-click pick of the original on every
-                          member (temp parent + seeds). */}
+                      {/* Step 1 → 2: this venue looks like a chain but has no roster
+                          yet — offer to build it. Nothing is crowned. */}
+                      {v.chainCandidate && !v.chainRostered && !v.chainSeed && !v.flagshipUnset && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => buildRoster(v)}
+                            disabled={busy}
+                            title="Read the brand's locations page and add every branch as a seed"
+                            className="inline-flex items-center gap-1 rounded-md border border-brand-sienna/50 bg-brand-sienna/10 px-2 py-0.5 text-xs font-bold uppercase tracking-[0.03em] text-brand-sienna-light transition-colors hover:bg-brand-sienna/20 disabled:opacity-40"
+                          >
+                            <Store className="h-3 w-3" />Build roster
+                          </button>
+                          <span className="text-xs text-text-muted">Looks like a chain</span>
+                        </div>
+                      )}
+                      {/* Step 3: chain in "flagship not set" state — one-click pick
+                          of the original on every member. */}
                       {v.flagshipUnset && (
                         <div className="mt-1">
                           <button

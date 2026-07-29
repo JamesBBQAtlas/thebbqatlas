@@ -4,6 +4,7 @@ import { GROK_ENABLED, GROK_MODEL } from "@/lib/ai/grok";
 import { researchChainRoster } from "@/lib/ai/enrich";
 import { grokCost, round4 } from "@/lib/ai/cost";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
+import { revalidateVenues } from "@/lib/cache/venues";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -68,10 +69,15 @@ export async function POST(request: Request) {
 
   let roster;
   try {
+    // Step 2 is the token-spend step we approved: read the brand's OWN /locations
+    // page fully and enumerate EVERY branch (this is what kept missing Fort
+    // Worth / Waco / Lockhart). Give it room — up to 8 searches — and prefer the
+    // official site's list over open-web results.
     roster = await researchChainRoster({
       brand,
       url: dossier.chain_locations_url ?? null,
       country: row.country ?? null,
+      maxSearches: 8,
     });
   } catch (err) {
     return NextResponse.json(
@@ -93,20 +99,32 @@ export async function POST(request: Request) {
     roster.locations.map((l) => ({ name: l.name, address: l.address, city: l.city }))
   );
 
-  // Record the roster-scan spend AND stamp the chain as rostered so the gateway
-  // is never offered again for this chain (§09.2.1).
+  // Record the roster-scan spend, stamp the chain as rostered, and CLAIM NOTHING:
+  // the whole chain enters the "flagship not set — pick one" state. No row is
+  // crowned; the started venue keeps its own rich copy and simply becomes one
+  // member. The soft chain_candidate flag is cleared (roster now built).
+  const nowIso = new Date().toISOString();
   await ctx.db
     .from("restaurants")
     .update({
       enrichment_cost: round4(priorCost + cost),
-      chain_rostered_at: new Date().toISOString(),
+      chain_rostered_at: nowIso,
+      flagship_unset: true,
+      chain_candidate: false,
     })
     .eq("id", restaurantId);
+  // Every seeded branch is also "flagship not set" (badge suppressed; each offers
+  // "Set as flagship").
+  await ctx.db.from("restaurants").update({ flagship_unset: true }).eq("chain_parent_id", restaurantId);
+
+  // Roster membership can change what the public chain/venue pages show — refresh.
+  revalidateVenues();
 
   const alreadyPresent = result.updated.length + result.matchedParent;
   return NextResponse.json({
     ok: true,
     brand,
+    flagship_unset: true,
     // One honest, consistent readout (§09.2.3).
     found: result.found,
     added: result.added.length,
