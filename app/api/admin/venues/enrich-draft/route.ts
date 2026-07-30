@@ -16,7 +16,9 @@ import {
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
+import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
+import { desiredVenueSlug } from "@/lib/admin/slug";
 import { composeAddress, preferFullerAddress } from "@/lib/admin/address";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +51,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, location_label, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset"
+      "id, slug, name, location_label, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset"
     )
     .eq("id", restaurantId)
     .single();
@@ -161,6 +163,10 @@ export async function POST(request: Request) {
     }
     const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
     if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+    // Find IG writes socials/handle straight onto the live row — refresh the
+    // public page so the new link-out logos actually show (they were saved but
+    // the cached page kept the old render).
+    if (row.status === "approved") revalidateVenues();
     return NextResponse.json({ ok: true, mode, name: row.name, posts: find.recent_instagram_posts.length, cost });
   }
 
@@ -347,6 +353,23 @@ export async function POST(request: Request) {
   // Canonical country name (one chip per country; stops the USA/United States,
   // Mexico/México split re-appearing as we enrich).
   if (country) proposed.country = canonicalCountry(country);
+
+  // Slug regeneration (root-cause fix): when enrich corrects a venue's city/name,
+  // its slug can go stale (a Dallas venue stuck at a "…-austin" URL). Regenerate
+  // it — but ONLY for a not-yet-approved row (safe/low-traffic), and always leave
+  // a 301 so no link breaks. An approved venue's live slug is left alone (the
+  // operator can rename it deliberately via the admin edit).
+  if (row.status !== "approved") {
+    const finalName = (dossier.name as string) || row.name;
+    const finalCity = (city as string) || row.city || null;
+    const newSlug = await desiredVenueSlug(ctx.db, restaurantId, finalName, finalCity, row.slug);
+    if (row.slug && newSlug !== row.slug) {
+      proposed.slug = newSlug;
+      await ctx.db
+        .from("slug_redirects")
+        .upsert({ old_slug: row.slug, new_slug: newSlug }, { onConflict: "old_slug" });
+    }
+  }
 
   // Metadata always commits (cost, dossier, model). needs_attention flags the
   // draft copy or a cost overrun.

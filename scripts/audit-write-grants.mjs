@@ -32,6 +32,9 @@ const GRANT_POLICY = new Set([
 const SERVICE_ROLE = new Set([
   "email_subscribers", "email_log", "subscriptions", "orders",
   "contact_messages", "role_change_log", "enrichment_runs",
+  // Admin-only slug 301 map — written solely by admin routes via the service-role
+  // client (never by end users), so no public grant/RLS policy is needed.
+  "slug_redirects",
 ]);
 
 const WRITE_METHODS = /\.(insert|update|delete|upsert)\s*\(/;

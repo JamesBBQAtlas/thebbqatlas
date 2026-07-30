@@ -17,6 +17,7 @@ import {
   X,
   Store,
   Crown,
+  MapPin,
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
@@ -188,6 +189,7 @@ export function VenueHub({
   const [paused, setPaused] = useState(false);
   const [progress, setProgress] = useState({ done: 0, attention: 0, total: 0, kind: "" as string });
   const [heroOpen, setHeroOpen] = useState<string | null>(null);
+  const [locOpen, setLocOpen] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [rowResult, setRowResult] = useState<Record<string, { msg?: string; err?: string; warn?: string }>>({});
   const [confirmBatch, setConfirmBatch] = useState<{ kind: ActionKind; n: number; est: number } | null>(null);
@@ -615,6 +617,14 @@ export function VenueHub({
       setRowResult((p) => ({ ...p, [v.id]: { err: `Roster scan failed — ${data.error ?? "try again"}` } }));
       return;
     }
+    if (data.not_a_chain) {
+      setRowResult((p) => ({
+        ...p,
+        [v.id]: { msg: data.message ?? "No other locations found — treated as a single venue." },
+      }));
+      router.refresh();
+      return;
+    }
     const found = data.found ?? 0;
     const added = data.added ?? 0;
     setRowResult((p) => ({
@@ -623,6 +633,34 @@ export function VenueHub({
         warn: `Found ${found} location${found === 1 ? "" : "s"} (${added} new) — flagship not set. Pick the original with “Set as flagship”.`,
       },
     }));
+    router.refresh();
+  }
+
+  // Operator clears a false-positive chain candidate without running a scan.
+  async function dismissChain(v: HubVenue) {
+    keepScroll();
+    markActed(v.id);
+    setState(v.id, "running");
+    setRowResult((p) => ({ ...p, [v.id]: {} }));
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/venues/dismiss-chain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: v.id }),
+      });
+    } catch {
+      setState(v.id, "idle");
+      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setState(v.id, "idle");
+    if (!res.ok) {
+      setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Failed" } }));
+      return;
+    }
+    setRowResult((p) => ({ ...p, [v.id]: { msg: data.message ?? "Cleared — single venue." } }));
     router.refresh();
   }
 
@@ -933,11 +971,19 @@ export function VenueHub({
                             onClick={() => buildRoster(v)}
                             disabled={busy}
                             title="Read the brand's locations page and add every branch as a seed"
-                            className="inline-flex items-center gap-1 rounded-md border border-brand-sienna/50 bg-brand-sienna/10 px-2 py-0.5 text-xs font-bold uppercase tracking-[0.03em] text-brand-sienna-light transition-colors hover:bg-brand-sienna/20 disabled:opacity-40"
+                            className="inline-flex items-center gap-1 rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2 py-0.5 text-xs font-bold uppercase tracking-[0.03em] text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-40"
                           >
                             <Store className="h-3 w-3" />Build roster
                           </button>
-                          <span className="text-xs text-text-muted">Looks like a chain</span>
+                          <button
+                            type="button"
+                            onClick={() => dismissChain(v)}
+                            disabled={busy}
+                            title="Not a chain — clear the flag and treat as a single venue"
+                            className="text-xs text-text-muted underline-offset-2 hover:text-text-primary hover:underline disabled:opacity-40"
+                          >
+                            Not a chain
+                          </button>
                         </div>
                       )}
                       {/* Step 3: chain in "flagship not set" state — one-click pick
@@ -995,9 +1041,11 @@ export function VenueHub({
                       {rowResult[v.id]?.err && <div className="mt-1 text-xs text-destructive">{rowResult[v.id]?.err}</div>}
                     </td>
                     <td className="px-3 py-3">
-                      {rt && rt !== "idle" ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand-gold">{busy && <Loader2 className="h-3 w-3 animate-spin" />}{rt === "running" ? "Working…" : rt === "queued" ? "Queued" : rt === "attention" ? "Attention" : rt === "error" ? (status[v.id]?.msg ?? "Error") : "Done"}</span>
+                      {rt && rt !== "idle" && rt !== "done" ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-brand-gold">{busy && <Loader2 className="h-3 w-3 animate-spin" />}{rt === "running" ? "Working…" : rt === "queued" ? "Queued" : rt === "attention" ? "Attention" : (status[v.id]?.msg ?? "Error")}</span>
                       ) : (
+                        /* One consistent label for the approved state — a finished
+                           ("done") row shows its real status, never a stray "Done". */
                         <span className="text-xs capitalize text-text-secondary">{v.status === "approved" ? "Published" : v.status}</span>
                       )}
                     </td>
@@ -1028,6 +1076,7 @@ export function VenueHub({
                           <Instagram className={`h-3.5 w-3.5 ${v.hasIG ? "text-emerald-400" : ""}`} />
                         </IconBtn>
                         <IconBtn title="Hero image" onClick={() => setHeroOpen(heroOpen === v.id ? null : v.id)}><ImageIcon className="h-3.5 w-3.5" /></IconBtn>
+                        <IconBtn title="Edit address & map pin" onClick={() => setLocOpen(locOpen === v.id ? null : v.id)}><MapPin className="h-3.5 w-3.5" /></IconBtn>
                         <button type="button" onClick={() => setPreview(previewFromRow(v))} title="Preview the copy that will publish" className="inline-flex shrink-0 items-center rounded-md border border-border-strong p-1.5 text-text-primary transition-colors hover:border-brand-gold/60 hover:text-brand-gold">
                           <Eye className="h-3.5 w-3.5" />
                         </button>
@@ -1052,6 +1101,13 @@ export function VenueHub({
                     <tr className="border-t border-border-subtle bg-surface-1/40">
                       <td colSpan={7} className="px-3 py-4">
                         <HeroPanel venue={v} styleOptions={styleOptions} onDone={() => { setHeroOpen(null); router.refresh(); }} />
+                      </td>
+                    </tr>
+                  )}
+                  {locOpen === v.id && (
+                    <tr className="border-t border-border-subtle bg-surface-1/40">
+                      <td colSpan={7} className="px-3 py-4">
+                        <LocationPanel venue={v} onDone={() => { markActed(v.id); setLocOpen(null); router.refresh(); }} />
                       </td>
                     </tr>
                   )}
@@ -1130,6 +1186,91 @@ function IconBtn({ children, title, onClick, busy }: { children: React.ReactNode
     <button type="button" title={title} onClick={onClick} disabled={busy} className="inline-flex items-center rounded-md border border-border-default px-2 py-1.5 text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">
       {children}
     </button>
+  );
+}
+
+function LocationPanel({ venue, onDone }: { venue: HubVenue; onDone: () => void }) {
+  const [address, setAddress] = useState((venue.fields.address as string) ?? "");
+  const [city, setCity] = useState(venue.city ?? "");
+  const [country, setCountry] = useState(venue.country ?? "");
+  const [lat, setLat] = useState(String(venue.lat ?? 0));
+  const [lng, setLng] = useState(String(venue.lng ?? 0));
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+
+  async function save(regeocode: boolean) {
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    const body: Record<string, unknown> = { restaurantId: venue.id, address, city, country, regeocode };
+    const nlat = Number(lat);
+    const nlng = Number(lng);
+    if (!regeocode && Number.isFinite(nlat) && Number.isFinite(nlng)) {
+      body.lat = nlat;
+      body.lng = nlng;
+    }
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/venues/location", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      setBusy(false);
+      setErr("Network error");
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setErr(data.error ?? "Failed");
+      return;
+    }
+    if (typeof data.lat === "number") setLat(String(data.lat));
+    if (typeof data.lng === "number") setLng(String(data.lng));
+    setMsg(regeocode ? `Re-geocoded → ${data.lat}, ${data.lng}. Saved.` : "Saved.");
+    onDone();
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Address &amp; map pin</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="block sm:col-span-2">
+          <span className="text-xs text-text-muted">Full address (include postcode/ZIP)</span>
+          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="8-9 Snowsfields, SE1 3SU" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
+        </label>
+        <label className="block">
+          <span className="text-xs text-text-muted">City / locale</span>
+          <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Bermondsey" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
+        </label>
+        <label className="block">
+          <span className="text-xs text-text-muted">Country</span>
+          <input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="United Kingdom" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
+        </label>
+        <label className="block">
+          <span className="text-xs text-text-muted">Latitude</span>
+          <input value={lat} onChange={(e) => setLat(e.target.value)} inputMode="decimal" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
+        </label>
+        <label className="block">
+          <span className="text-xs text-text-muted">Longitude</span>
+          <input value={lng} onChange={(e) => setLng(e.target.value)} inputMode="decimal" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
+        </label>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" disabled={busy} onClick={() => save(true)} className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />}Save &amp; re-geocode
+        </button>
+        <button type="button" disabled={busy} onClick={() => save(false)} className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">
+          Save with this pin (manual lat/lng)
+        </button>
+        {msg && <span className="text-xs text-emerald-400">{msg}</span>}
+        {err && <span className="text-xs text-destructive">{err}</span>}
+      </div>
+      <p className="text-xs text-text-muted">“Save &amp; re-geocode” moves the pin to match the address. “Save with this pin” keeps the lat/lng you entered.</p>
+    </div>
   );
 }
 

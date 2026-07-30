@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound, redirect } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Clock } from "lucide-react";
 import { Link } from "@/i18n/navigation";
@@ -7,6 +7,7 @@ import {
   getRestaurantBySlug,
   getRestaurants,
   getSignatureDishes,
+  getSlugRedirect,
 } from "@/lib/queries/restaurants";
 import { safeVenueImage } from "@/lib/restaurants/image";
 import { STYLE_LABELS } from "@/lib/constants/styles";
@@ -107,9 +108,14 @@ export default async function RestaurantPage({ params }: Props) {
   const t = await getTranslations("Restaurant");
 
   const restaurant = await getRestaurantBySlug(params.slug);
-  if (!restaurant) notFound();
+  if (!restaurant) {
+    // Retired slug? 301 to its new home so old links/SEO never 404.
+    const dest = await getSlugRedirect(params.slug);
+    if (dest) permanentRedirect(`/restaurants/${dest}`);
+    notFound();
+  }
   if (restaurant.slug !== params.slug) {
-    redirect(`/restaurants/${restaurant.slug}`);
+    permanentRedirect(`/restaurants/${restaurant.slug}`);
   }
 
   const supabase = await createClient();
@@ -162,9 +168,16 @@ export default async function RestaurantPage({ params }: Props) {
   const menu = groupOfferings(restaurant.offerings);
   const alcohol = restaurant.alcohol as AlcoholPolicy | null;
 
+  // A saved handle must ALWAYS be reachable as a link-out, even with 0 embeddable
+  // posts: fall back to building the Instagram URL from the handle.
+  const igHref =
+    restaurant.instagram_url ??
+    (restaurant.instagram_handle
+      ? `https://www.instagram.com/${restaurant.instagram_handle.replace(/^@/, "")}/`
+      : null);
   const socials = (
     [
-      { kind: "instagram", label: SOCIAL_LABELS.instagram, href: restaurant.instagram_url },
+      { kind: "instagram", label: SOCIAL_LABELS.instagram, href: igHref },
       { kind: "x", label: SOCIAL_LABELS.x, href: restaurant.x_url },
       { kind: "facebook", label: SOCIAL_LABELS.facebook, href: restaurant.facebook_url },
       { kind: "tiktok", label: SOCIAL_LABELS.tiktok, href: restaurant.tiktok_url },

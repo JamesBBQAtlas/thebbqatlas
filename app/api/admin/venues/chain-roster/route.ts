@@ -89,6 +89,32 @@ export async function POST(request: Request) {
   const cost = round4(grokCost(roster.usage, roster.model ?? GROK_MODEL));
   const overCeiling = cost > ROSTER_CEILING;
 
+  // 0 or 1 locations means this ISN'T a chain — the candidate was a false
+  // positive. Don't strand it wearing chain flags: clear them, treat it as a
+  // normal single venue, and stop (no seeds).
+  if (roster.locations.length <= 1) {
+    await ctx.db
+      .from("restaurants")
+      .update({
+        enrichment_cost: round4(priorCost + cost),
+        chain_candidate: false,
+        flagship_unset: false,
+        chain_rostered_at: null,
+      })
+      .eq("id", restaurantId);
+    revalidateVenues();
+    return NextResponse.json({
+      ok: true,
+      brand,
+      not_a_chain: true,
+      found: roster.locations.length,
+      added: 0,
+      cost,
+      over_ceiling: overCeiling,
+      message: "No other locations found — treated as a single venue.",
+    });
+  }
+
   // Seed/reconcile every branch — matched on PHYSICAL LOCATION, idempotent, and
   // skipping the parent's own venue (§09.2.2). Full address available here.
   const result = await seedChainLocations(

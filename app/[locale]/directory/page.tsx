@@ -92,7 +92,7 @@ export default async function DirectoryPage({ searchParams }: DirectoryPageProps
           <span className="text-xs font-semibold uppercase tracking-[0.08em] text-text-muted">
             Browse by country
           </span>
-          {countries.slice(0, 14).map((c) => (
+          {countries.map((c) => (
             <Link
               key={c.slug}
               href={`/directory/${c.slug}`}

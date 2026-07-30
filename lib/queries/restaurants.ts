@@ -94,6 +94,21 @@ export async function getRestaurantBySlug(slug: string): Promise<Restaurant | nu
   );
 }
 
+/** If a requested slug is a retired one, the slug it now points to (for a 301). */
+export async function getSlugRedirect(slug: string): Promise<string | null> {
+  try {
+    const supabase = createAnonClient();
+    const { data } = await supabase
+      .from("slug_redirects")
+      .select("new_slug")
+      .eq("old_slug", slug)
+      .maybeSingle();
+    return (data?.new_slug as string) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function getSignatureDishes(restaurantId: string): Promise<SignatureDish[]> {
   try {
     const supabase = createAnonClient();

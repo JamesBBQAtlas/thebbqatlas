@@ -259,6 +259,10 @@ COPYRIGHT / SOURCING RULE: collect FACTS ONLY (facts aren't copyrightable). NEVE
 For anything you cannot verify within the budget, use null (or [] for lists) and list the field name under "unknowns" — NEVER guess or invent. Put a source URL for each non-obvious fact in "sources".
 
 Field notes:
+- "address": the venue's FULL street address from its own contact/location page — building number + street (+ unit). Do NOT include the city/region/postcode here; those go in their own fields.
+- "city": the ACTUAL town/locality (e.g. "Bermondsey" or "London", "Leawood", "Austin") — NOT a coarse region like "Greater London", "Bay Area" or a county. Use the specific place the address sits in.
+- "region_state": the state/province/region (e.g. "TX", "England", "NSW"), or null.
+- "postcode": the FULL postal/ZIP code (e.g. "SE1 3SU", "78704"). ALWAYS capture it — it's on the venue's own contact page/footer. Only null if genuinely unpublished (then add "postcode" to "unknowns").
 - "what_it_is": ONE factual line (e.g. "Central Texas barbecue joint and butcher shop"). Not a description.
 - "established": when the overall BUSINESS/BRAND was founded — its origin year (e.g. "2014"). This is a brand-level fact.
 - "opening_date": when THIS SPECIFIC location/branch opened, ONLY if you can verify it AND it differs from the brand's founding (e.g. a 2019 branch of a brand founded in 2014). For a single independent venue, or the original/flagship location, leave this null (its opening IS the brand's founding). NEVER guess.
