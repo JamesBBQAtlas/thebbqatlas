@@ -147,6 +147,7 @@ export async function POST(request: Request) {
   revalidateVenues();
 
   const alreadyPresent = result.updated.length + result.matchedParent;
+  const locSuffix = result.needsLocation ? ` · ${result.needsLocation} need a pin` : "";
   return NextResponse.json({
     ok: true,
     brand,
@@ -155,7 +156,8 @@ export async function POST(request: Request) {
     found: result.found,
     added: result.added.length,
     already_present: alreadyPresent,
-    summary: `${result.found} found · ${result.added.length} new · ${alreadyPresent} already present`,
+    needs_location: result.needsLocation,
+    summary: `${result.found} found · ${result.added.length} new · ${alreadyPresent} already present${locSuffix}`,
     seeded: result.added,
     cost,
     over_ceiling: overCeiling,

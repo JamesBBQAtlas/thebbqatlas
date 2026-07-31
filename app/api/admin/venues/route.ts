@@ -186,16 +186,20 @@ export async function PATCH(request: Request) {
   }
 
   // Guard: never publish an un-geocoded seed draft (it would pin at 0,0 in the
-  // ocean). Enrich it first — that researches + geocodes the record.
+  // ocean). Catches both the (0,0) placeholder AND a null pin (a geocode failure
+  // that was flagged needs_attention). Enrich it, or drop a manual pin via the
+  // location editor, first.
   if (status === "approved") {
     const { data: row } = await ctx.db
       .from("restaurants")
       .select("lat, lng")
       .eq("id", restaurantId)
       .single();
-    if (row && row.lat === 0 && row.lng === 0) {
+    const badPin =
+      row && (row.lat == null || row.lng == null || (row.lat === 0 && row.lng === 0));
+    if (badPin) {
       return NextResponse.json(
-        { error: "Enrich this venue first — it has no map location yet." },
+        { error: "This venue has no map location yet — enrich it or set a pin first." },
         { status: 422 }
       );
     }

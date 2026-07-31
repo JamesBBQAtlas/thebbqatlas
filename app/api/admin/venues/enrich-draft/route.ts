@@ -19,7 +19,7 @@ import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { desiredVenueSlug } from "@/lib/admin/slug";
-import { composeAddress, preferFullerAddress } from "@/lib/admin/address";
+import { composeAddress, preferFullerAddress, settlementCity } from "@/lib/admin/address";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -297,18 +297,23 @@ export async function POST(request: Request) {
   });
   const address = preferFullerAddress(composed, row.address);
 
-  // Geocode.
+  // Geocode. `city` stays PRECISE for the geocoder query; we settlement-normalise
+  // only the value we store (below). A coordinate is only "valid" if it's real —
+  // a hallucinated (0,0) from the dossier is NOT and must fall through to a real
+  // geocode instead of pinning the venue in the Atlantic.
+  const validCoord = (a: number | null, b: number | null) =>
+    typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
   let city = dossier.city ?? row.city;
   let country = dossier.country ?? row.country;
   let lat: number | null = null;
   let lng: number | null = null;
   let country_code: string | null = null;
-  if (dossier.lat !== null && dossier.lng !== null) {
+  if (validCoord(dossier.lat, dossier.lng)) {
     lat = dossier.lat;
     lng = dossier.lng;
   } else {
     const geo = await geocodeAddress({ address: dossier.address ?? row.address, city, country });
-    if (geo) {
+    if (geo && validCoord(geo.lat, geo.lng)) {
       lat = geo.lat;
       lng = geo.lng;
       country_code = geo.country_code;
@@ -316,6 +321,10 @@ export async function POST(request: Request) {
       country = geo.country ?? country;
     }
   }
+  // Fix B — did we END UP with a real location? A venue that neither geocoded now
+  // nor already had a valid pin must be FLAGGED (never left silently at 0,0 while
+  // looking enriched — the Red Dog Southampton "West Quay South" case).
+  const noValidLocation = !validCoord(lat, lng) && !validCoord(row.lat as number, row.lng as number);
 
   // Was the dossier too thin to write honest copy? If so we must NOT blank the
   // venue's copy with an empty draft — we keep whatever's there and flag why.
@@ -349,7 +358,10 @@ export async function POST(request: Request) {
     proposed.lng = lng;
     if (country_code) proposed.country_code = country_code;
   }
-  if (city) proposed.city = city;
+  // Store the SETTLEMENT, not the admin district ("City of Westminster" → London),
+  // while the full precise address (incl. postcode) above is left untouched.
+  const storedCity = city ? settlementCity(city) || city : city;
+  if (storedCity) proposed.city = storedCity;
   // Canonical country name (one chip per country; stops the USA/United States,
   // Mexico/México split re-appearing as we enrich).
   if (country) proposed.country = canonicalCountry(country);
@@ -361,7 +373,7 @@ export async function POST(request: Request) {
   // operator can rename it deliberately via the admin edit).
   if (row.status !== "approved") {
     const finalName = (dossier.name as string) || row.name;
-    const finalCity = (city as string) || row.city || null;
+    const finalCity = (storedCity as string) || row.city || null;
     const newSlug = await desiredVenueSlug(ctx.db, restaurantId, finalName, finalCity, row.slug);
     if (row.slug && newSlug !== row.slug) {
       proposed.slug = newSlug;
@@ -417,6 +429,7 @@ export async function POST(request: Request) {
   const attention =
     overCeiling ||
     searchRunaway ||
+    noValidLocation ||
     (effectivelySibling ? locationFactsMissing : copy.needs_attention);
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
@@ -424,9 +437,15 @@ export async function POST(request: Request) {
       ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${CEILING} ceiling.`
       : searchRunaway
         ? `Search budget exceeded (${grokSearches} > ${MAX_TOTAL_SEARCHES}) — stopped and flagged; check enrichment_debug.`
-        : effectivelySibling
-          ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
-          : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
+        : noValidLocation
+          ? address
+            ? "Couldn't locate — check address / set pin manually"
+            : effectivelySibling
+              ? "This outpost's own location facts (address) are missing — add them, then re-enrich."
+              : "No address to place this venue on the map — add one, then re-enrich."
+          : effectivelySibling
+            ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
+            : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
     : null;
 
   // For an approved (live) venue, hold changes as pending — but only if there's

@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "./venues";
 import { loadExistingVenues } from "@/lib/venues/dedupe-server";
 import { findDuplicates, normName, type VenueLike } from "@/lib/venues/dedupe";
-import { normCity } from "@/lib/admin/address";
+import { normCity, settlementCity } from "@/lib/admin/address";
 
 /**
  * Bulk venue seed import. Parses the follow-list seed sheet, keeps only real
@@ -151,7 +151,9 @@ export async function importSeedRows(
     candidates.push({
       handle,
       name,
-      city: cell(row, iCity),
+      // Store the settlement, not the admin district ("City of Westminster" →
+      // London), so imported seeds group correctly from the start (Fix C).
+      city: settlementCity(cell(row, iCity)),
       country: cell(row, iCountry),
       website: cell(row, iWebsite) || null,
       hero_post_url: isInstagramPost(heroRaw) ? heroRaw : null,

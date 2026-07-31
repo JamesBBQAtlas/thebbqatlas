@@ -33,6 +33,50 @@ export function composeAddress(parts: {
   return acc.join(", ");
 }
 
+/**
+ * Normalise a CITY to the SETTLEMENT, not the administrative district (§09.2.7).
+ * A pin's postcode and full street address stay precise; only the grouping
+ * `city` is cleaned so "City of Westminster" and "Greater London" don't sit as
+ * their own countries-of-one on the directory. Conservative and UK-focused:
+ * only the explicit ADMIN-DISTRICT forms are rewritten — a bare locality
+ * ("Bermondsey", "Croydon") is left exactly as entered.
+ *   "Greater London" / "City of Westminster" / "City of London"  → "London"
+ *   "London Borough of Hackney" / "Royal Borough of Greenwich"    → "London"
+ *   "City of Nottingham"                                          → "Nottingham"
+ *   "Royal Borough of Kingston upon Thames"                       → "London"
+ *   "Borough of Poole" / "Poole Borough"                          → "Poole"
+ */
+export function settlementCity(city: string | null | undefined): string {
+  const raw = clean(city);
+  if (!raw) return "";
+  const low = raw.toLowerCase();
+
+  // The Greater London family — the whole conurbation is addressed as "London".
+  if (low === "greater london" || low === "city of london" || low === "city of westminster") {
+    return "London";
+  }
+  // Any London borough (incl. the two royal boroughs inside London) → "London".
+  if (/\blondon borough of\b/.test(low)) return "London";
+  const LONDON_ROYAL = new Set([
+    "royal borough of kensington and chelsea",
+    "royal borough of greenwich",
+    "royal borough of kingston upon thames",
+  ]);
+  if (LONDON_ROYAL.has(low)) return "London";
+
+  // "City of X" → the settlement X (City of Nottingham → Nottingham).
+  let m = raw.match(/^city of\s+(.+)$/i);
+  if (m) return m[1].trim();
+  // "Royal/Metropolitan/plain Borough of X" → X.
+  m = raw.match(/^(?:royal\s+|metropolitan\s+)?borough of\s+(.+)$/i);
+  if (m) return m[1].trim();
+  // Trailing admin suffix ("Poole Borough", "X District Council") → X.
+  const stripped = raw
+    .replace(/\s+(?:metropolitan borough|borough council|borough|district council|district|council)$/i, "")
+    .trim();
+  return stripped || raw;
+}
+
 /** Completeness score = count of comma-separated tokens (more parts = fuller). */
 export function addressScore(addr: string | null | undefined): number {
   if (!addr) return 0;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
+import { settlementCity } from "@/lib/admin/address";
 import { revalidateVenues } from "@/lib/cache/venues";
 
 export const dynamic = "force-dynamic";
@@ -31,12 +32,16 @@ export async function POST(request: Request) {
   if (loadErr || !row) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
 
   const address = typeof body.address === "string" ? body.address.trim() : (row.address as string);
+  // Geocode with the PRECISE city the operator typed; store the settlement form
+  // ("City of Westminster" → London) for consistent grouping (Fix C). A bare
+  // locality is left exactly as entered.
   const city = typeof body.city === "string" ? body.city.trim() : (row.city as string);
+  const storedCity = settlementCity(city) || city;
   const country = canonicalCountry(
     typeof body.country === "string" && body.country.trim() ? body.country : (row.country as string)
   );
 
-  const patch: Record<string, unknown> = { address, city, country };
+  const patch: Record<string, unknown> = { address, city: storedCity, country };
 
   // An explicit numeric lat/lng from the operator wins (a hand-nudged pin);
   // otherwise (or when they ask to re-geocode) derive the pin from the address.
