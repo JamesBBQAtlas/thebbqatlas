@@ -8,6 +8,7 @@ import {
   type VenueDossier,
 } from "@/lib/ai/enrich";
 import { claudeCost, round4 } from "@/lib/ai/cost";
+import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -61,7 +62,20 @@ export async function POST(request: Request) {
   }
 
   // Rewrite is Claude-only — accumulate just the writer cost (no Grok).
-  const cost = round4(claudeCost(copy.usage));
+  const cost = round4(claudeCost(copy.usage, copy.model));
+  // Exact per-call AI ledger row (§ PRE-623).
+  await logAiUsage(ctx.db, {
+    provider: providerForModel(copy.model),
+    model: copy.model,
+    task: "rewrite",
+    entity_type: "restaurant",
+    entity_id: restaurantId,
+    input_tokens: copy.usage.in_tokens,
+    output_tokens: copy.usage.out_tokens,
+    search_count: 0,
+    cost,
+    usage_raw: copy.usage,
+  });
   const priorCost = Number(row.enrichment_cost ?? 0) || 0;
   const patch = {
     ...buildCopyPatch(row.status, copy),

@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { GROK_ENABLED, GROK_MODEL } from "@/lib/ai/grok";
 import { researchChainRoster } from "@/lib/ai/enrich";
 import { grokCost, round4 } from "@/lib/ai/cost";
+import { logAiUsage } from "@/lib/ai/usage-log";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
 import { revalidateVenues } from "@/lib/cache/venues";
 
@@ -88,6 +89,21 @@ export async function POST(request: Request) {
 
   const cost = round4(grokCost(roster.usage, roster.model ?? GROK_MODEL));
   const overCeiling = cost > ROSTER_CEILING;
+
+  // Exact per-call AI ledger row for the roster search (§ PRE-623) — logged
+  // whether or not it turns out to be a chain (the search cost was incurred).
+  await logAiUsage(ctx.db, {
+    provider: "xai",
+    model: roster.model ?? GROK_MODEL,
+    task: "roster",
+    entity_type: "restaurant",
+    entity_id: restaurantId,
+    input_tokens: roster.usage.in_tokens,
+    output_tokens: roster.usage.out_tokens,
+    search_count: roster.usage.searches,
+    cost,
+    usage_raw: roster.usage,
+  });
 
   // 0 or 1 locations means this ISN'T a chain — the candidate was a false
   // positive. Don't strand it wearing chain flags: clear them, treat it as a

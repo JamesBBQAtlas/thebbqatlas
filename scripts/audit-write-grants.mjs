@@ -35,6 +35,9 @@ const SERVICE_ROLE = new Set([
   // Admin-only slug 301 map — written solely by admin routes via the service-role
   // client (never by end users), so no public grant/RLS policy is needed.
   "slug_redirects",
+  // Append-only AI usage ledger — inserted only by admin AI routes via the
+  // service-role client; RLS-on with no policies, service role bypasses.
+  "ai_usage_log",
 ]);
 
 const WRITE_METHODS = /\.(insert|update|delete|upsert)\s*\(/;

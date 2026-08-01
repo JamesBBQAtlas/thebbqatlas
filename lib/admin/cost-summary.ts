@@ -12,6 +12,71 @@
  * so it can't give a truer split — hence this row-based derivation.
  */
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+const n = (v: unknown): number => Number(v) || 0;
+
+/** Exact spend split read straight from the append-only ai_usage_log ledger. */
+export interface UsageReport {
+  allTime: { anthropic: number; xai: number; total: number; searches: number; calls: number };
+  today: { anthropic: number; xai: number; total: number };
+  week: { anthropic: number; xai: number; total: number };
+  venuesEnriched: number;
+  byModel: { provider: string; model: string; cost: number; calls: number; input_tokens: number; output_tokens: number; searches: number }[];
+  byTask: { task: string; cost: number; calls: number; anthropic: number; xai: number }[];
+}
+
+/**
+ * Read the EXACT spend rollup from the ledger (via the ai_usage_report() SQL
+ * function — server-side aggregation, so no 1000-row API cap and no scaling).
+ * Returns null if the ledger/function isn't available (older env) so the caller
+ * can fall back to the legacy per-venue derivation.
+ */
+export async function getAiUsageReport(db: SupabaseClient): Promise<UsageReport | null> {
+  try {
+    const { data, error } = await db.rpc("ai_usage_report");
+    if (error || !data || typeof data !== "object") return null;
+    const d = data as Record<string, Record<string, unknown>>;
+    const money = (o: Record<string, unknown> | undefined) => ({
+      anthropic: n(o?.anthropic),
+      xai: n(o?.xai),
+      total: n(o?.total),
+    });
+    return {
+      allTime: {
+        ...money(d.allTime),
+        searches: n(d.allTime?.searches),
+        calls: n(d.allTime?.calls),
+      },
+      today: money(d.today),
+      week: money(d.week),
+      venuesEnriched: n((d as Record<string, unknown>).venuesEnriched),
+      byModel: Array.isArray((d as Record<string, unknown>).byModel)
+        ? ((d as unknown as { byModel: Record<string, unknown>[] }).byModel).map((m) => ({
+            provider: String(m.provider ?? ""),
+            model: String(m.model ?? ""),
+            cost: n(m.cost),
+            calls: n(m.calls),
+            input_tokens: n(m.input_tokens),
+            output_tokens: n(m.output_tokens),
+            searches: n(m.searches),
+          }))
+        : [],
+      byTask: Array.isArray((d as Record<string, unknown>).byTask)
+        ? ((d as unknown as { byTask: Record<string, unknown>[] }).byTask).map((t) => ({
+            task: String(t.task ?? ""),
+            cost: n(t.cost),
+            calls: n(t.calls),
+            anthropic: n(t.anthropic),
+            xai: n(t.xai),
+          }))
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface CostSummary {
   anthropicAllTime: number;
   xaiAllTime: number;

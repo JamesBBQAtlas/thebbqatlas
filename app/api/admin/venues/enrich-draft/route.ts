@@ -14,6 +14,7 @@ import {
   type VenueLead,
 } from "@/lib/ai/enrich";
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
+import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
@@ -178,6 +179,19 @@ export async function POST(request: Request) {
     // Find IG writes socials/handle straight onto the live row — refresh the
     // public page so the new link-out logos actually show (they were saved but
     // the cached page kept the old render).
+    // Exact per-call ledger row for the Find-IG search (Fix: usage logging).
+    await logAiUsage(ctx.db, {
+      provider: "xai",
+      model: grokModel,
+      task: "find_ig",
+      entity_type: "restaurant",
+      entity_id: restaurantId,
+      input_tokens: usage.in_tokens,
+      output_tokens: usage.out_tokens,
+      search_count: usage.searches,
+      cost,
+      usage_raw: usage,
+    });
     if (row.status === "approved") revalidateVenues();
     // Report EXACTLY what happened so the hub never claims "Found Instagram"
     // when nothing was saved (the Moyo Shisanyama case). saved_ig is true only
@@ -315,6 +329,35 @@ export async function POST(request: Request) {
   const cCost = claudeCost(copy.usage, claudeModel);
   const thisCost = round4(gCost + cCost);
   const overCeiling = thisCost > CEILING;
+
+  // Exact per-call AI ledger (§ PRE-623): the research call (xAI/Grok) and the
+  // writer call (Anthropic/Claude) each get one row, keyed to this venue and the
+  // operation. flagship_enrich vs enrich distinguishes the flagship's fuller run.
+  const enrichTask = isConfirmedFlagship ? "flagship_enrich" : "enrich";
+  await logAiUsage(ctx.db, {
+    provider: "xai",
+    model: grokModel,
+    task: enrichTask,
+    entity_type: "restaurant",
+    entity_id: restaurantId,
+    input_tokens: grokInTokens,
+    output_tokens: grokOutTokens,
+    search_count: grokSearches,
+    cost: round4(gCost),
+    usage_raw: { in_tokens: grokInTokens, out_tokens: grokOutTokens, searches: grokSearches, passes: passLog.length },
+  });
+  await logAiUsage(ctx.db, {
+    provider: providerForModel(claudeModel),
+    model: claudeModel,
+    task: enrichTask,
+    entity_type: "restaurant",
+    entity_id: restaurantId,
+    input_tokens: copy.usage.in_tokens,
+    output_tokens: copy.usage.out_tokens,
+    search_count: 0,
+    cost: round4(cCost),
+    usage_raw: copy.usage,
+  });
 
   const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
   const socials = mapSocials(dossier.other_socials);

@@ -7,7 +7,7 @@ import { CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/constants/categories";
 import { freshness } from "@/lib/admin/freshness";
 import { VenueHub } from "@/components/admin/VenueHub";
 import { toHubVenue, STYLE_OPTIONS } from "@/lib/admin/hub";
-import { summarizeCosts } from "@/lib/admin/cost-summary";
+import { summarizeCosts, getAiUsageReport } from "@/lib/admin/cost-summary";
 import { fmtUsd } from "@/lib/constants/enrichment-cost";
 import { isRealPhoto } from "@/lib/constants/hero";
 import type { Restaurant, MapItemCategory } from "@/lib/types/database";
@@ -214,17 +214,21 @@ export default async function ListingsPage() {
 
   const hubVenues = all.map(toHubVenue);
 
-  // Spend by provider — exact all-time total (cumulative per venue), split by
-  // each venue's most-recent run breakdown.
-  const cost = summarizeCosts(
-    all.map((r) => ({
-      enrichment_cost: r.enrichment_cost ?? null,
-      enrichment_cost_breakdown:
-        (r.enrichment_cost_breakdown as Record<string, unknown> | null) ?? null,
-      enriched_at: r.enriched_at ?? null,
-    })),
-    new Date().toISOString().slice(0, 10)
-  );
+  // Spend by provider — read EXACT figures from the append-only AI usage ledger
+  // (no scaling). Falls back to the legacy per-venue derivation only if the
+  // ledger isn't available yet (older env).
+  const usage = await getAiUsageReport(db);
+  const cost = usage
+    ? null
+    : summarizeCosts(
+        all.map((r) => ({
+          enrichment_cost: r.enrichment_cost ?? null,
+          enrichment_cost_breakdown:
+            (r.enrichment_cost_breakdown as Record<string, unknown> | null) ?? null,
+          enriched_at: r.enriched_at ?? null,
+        })),
+        new Date().toISOString().slice(0, 10)
+      );
 
   return (
     <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10">
@@ -317,30 +321,66 @@ export default async function ListingsPage() {
         )}
       </Section>
 
-      {/* Spend by provider */}
+      {/* Spend by provider — exact, from the append-only AI usage ledger */}
       <Section title="Spend by provider">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <Stat
-            label="Anthropic (Claude)"
-            value={fmtUsd(cost.anthropicAllTime)}
-            sub={`${fmtUsd(cost.anthropicToday)} today`}
-            tone="gold"
-          />
-          <Stat
-            label="xAI (Grok + search)"
-            value={fmtUsd(cost.xaiAllTime)}
-            sub={`${fmtUsd(cost.xaiToday)} today`}
-            tone="gold"
-          />
-          <Stat
-            label="Total"
-            value={fmtUsd(cost.totalAllTime)}
-            sub={`${fmtUsd(cost.totalToday)} today`}
-          />
-          <Stat label="Venues enriched" value={cost.venuesEnriched} />
-          <Stat label="Total searches" value={cost.totalSearches} />
-        </div>
-        <p className="mt-3 text-xs text-text-muted">{cost.basis}</p>
+        {usage ? (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <Stat label="Anthropic (Claude)" value={fmtUsd(usage.allTime.anthropic)} sub={`${fmtUsd(usage.today.anthropic)} today · ${fmtUsd(usage.week.anthropic)} 7d`} tone="gold" />
+              <Stat label="xAI (Grok + search)" value={fmtUsd(usage.allTime.xai)} sub={`${fmtUsd(usage.today.xai)} today · ${fmtUsd(usage.week.xai)} 7d`} tone="gold" />
+              <Stat label="Total" value={fmtUsd(usage.allTime.total)} sub={`${fmtUsd(usage.today.total)} today · ${fmtUsd(usage.week.total)} 7d`} />
+              <Stat label="Venues enriched" value={usage.venuesEnriched} />
+              <Stat label="Searches · AI calls" value={`${usage.allTime.searches} · ${usage.allTime.calls}`} />
+            </div>
+            <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-2">
+              <div className="rounded-xl border border-border-subtle bg-surface-0 p-5">
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.06em] text-text-muted">By model</h3>
+                <div className="space-y-2 text-sm">
+                  {usage.byModel.length === 0 && <p className="text-text-muted">No calls logged yet.</p>}
+                  {usage.byModel.map((m) => (
+                    <div key={`${m.provider}:${m.model}`} className="flex items-baseline justify-between gap-3">
+                      <span className="text-text-secondary">
+                        {m.model} <span className="text-text-muted">· {m.provider}</span>
+                      </span>
+                      <span className="whitespace-nowrap text-text-primary">
+                        {fmtUsd(m.cost)} <span className="text-text-muted">· {m.calls} call{m.calls === 1 ? "" : "s"}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border-subtle bg-surface-0 p-5">
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-[0.06em] text-text-muted">By task</h3>
+                <div className="space-y-2 text-sm">
+                  {usage.byTask.length === 0 && <p className="text-text-muted">No calls logged yet.</p>}
+                  {usage.byTask.map((tk) => (
+                    <div key={tk.task} className="flex items-baseline justify-between gap-3">
+                      <span className="text-text-secondary">{tk.task} <span className="text-text-muted">· {tk.calls}×</span></span>
+                      <span className="whitespace-nowrap text-text-primary">
+                        {fmtUsd(tk.cost)}
+                        <span className="text-text-muted"> · A {fmtUsd(tk.anthropic)} / x {fmtUsd(tk.xai)}</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <p className="mt-3 text-xs text-text-muted">
+              Exact — summed from the per-call AI usage ledger (provider · model · task, all-time / today / 7-day). Not scaled or estimated.
+            </p>
+          </>
+        ) : cost ? (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              <Stat label="Anthropic (Claude)" value={fmtUsd(cost.anthropicAllTime)} sub={`${fmtUsd(cost.anthropicToday)} today`} tone="gold" />
+              <Stat label="xAI (Grok + search)" value={fmtUsd(cost.xaiAllTime)} sub={`${fmtUsd(cost.xaiToday)} today`} tone="gold" />
+              <Stat label="Total" value={fmtUsd(cost.totalAllTime)} sub={`${fmtUsd(cost.totalToday)} today`} />
+              <Stat label="Venues enriched" value={cost.venuesEnriched} />
+              <Stat label="Total searches" value={cost.totalSearches} />
+            </div>
+            <p className="mt-3 text-xs text-text-muted">{cost.basis}</p>
+          </>
+        ) : null}
       </Section>
 
       {/* Control hub — the same surface for existing venues and new imports */}

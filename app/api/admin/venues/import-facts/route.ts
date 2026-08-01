@@ -10,6 +10,8 @@ import {
   priceBandToLevel,
   mapSocials,
 } from "@/lib/ai/enrich";
+import { claudeCost, round4 } from "@/lib/ai/cost";
+import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { parseFactsSheet, rowToDossier, factsHandle } from "@/lib/admin/facts-import";
@@ -74,6 +76,20 @@ async function processRow(
     const r = (data as { id: string; status: string }[] | null)?.[0];
     if (r) existing = { id: r.id, status: r.status };
   }
+
+  // Exact per-call AI ledger row for this row's writer call (§ PRE-623).
+  await logAiUsage(db, {
+    provider: providerForModel(copy.model),
+    model: copy.model,
+    task: "facts_import",
+    entity_type: "restaurant",
+    entity_id: existing?.id ?? null,
+    input_tokens: copy.usage.in_tokens,
+    output_tokens: copy.usage.out_tokens,
+    search_count: 0,
+    cost: round4(claudeCost(copy.usage, copy.model)),
+    usage_raw: copy.usage,
+  });
 
   if (existing) {
     const patch: Record<string, unknown> = {
