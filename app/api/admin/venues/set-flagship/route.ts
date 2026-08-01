@@ -21,6 +21,7 @@ export const maxDuration = 60;
 interface MemberRow {
   id: string;
   status: string | null;
+  style: string | null;
   instagram_url: string | null;
   instagram_handle: string | null;
   x_url: string | null;
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "restaurantId required." }, { status: 400 });
   }
 
-  const cols = "id, name, city, status, chain_parent_id, " + SOCIAL_COLS.join(", ");
+  const cols = "id, name, city, status, style, chain_parent_id, " + SOCIAL_COLS.join(", ");
 
   const { data: chosen, error: loadErr } = await ctx.db
     .from("restaurants")
@@ -89,6 +90,10 @@ export async function POST(request: Request) {
 
   const nowIso = new Date().toISOString();
 
+  // The flagship's cuisine (if definite) — every branch on the "other" default
+  // adopts it (a chain is one brand = one style).
+  const flagshipStyle = chosenRow.style && chosenRow.style !== "other" ? chosenRow.style : null;
+
   // Chosen becomes the CONFIRMED flagship parent.
   await ctx.db
     .from("restaurants")
@@ -113,7 +118,16 @@ export async function POST(request: Request) {
     for (const col of SOCIAL_COLS) {
       if (!m[col] && brandSocials[col]) patch[col] = brandSocials[col];
     }
+    const adoptStyle = flagshipStyle && (m.style === "other" || !m.style);
+    if (adoptStyle) patch.style = flagshipStyle;
     await ctx.db.from("restaurants").update(patch).eq("id", m.id);
+    if (adoptStyle) {
+      await auditField(ctx.db, m.id, "style", m.style ?? null, flagshipStyle, {
+        source: "roster",
+        changedBy: ctx.userId,
+        note: "adopted flagship style",
+      });
+    }
   }
 
   // Audit the flagship decision on the chosen venue + each re-pointed sibling.

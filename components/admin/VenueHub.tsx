@@ -1475,7 +1475,8 @@ export function EditorPanel({
     }
     if (typeof data.lat === "number") setLat(data.lat);
     if (typeof data.lng === "number") setLng(data.lng);
-    setMsg(regeocode ? `Saved · re-geocoded → ${data.lat?.toFixed?.(5)}, ${data.lng?.toFixed?.(5)}.` : "Saved.");
+    const branchNote = data.styled_branches > 0 ? ` · applied the style to ${data.styled_branches} branch${data.styled_branches === 1 ? "" : "es"}` : "";
+    setMsg((regeocode ? `Saved · re-geocoded → ${data.lat?.toFixed?.(5)}, ${data.lng?.toFixed?.(5)}.` : "Saved.") + branchNote);
     onDone();
   }
 

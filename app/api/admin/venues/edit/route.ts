@@ -4,7 +4,7 @@ import { geocodeAddress } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { settlementCity } from "@/lib/admin/address";
 import { revalidateVenues } from "@/lib/cache/venues";
-import { auditFromPatch } from "@/lib/admin/content-audit";
+import { auditFromPatch, auditField } from "@/lib/admin/content-audit";
 import { BBQ_STYLES } from "@/lib/constants/styles";
 
 export const dynamic = "force-dynamic";
@@ -136,6 +136,14 @@ export async function POST(request: Request) {
     }
   }
 
+  // A chain BRANCH must never sit on "other" while its flagship has a definite
+  // style — if the operator set this branch to "other", adopt the flagship's.
+  if (row.chain_parent_id && patch.style === "other") {
+    const { data: fp } = await ctx.db.from("restaurants").select("style").eq("id", row.chain_parent_id).single();
+    const fs = (fp?.style as string) ?? null;
+    if (fs && fs !== "other") patch.style = fs;
+  }
+
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "Nothing to save." }, { status: 400 });
   }
@@ -150,12 +158,35 @@ export async function POST(request: Request) {
     note: touchedCopy ? "manual copy edit" : "manual field edit",
   });
 
+  // Flagship style change → propagate the new definite style to any branch still
+  // on the "other" default, so no branch is left contradicting the flagship.
+  // Branches that already carry a different definite style are left as-is.
+  let styledBranches = 0;
+  if (!row.chain_parent_id && typeof patch.style === "string" && patch.style !== "other" && patch.style !== row.style) {
+    const { data: branches } = await ctx.db
+      .from("restaurants")
+      .select("id, style")
+      .eq("chain_parent_id", restaurantId);
+    for (const b of (branches ?? []) as { id: string; style: string | null }[]) {
+      if (b.style === "other" || !b.style) {
+        await ctx.db.from("restaurants").update({ style: patch.style }).eq("id", b.id);
+        await auditField(ctx.db, b.id, "style", b.style ?? null, patch.style, {
+          source: "roster",
+          changedBy: ctx.userId,
+          note: "inherited flagship style (flagship style changed)",
+        });
+        styledBranches++;
+      }
+    }
+  }
+
   revalidateVenues();
   return NextResponse.json({
     ok: true,
     lat: patch.lat ?? row.lat,
     lng: patch.lng ?? row.lng,
     manual_copy: Boolean(patch.manual_copy),
+    styled_branches: styledBranches,
     saved: Object.keys(patch),
   });
 }

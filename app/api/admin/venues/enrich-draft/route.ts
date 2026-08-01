@@ -74,15 +74,18 @@ export async function POST(request: Request) {
   // this location's address/hours/phone (the Joe's-Olathe thin-dossier case).
   let parentWebsite: string | null = null;
   let parentDossier: VenueDossier | null = null;
+  let parentStyle: string | null = null;
   let branchNote: string | undefined;
   if (row.chain_parent_id) {
     const { data: parent } = await ctx.db
       .from("restaurants")
-      .select("website, dossier")
+      .select("website, dossier, style")
       .eq("id", row.chain_parent_id)
       .single();
     parentWebsite = parent?.website ?? null;
     parentDossier = (parent?.dossier as VenueDossier | null) ?? null;
+    const ps = (parent?.style as string) ?? null;
+    parentStyle = ps && ps !== "other" ? ps : null;
     const label = row.location_label || row.city || "this";
     // The sibling inherits the parent's brand-level facts (below), so its
     // research only chases THIS branch's own location facts — never the brand
@@ -405,7 +408,14 @@ export async function POST(request: Request) {
     ...(dossier.best_photo_post_url ? [dossier.best_photo_post_url] : []),
     ...dossier.recent_instagram_posts,
   ].filter((v, i, a) => a.indexOf(v) === i);
-  const style = matchBbqStyle(dossier.bbq_style);
+  let style = matchBbqStyle(dossier.bbq_style);
+  // A chain BRANCH inherits the flagship's cuisine — never downgrade it to "other".
+  // Keep the flagship's style unless research found a DIFFERENT, definite style for
+  // this specific branch (rare for a chain); and never write "other" over a
+  // flagship's definite style.
+  if (row.chain_parent_id && parentStyle) {
+    if (!style || style === "other") style = parentStyle as typeof style;
+  }
   const price = priceBandToLevel(dossier.price_band);
   // Full address — street, city, region/state, postcode (§09.2.6). Never
   // downgrade an existing fuller address to a thinner one.

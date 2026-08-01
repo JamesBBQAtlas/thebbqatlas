@@ -61,7 +61,7 @@ export async function POST(request: Request) {
 
   const { data: parent } = await ctx.db
     .from("restaurants")
-    .select("id, chain_parent_id, instagram_url, website, x_url, facebook_url, tiktok_url, youtube_url")
+    .select("id, chain_parent_id, style, instagram_url, website, x_url, facebook_url, tiktok_url, youtube_url")
     .eq("id", parentId)
     .single();
   if (!parent) return NextResponse.json({ error: "Flagship not found." }, { status: 404 });
@@ -71,7 +71,7 @@ export async function POST(request: Request) {
 
   const { data: child } = await ctx.db
     .from("restaurants")
-    .select("id, instagram_url, website, x_url, facebook_url, tiktok_url, youtube_url")
+    .select("id, style, instagram_url, website, x_url, facebook_url, tiktok_url, youtube_url")
     .eq("id", restaurantId)
     .single();
   if (!child) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
@@ -85,6 +85,11 @@ export async function POST(request: Request) {
   for (const k of ["instagram_url", "website", "x_url", "facebook_url", "tiktok_url", "youtube_url"] as const) {
     if (!child[k] && parent[k]) patch[k] = parent[k];
   }
+  // Adopt the flagship's cuisine if this venue was sitting on the "other" default
+  // (a chain is one brand = one style).
+  const parentStyle = (parent.style as string) ?? null;
+  const adoptStyle = parentStyle && parentStyle !== "other" && (child.style === "other" || !child.style);
+  if (adoptStyle) patch.style = parentStyle;
 
   const { error } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -93,6 +98,13 @@ export async function POST(request: Request) {
     changedBy: ctx.userId,
     note: "attached to chain",
   });
+  if (adoptStyle) {
+    await auditField(ctx.db, restaurantId, "style", child.style ?? null, parentStyle, {
+      source: "roster",
+      changedBy: ctx.userId,
+      note: "adopted flagship style on attach",
+    });
+  }
   revalidateVenues();
   return NextResponse.json({ ok: true, action, message: "Attached to the chain as a branch." });
 }

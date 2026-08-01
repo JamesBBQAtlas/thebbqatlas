@@ -4,6 +4,7 @@ import { composeAddress, normStreet, normCity, settlementCity } from "@/lib/admi
 import { canonicalCountry } from "@/lib/constants/countries";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
+import { auditField } from "@/lib/admin/content-audit";
 
 /** A location to seed: a branch label/name, optional street address, and city. */
 export interface SeedLocation {
@@ -107,9 +108,14 @@ export async function seedChainLocations(
 
   const { data: parentRow } = await db
     .from("restaurants")
-    .select("id, address, city, location_label, lat, lng")
+    .select("id, address, city, location_label, lat, lng, style")
     .eq("id", parentId)
     .single();
+  // A chain is one brand = one cuisine — a new branch inherits the flagship's
+  // style, never the "other" default (systemic fix). Only a definite (non-"other")
+  // flagship style is inherited.
+  const parentStyle = (parentRow as { style?: string } | null)?.style ?? null;
+  const branchStyle = parentStyle && parentStyle !== "other" ? parentStyle : "other";
   const { data: siblingRows } = await db
     .from("restaurants")
     .select("id, address, city, location_label, lat, lng")
@@ -235,7 +241,8 @@ export async function seedChainLocations(
       name: brand,
       location_label: label,
       description: `${brand} — barbecue${settle ? ` in ${settle}` : ""}.`,
-      style: "other",
+      // Inherit the flagship's cuisine (never the "other" default).
+      style: branchStyle,
       lat: located ? c.lat : 0,
       lng: located ? c.lng : 0,
       address: composed,
@@ -274,6 +281,14 @@ export async function seedChainLocations(
       consumed.add(inserted.id as string);
       result.added.push({ label, city: settle || loc.city });
       if (!located) result.needsLocation += 1;
+      // Audit the inherited style at creation (source=roster).
+      if (branchStyle !== "other") {
+        await auditField(db, inserted.id as string, "style", null, branchStyle, {
+          source: "roster",
+          changedBy: null,
+          note: "inherited flagship style at creation",
+        });
+      }
     }
   }
 
