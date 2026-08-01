@@ -18,9 +18,16 @@ import {
   Store,
   Crown,
   MapPin,
+  Star,
+  Trash2,
+  Unlink,
+  Link2,
+  SquarePen,
+  Ban,
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
+import { PinMap } from "@/components/admin/PinMap";
 
 export interface HubVenue {
   id: string;
@@ -52,6 +59,9 @@ export interface HubVenue {
   chainRostered: boolean;
   flagshipUnset: boolean;
   chainCandidate: boolean;
+  isFeatured: boolean;
+  permanentlyClosed: boolean;
+  manualCopy: boolean;
   lat: number;
   lng: number;
 }
@@ -127,7 +137,7 @@ async function fetchWithTimeout(url: string, opts: RequestInit, ms: number): Pro
   }
 }
 
-async function callAction(id: string, kind: ActionKind): Promise<Response> {
+async function callAction(id: string, kind: ActionKind, extra?: Record<string, unknown>): Promise<Response> {
   if (kind === "publish" || kind === "reject") {
     return fetch("/api/admin/venues", {
       method: "PATCH",
@@ -135,13 +145,14 @@ async function callAction(id: string, kind: ActionKind): Promise<Response> {
       body: JSON.stringify({
         restaurantId: id,
         status: kind === "publish" ? "approved" : "rejected",
+        ...extra,
       }),
     });
   }
   if (kind === "rewrite") {
     return fetchWithTimeout(
       "/api/admin/venues/rewrite",
-      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: id }) },
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: id, ...extra }) },
       240_000
     );
   }
@@ -150,7 +161,7 @@ async function callAction(id: string, kind: ActionKind): Promise<Response> {
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ restaurantId: id, mode: kind === "findig" ? "light" : "full" }),
+      body: JSON.stringify({ restaurantId: id, mode: kind === "findig" ? "light" : "full", ...extra }),
     },
     240_000
   );
@@ -444,7 +455,7 @@ export function VenueHub({
     return { venueId: v.id, mode };
   }
 
-  async function single(v: HubVenue, kind: ActionKind) {
+  async function single(v: HubVenue, kind: ActionKind, extra?: Record<string, unknown>) {
     // Guard: don't spend on a sibling's enrich/rewrite while its flagship is
     // still thin/unenriched — it would inherit nothing and come back thin.
     if ((kind === "enrich" || kind === "rewrite") && !parentReady(v)) {
@@ -458,7 +469,7 @@ export function VenueHub({
     setState(v.id, "running");
     let res: Response;
     try {
-      res = await callAction(v.id, kind);
+      res = await callAction(v.id, kind, extra);
     } catch (e) {
       setState(v.id, "idle");
       const timedOut = e instanceof DOMException && e.name === "AbortError";
@@ -470,12 +481,34 @@ export function VenueHub({
     }
     const data = await res.json().catch(() => ({}));
     setState(v.id, "idle");
+    // Fix 10 — publishing a needs_attention (thin-data) venue is blocked; offer an
+    // explicit override so filler never goes live silently.
+    if (kind === "publish" && res.status === 422 && data.needs_override) {
+      const ok = typeof window !== "undefined" && window.confirm(`${data.error}\n\nThis venue is flagged for attention. Publish it anyway?`);
+      if (ok) return single(v, "publish", { override: true });
+      setRowResult((p) => ({ ...p, [v.id]: { warn: "Publish held — flagged for attention. Fix or remove it." } }));
+      return;
+    }
     if (!res.ok) {
       setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Failed" } }));
       return;
     }
+    // Fix 3 — a re-enrich that would overwrite hand-edited copy stops first and
+    // asks; nothing was spent yet. Confirm → re-run with the overwrite flag.
+    if (data.manual_copy_guard) {
+      const ok = typeof window !== "undefined" && window.confirm(`${data.message}\n\nOverwrite the manual copy with a fresh AI write-up?`);
+      if (ok) return single(v, kind, { overwriteManual: true });
+      setRowResult((p) => ({ ...p, [v.id]: { warn: "Kept your manual copy — enrich cancelled." } }));
+      return;
+    }
     if (kind === "findig") {
-      setRowResult((p) => ({ ...p, [v.id]: { msg: `Found Instagram · ${data.posts ?? 0} posts` } }));
+      // Report EXACTLY what was saved (Fix 2): only claim "Instagram" when a
+      // handle/URL was actually persisted; a true empty says so plainly.
+      const posts = data.posts ?? 0;
+      const result = data.saved_ig
+        ? { msg: `Instagram saved${data.handle ? ` · @${data.handle}` : ""} · ${posts} post${posts === 1 ? "" : "s"}` }
+        : { warn: "No Instagram found" };
+      setRowResult((p) => ({ ...p, [v.id]: result }));
       router.refresh();
       return;
     }
@@ -730,6 +763,99 @@ export function VenueHub({
     }
   }
 
+  // Fix 6/7 — one-tap Featured / Permanently-closed flags.
+  async function setFlag(v: HubVenue, patch: { is_featured?: boolean; permanently_closed?: boolean }) {
+    keepScroll();
+    markActed(v.id);
+    setState(v.id, "running");
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/venues/flags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: v.id, ...patch }),
+      });
+    } catch {
+      setState(v.id, "idle");
+      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setState(v.id, "idle");
+    if (!res.ok) {
+      setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Failed" } }));
+      return;
+    }
+    const note =
+      "permanently_closed" in patch
+        ? patch.permanently_closed
+          ? "Marked permanently closed — hidden from the map, directory, Featured & count."
+          : "Reopened — back on the map & directory."
+        : patch.is_featured
+          ? "Featured ✓ — on the homepage & directory."
+          : "Unfeatured.";
+    setRowResult((p) => ({ ...p, [v.id]: { msg: note } }));
+    router.refresh();
+  }
+
+  // Fix 5 — delete a bogus row (with confirm), or detach / attach a chain member.
+  async function deleteVenue(v: HubVenue) {
+    if (typeof window !== "undefined" && !window.confirm(`Delete “${v.name}”${v.city ? ` (${v.city})` : ""}? This can't be undone. If it had a live URL it will 301 to the chain flagship.`)) return;
+    keepScroll();
+    setState(v.id, "running");
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/venues/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: v.id }),
+      });
+    } catch {
+      setState(v.id, "idle");
+      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setState(v.id, "idle");
+    if (!res.ok) {
+      setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Delete failed" } }));
+      return;
+    }
+    router.refresh();
+  }
+
+  async function chainEdit(v: HubVenue, action: "attach" | "detach", parentId?: string) {
+    keepScroll();
+    markActed(v.id);
+    setState(v.id, "running");
+    let res: Response;
+    try {
+      res = await fetch("/api/admin/venues/chain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: v.id, action, parentId }),
+      });
+    } catch {
+      setState(v.id, "idle");
+      setRowResult((p) => ({ ...p, [v.id]: { err: "Network error" } }));
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
+    setState(v.id, "idle");
+    if (!res.ok) {
+      setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Failed" } }));
+      return;
+    }
+    setRowResult((p) => ({ ...p, [v.id]: { msg: data.message ?? "Done." } }));
+    router.refresh();
+  }
+
+  // Candidate flagships to attach an orphan to: top-level venues (not siblings).
+  const flagshipChoices = useMemo(
+    () => venues.filter((v) => !v.chainParentId).map((v) => ({ id: v.id, name: v.name, city: v.city })),
+    [venues]
+  );
+
   const selCount = shown.filter((v) => selected.has(v.id)).length;
 
   return (
@@ -957,6 +1083,22 @@ export function VenueHub({
                             <Store className="h-3 w-3" />Chain
                           </span>
                         )}
+                        {v.permanentlyClosed && (
+                          <span
+                            title="Permanently closed — hidden from the public map, directory, Featured & count"
+                            className="ml-2 inline-flex items-center gap-1 rounded-full border border-destructive/50 bg-destructive/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.05em] text-destructive"
+                          >
+                            <Ban className="h-3 w-3" />Closed
+                          </span>
+                        )}
+                        {v.isFeatured && !v.permanentlyClosed && (
+                          <span
+                            title="Featured on the homepage & directory"
+                            className="ml-2 inline-flex items-center gap-1 rounded-full border border-brand-gold/50 bg-brand-gold/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-gold"
+                          >
+                            <Star className="h-3 w-3 fill-brand-gold" />Featured
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-text-muted">{[v.city, v.country].filter(Boolean).join(", ")} · {v.styleLabel}</div>
                       {v.needs_attention && v.attention_reason && (
@@ -1076,7 +1218,16 @@ export function VenueHub({
                           <Instagram className={`h-3.5 w-3.5 ${v.hasIG ? "text-emerald-400" : ""}`} />
                         </IconBtn>
                         <IconBtn title="Hero image" onClick={() => setHeroOpen(heroOpen === v.id ? null : v.id)}><ImageIcon className="h-3.5 w-3.5" /></IconBtn>
-                        <IconBtn title="Edit address & map pin" onClick={() => setLocOpen(locOpen === v.id ? null : v.id)}><MapPin className="h-3.5 w-3.5" /></IconBtn>
+                        <button
+                          type="button"
+                          onClick={() => setFlag(v, { is_featured: !v.isFeatured })}
+                          disabled={busy || v.permanentlyClosed}
+                          title={v.permanentlyClosed ? "Closed venues can't be featured" : v.isFeatured ? "Featured — tap to unfeature" : "Feature on the homepage & directory"}
+                          className={`inline-flex shrink-0 items-center rounded-md border p-1.5 transition-colors disabled:opacity-40 ${v.isFeatured ? "border-brand-gold/60 text-brand-gold" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}
+                        >
+                          <Star className={`h-3.5 w-3.5 ${v.isFeatured ? "fill-brand-gold" : ""}`} />
+                        </button>
+                        <IconBtn title="Edit venue — copy, every field & map pin" onClick={() => setLocOpen(locOpen === v.id ? null : v.id)}><SquarePen className="h-3.5 w-3.5" /></IconBtn>
                         <button type="button" onClick={() => setPreview(previewFromRow(v))} title="Preview the copy that will publish" className="inline-flex shrink-0 items-center rounded-md border border-border-strong p-1.5 text-text-primary transition-colors hover:border-brand-gold/60 hover:text-brand-gold">
                           <Eye className="h-3.5 w-3.5" />
                         </button>
@@ -1107,7 +1258,16 @@ export function VenueHub({
                   {locOpen === v.id && (
                     <tr className="border-t border-border-subtle bg-surface-1/40">
                       <td colSpan={7} className="px-3 py-4">
-                        <LocationPanel venue={v} onDone={() => { markActed(v.id); setLocOpen(null); router.refresh(); }} />
+                        <EditorPanel
+                          venue={v}
+                          styleOptions={styleOptions}
+                          flagshipChoices={flagshipChoices}
+                          onDone={() => { markActed(v.id); setLocOpen(null); router.refresh(); }}
+                          onDelete={() => { setLocOpen(null); deleteVenue(v); }}
+                          onDetach={() => chainEdit(v, "detach")}
+                          onAttach={(pid) => chainEdit(v, "attach", pid)}
+                          onFlag={(patch) => setFlag(v, patch)}
+                        />
                       </td>
                     </tr>
                   )}
@@ -1189,12 +1349,68 @@ function IconBtn({ children, title, onClick, busy }: { children: React.ReactNode
   );
 }
 
-function LocationPanel({ venue, onDone }: { venue: HubVenue; onDone: () => void }) {
-  const [address, setAddress] = useState((venue.fields.address as string) ?? "");
+const fieldInput =
+  "mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none";
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="text-xs text-text-muted">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+// The full manual venue editor (Fix 3 + Fix 4 + Fix 5 + Fix 7). Every field is
+// hand-editable — copy included — with an interactive tap-to-place map pin, the
+// featured/closed flags, and delete / chain-membership controls.
+function EditorPanel({
+  venue,
+  styleOptions,
+  flagshipChoices,
+  onDone,
+  onDelete,
+  onDetach,
+  onAttach,
+  onFlag,
+}: {
+  venue: HubVenue;
+  styleOptions: { slug: string; label: string }[];
+  flagshipChoices: { id: string; name: string; city: string | null }[];
+  onDone: () => void;
+  onDelete: () => void;
+  onDetach: () => void;
+  onAttach: (parentId: string) => void;
+  onFlag: (patch: { is_featured?: boolean; permanently_closed?: boolean }) => void;
+}) {
+  const f = venue.fields as Record<string, unknown>;
+  const s = (k: string) => (typeof f[k] === "string" ? (f[k] as string) : "");
+  const [name, setName] = useState(venue.name);
+  const [label, setLabel] = useState(s("location_label"));
+  const [hook, setHook] = useState(venue.hook ?? "");
+  const [description, setDescription] = useState(venue.description ?? "");
+  const [address, setAddress] = useState(s("address"));
   const [city, setCity] = useState(venue.city ?? "");
   const [country, setCountry] = useState(venue.country ?? "");
-  const [lat, setLat] = useState(String(venue.lat ?? 0));
-  const [lng, setLng] = useState(String(venue.lng ?? 0));
+  const [lat, setLat] = useState(venue.lat ?? 0);
+  const [lng, setLng] = useState(venue.lng ?? 0);
+  const [phone, setPhone] = useState(s("phone"));
+  const [website, setWebsite] = useState(s("website"));
+  const [igHandle, setIgHandle] = useState(s("instagram_handle"));
+  const [igUrl, setIgUrl] = useState(s("instagram_url"));
+  const [xUrl, setXUrl] = useState(s("x_url"));
+  const [fbUrl, setFbUrl] = useState(s("facebook_url"));
+  const [ttUrl, setTtUrl] = useState(s("tiktok_url"));
+  const [ytUrl, setYtUrl] = useState(s("youtube_url"));
+  const [style, setStyle] = useState(venue.style);
+  const [price, setPrice] = useState(Number(f.price_level) || 2);
+  const [offerings, setOfferings] = useState(
+    Array.isArray(f.offerings) ? (f.offerings as string[]).join(", ") : ""
+  );
+  const [hoursText, setHoursText] = useState(
+    f.hours && typeof f.hours === "object" ? JSON.stringify(f.hours, null, 0) : ""
+  );
+  const [attachTo, setAttachTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
@@ -1203,16 +1419,48 @@ function LocationPanel({ venue, onDone }: { venue: HubVenue; onDone: () => void 
     setBusy(true);
     setErr("");
     setMsg("");
-    const body: Record<string, unknown> = { restaurantId: venue.id, address, city, country, regeocode };
-    const nlat = Number(lat);
-    const nlng = Number(lng);
-    if (!regeocode && Number.isFinite(nlat) && Number.isFinite(nlng)) {
-      body.lat = nlat;
-      body.lng = nlng;
+    let hours: unknown = undefined;
+    if (hoursText.trim()) {
+      try {
+        hours = JSON.parse(hoursText);
+      } catch {
+        setBusy(false);
+        setErr("Hours must be valid JSON, e.g. {\"mon\":\"11–21\"}. Fix or clear it.");
+        return;
+      }
+    } else {
+      hours = null;
+    }
+    const body: Record<string, unknown> = {
+      restaurantId: venue.id,
+      name,
+      location_label: label,
+      hook,
+      description,
+      address,
+      city,
+      country,
+      phone,
+      website,
+      instagram_handle: igHandle,
+      instagram_url: igUrl,
+      x_url: xUrl,
+      facebook_url: fbUrl,
+      tiktok_url: ttUrl,
+      youtube_url: ytUrl,
+      style,
+      price_level: price,
+      offerings: offerings.split(",").map((o) => o.trim()).filter(Boolean),
+      hours,
+      regeocode,
+    };
+    if (!regeocode) {
+      body.lat = lat;
+      body.lng = lng;
     }
     let res: Response;
     try {
-      res = await fetch("/api/admin/venues/location", {
+      res = await fetch("/api/admin/venues/edit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -1228,48 +1476,112 @@ function LocationPanel({ venue, onDone }: { venue: HubVenue; onDone: () => void 
       setErr(data.error ?? "Failed");
       return;
     }
-    if (typeof data.lat === "number") setLat(String(data.lat));
-    if (typeof data.lng === "number") setLng(String(data.lng));
-    setMsg(regeocode ? `Re-geocoded → ${data.lat}, ${data.lng}. Saved.` : "Saved.");
+    if (typeof data.lat === "number") setLat(data.lat);
+    if (typeof data.lng === "number") setLng(data.lng);
+    setMsg(regeocode ? `Saved · re-geocoded → ${data.lat?.toFixed?.(5)}, ${data.lng?.toFixed?.(5)}.` : "Saved.");
     onDone();
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Address &amp; map pin</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <label className="block sm:col-span-2">
-          <span className="text-xs text-text-muted">Full address (include postcode/ZIP)</span>
-          <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="8-9 Snowsfields, SE1 3SU" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
-        </label>
-        <label className="block">
-          <span className="text-xs text-text-muted">City / locale</span>
-          <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Bermondsey" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
-        </label>
-        <label className="block">
-          <span className="text-xs text-text-muted">Country</span>
-          <input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="United Kingdom" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
-        </label>
-        <label className="block">
-          <span className="text-xs text-text-muted">Latitude</span>
-          <input value={lat} onChange={(e) => setLat(e.target.value)} inputMode="decimal" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
-        </label>
-        <label className="block">
-          <span className="text-xs text-text-muted">Longitude</span>
-          <input value={lng} onChange={(e) => setLng(e.target.value)} inputMode="decimal" className="mt-1 w-full rounded-md border border-border-default bg-surface-0 px-2.5 py-1.5 text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none" />
-        </label>
+    <div className="space-y-4">
+      {/* Copy — hook + description (manual edits are sacred) */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Copy (house voice)</p>
+        <Field label="Hook (one line)">
+          <input value={hook} onChange={(e) => setHook(e.target.value)} className={fieldInput} placeholder="A pit, a queue, and the quiet confidence of a place that knows what it is." />
+        </Field>
+        <Field label="Description">
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={5} className={`${fieldInput} resize-y font-sans leading-relaxed`} placeholder="Two or three short paragraphs, blank line between them." />
+        </Field>
+        {venue.manualCopy && (
+          <p className="text-xs text-emerald-400/90">This copy is hand-edited — a future AI enrich will ask before overwriting it.</p>
+        )}
       </div>
+
+      {/* Core fields */}
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Field label="Name"><input value={name} onChange={(e) => setName(e.target.value)} className={fieldInput} /></Field>
+        <Field label="Location label (branch)"><input value={label} onChange={(e) => setLabel(e.target.value)} className={fieldInput} placeholder="Bermondsey" /></Field>
+        <Field label="BBQ style">
+          <select value={style} onChange={(e) => setStyle(e.target.value)} className={fieldInput}>
+            {styleOptions.map((o) => <option key={o.slug} value={o.slug}>{o.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Price band">
+          <select value={price} onChange={(e) => setPrice(Number(e.target.value))} className={fieldInput}>
+            {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{"$".repeat(n)}</option>)}
+          </select>
+        </Field>
+        <Field label="Phone"><input value={phone} onChange={(e) => setPhone(e.target.value)} className={fieldInput} /></Field>
+        <Field label="Website"><input value={website} onChange={(e) => setWebsite(e.target.value)} className={fieldInput} /></Field>
+        <Field label="Instagram handle"><input value={igHandle} onChange={(e) => setIgHandle(e.target.value)} className={fieldInput} placeholder="joesbbq" /></Field>
+        <Field label="Instagram URL"><input value={igUrl} onChange={(e) => setIgUrl(e.target.value)} className={fieldInput} /></Field>
+        <Field label="Facebook URL"><input value={fbUrl} onChange={(e) => setFbUrl(e.target.value)} className={fieldInput} /></Field>
+        <Field label="X URL"><input value={xUrl} onChange={(e) => setXUrl(e.target.value)} className={fieldInput} /></Field>
+        <Field label="TikTok URL"><input value={ttUrl} onChange={(e) => setTtUrl(e.target.value)} className={fieldInput} /></Field>
+        <Field label="YouTube URL"><input value={ytUrl} onChange={(e) => setYtUrl(e.target.value)} className={fieldInput} /></Field>
+        <Field label="Offerings (comma-separated)"><input value={offerings} onChange={(e) => setOfferings(e.target.value)} className={fieldInput} placeholder="brisket, ribs, burnt ends" /></Field>
+        <Field label="Hours (JSON: {&quot;mon&quot;:&quot;11–21&quot;})"><input value={hoursText} onChange={(e) => setHoursText(e.target.value)} className={fieldInput} placeholder='{"mon":"11–21","tue":"11–21"}' /></Field>
+      </div>
+
+      {/* Address & map pin (Fix 4) */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Address &amp; map pin</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className="block sm:col-span-2">
+            <span className="text-xs text-text-muted">Full address (include postcode/ZIP)</span>
+            <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="8-9 Snowsfields, SE1 3SU" className={fieldInput} />
+          </label>
+          <Field label="City / locale"><input value={city} onChange={(e) => setCity(e.target.value)} className={fieldInput} placeholder="Bermondsey" /></Field>
+          <Field label="Country"><input value={country} onChange={(e) => setCountry(e.target.value)} className={fieldInput} placeholder="United Kingdom" /></Field>
+        </div>
+        <PinMap lat={lat} lng={lng} onChange={(la, ln) => { setLat(la); setLng(ln); }} />
+        <p className="text-xs text-text-muted">
+          Tap the map or drag the pin to place it — lat/lng fill in automatically ({lat.toFixed(5)}, {lng.toFixed(5)}). No need to type coordinates.
+        </p>
+      </div>
+
+      {/* Save */}
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" disabled={busy} onClick={() => save(true)} className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40">
-          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />}Save &amp; re-geocode
+        <button type="button" disabled={busy} onClick={() => save(false)} className="inline-flex items-center gap-1.5 rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40">
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}Save all
         </button>
-        <button type="button" disabled={busy} onClick={() => save(false)} className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">
-          Save with this pin (manual lat/lng)
+        <button type="button" disabled={busy} onClick={() => save(true)} className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">
+          <MapPin className="h-3.5 w-3.5" />Save &amp; re-geocode from address
         </button>
         {msg && <span className="text-xs text-emerald-400">{msg}</span>}
         {err && <span className="text-xs text-destructive">{err}</span>}
       </div>
-      <p className="text-xs text-text-muted">“Save &amp; re-geocode” moves the pin to match the address. “Save with this pin” keeps the lat/lng you entered.</p>
+
+      {/* Flags + danger zone */}
+      <div className="flex flex-wrap items-center gap-2 border-t border-border-subtle pt-3">
+        <button type="button" onClick={() => onFlag({ is_featured: !venue.isFeatured })} disabled={venue.permanentlyClosed} className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold disabled:opacity-40 ${venue.isFeatured ? "border-brand-gold/60 bg-brand-gold/10 text-brand-gold" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>
+          <Star className={`h-3.5 w-3.5 ${venue.isFeatured ? "fill-brand-gold" : ""}`} />{venue.isFeatured ? "Featured" : "Feature"}
+        </button>
+        <button type="button" onClick={() => onFlag({ permanently_closed: !venue.permanentlyClosed })} className={`inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-semibold ${venue.permanentlyClosed ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400" : "border-border-default text-text-secondary hover:border-destructive hover:text-destructive"}`}>
+          <Ban className="h-3.5 w-3.5" />{venue.permanentlyClosed ? "Reopen" : "Mark closed"}
+        </button>
+        {venue.chainSeed ? (
+          <button type="button" onClick={onDetach} className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold">
+            <Unlink className="h-3.5 w-3.5" />Remove from chain
+          </button>
+        ) : (
+          <div className="inline-flex items-center gap-1.5">
+            <select value={attachTo} onChange={(e) => setAttachTo(e.target.value)} className="rounded-md border border-border-default bg-surface-0 px-2 py-1.5 text-xs text-text-primary focus:outline-none">
+              <option value="">Attach to chain…</option>
+              {flagshipChoices.filter((c) => c.id !== venue.id).map((c) => (
+                <option key={c.id} value={c.id}>{c.name}{c.city ? ` · ${c.city}` : ""}</option>
+              ))}
+            </select>
+            <button type="button" disabled={!attachTo} onClick={() => onAttach(attachTo)} className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">
+              <Link2 className="h-3.5 w-3.5" />Attach
+            </button>
+          </div>
+        )}
+        <button type="button" onClick={onDelete} className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-destructive/60 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/10">
+          <Trash2 className="h-3.5 w-3.5" />Delete
+        </button>
+      </div>
     </div>
   );
 }

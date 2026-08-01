@@ -7,6 +7,8 @@ import { CATEGORY_LABELS, CATEGORY_ORDER } from "@/lib/constants/categories";
 import { freshness } from "@/lib/admin/freshness";
 import { VenueHub } from "@/components/admin/VenueHub";
 import { toHubVenue, STYLE_OPTIONS } from "@/lib/admin/hub";
+import { summarizeCosts } from "@/lib/admin/cost-summary";
+import { fmtUsd } from "@/lib/constants/enrichment-cost";
 import { isRealPhoto } from "@/lib/constants/hero";
 import type { Restaurant, MapItemCategory } from "@/lib/types/database";
 
@@ -212,6 +214,18 @@ export default async function ListingsPage() {
 
   const hubVenues = all.map(toHubVenue);
 
+  // Spend by provider — exact all-time total (cumulative per venue), split by
+  // each venue's most-recent run breakdown.
+  const cost = summarizeCosts(
+    all.map((r) => ({
+      enrichment_cost: r.enrichment_cost ?? null,
+      enrichment_cost_breakdown:
+        (r.enrichment_cost_breakdown as Record<string, unknown> | null) ?? null,
+      enriched_at: r.enriched_at ?? null,
+    })),
+    new Date().toISOString().slice(0, 10)
+  );
+
   return (
     <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10">
       <h1 className="font-heading text-3xl font-bold text-text-primary">Listings &amp; Insights</h1>
@@ -301,6 +315,32 @@ export default async function ListingsPage() {
             your review in Self-Healing.
           </p>
         )}
+      </Section>
+
+      {/* Spend by provider */}
+      <Section title="Spend by provider">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+          <Stat
+            label="Anthropic (Claude)"
+            value={fmtUsd(cost.anthropicAllTime)}
+            sub={`${fmtUsd(cost.anthropicToday)} today`}
+            tone="gold"
+          />
+          <Stat
+            label="xAI (Grok + search)"
+            value={fmtUsd(cost.xaiAllTime)}
+            sub={`${fmtUsd(cost.xaiToday)} today`}
+            tone="gold"
+          />
+          <Stat
+            label="Total"
+            value={fmtUsd(cost.totalAllTime)}
+            sub={`${fmtUsd(cost.totalToday)} today`}
+          />
+          <Stat label="Venues enriched" value={cost.venuesEnriched} />
+          <Stat label="Total searches" value={cost.totalSearches} />
+        </div>
+        <p className="mt-3 text-xs text-text-muted">{cost.basis}</p>
       </Section>
 
       {/* Control hub — the same surface for existing venues and new imports */}

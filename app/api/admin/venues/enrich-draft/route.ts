@@ -44,6 +44,8 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "");
   const mode: "full" | "light" = body.mode === "light" ? "light" : "full";
+  // Explicit operator override to let a re-enrich overwrite hand-edited copy.
+  const overwriteManual = Boolean(body.overwriteManual);
   if (!restaurantId) {
     return NextResponse.json({ error: "restaurantId required." }, { status: 400 });
   }
@@ -51,7 +53,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, slug, name, location_label, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset"
+      "id, slug, name, location_label, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
     )
     .eq("id", restaurantId)
     .single();
@@ -142,8 +144,18 @@ export async function POST(request: Request) {
       },
       enrichment_model: grokModel,
     };
-    if (!row.instagram_url && find.instagram) patch.instagram_url = find.instagram;
-    if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
+    // Persist the handle + URL the MOMENT one is found — regardless of post
+    // count (Fix 2). A 0-post account is still a valid link-out; the photo embed
+    // simply doesn't render (copyright-safe). If a handle is found but the row
+    // has no URL yet, build the URL from the handle; if a URL is found but no
+    // handle parsed, still save the URL so the IG ✓ lights up.
+    if (find.instagram) {
+      if (!row.instagram_url) patch.instagram_url = find.instagram;
+      if (!row.instagram_handle && igHandle) patch.instagram_handle = igHandle;
+    } else if (igHandle) {
+      if (!row.instagram_handle) patch.instagram_handle = igHandle;
+      if (!row.instagram_url) patch.instagram_url = `https://www.instagram.com/${igHandle}/`;
+    }
     if (find.recent_instagram_posts.length) {
       const existing = Array.isArray(row.instagram_posts) ? row.instagram_posts : [];
       patch.instagram_posts = existing.length ? existing : find.recent_instagram_posts;
@@ -167,7 +179,35 @@ export async function POST(request: Request) {
     // public page so the new link-out logos actually show (they were saved but
     // the cached page kept the old render).
     if (row.status === "approved") revalidateVenues();
-    return NextResponse.json({ ok: true, mode, name: row.name, posts: find.recent_instagram_posts.length, cost });
+    // Report EXACTLY what happened so the hub never claims "Found Instagram"
+    // when nothing was saved (the Moyo Shisanyama case). saved_ig is true only
+    // when the row now carries a handle or URL.
+    const savedHandle = (patch.instagram_handle as string) ?? row.instagram_handle ?? null;
+    const savedUrl = (patch.instagram_url as string) ?? row.instagram_url ?? null;
+    const savedIg = Boolean(savedHandle || savedUrl);
+    return NextResponse.json({
+      ok: true,
+      mode,
+      name: row.name,
+      saved_ig: savedIg,
+      handle: savedHandle,
+      posts: find.recent_instagram_posts.length,
+      cost,
+    });
+  }
+
+  // Manual copy is sacred (Fix 3): if a human hand-edited this venue's copy, a
+  // full re-enrich would overwrite their words. Stop BEFORE spending a cent and
+  // ask the operator to confirm; they re-run with overwriteManual to proceed.
+  if (mode === "full" && row.manual_copy && !overwriteManual) {
+    return NextResponse.json({
+      ok: true,
+      mode,
+      name: row.name,
+      manual_copy_guard: true,
+      message:
+        "This venue has hand-edited copy. Re-enriching will overwrite it — confirm to overwrite, or edit it directly instead.",
+    });
   }
 
   // ---- full mode: bounded dossier + Haiku copy ---------------------------
@@ -339,6 +379,9 @@ export async function POST(request: Request) {
   if (!thin) {
     if (copy.hook) proposed.hook = copy.hook;
     if (copy.description) proposed.description = copy.description;
+    // AI just (re)authored the copy — it's no longer a protected manual edit.
+    // (For an approved venue this rides in pending_changes and applies on approve.)
+    if (copy.hook || copy.description) proposed.manual_copy = false;
   }
   if (style) proposed.style = style;
   if (address) proposed.address = address;

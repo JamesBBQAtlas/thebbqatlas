@@ -485,13 +485,22 @@ export default async function RestaurantPage({ params }: Props) {
         {/* Right sidebar */}
         <aside className="flex flex-col gap-6 lg:sticky lg:top-24 lg:self-start">
           <div className="space-y-4 rounded-xl border border-border-subtle bg-surface-0 p-6">
-            <CheckInButton
-              restaurantId={restaurant.id}
-              restaurantName={restaurant.name}
-              isAuthed={Boolean(user)}
-              initial={myCheckIn}
-            />
-            {(metrics.visited > 0 || metrics.saved > 0) && (
+            {restaurant.permanently_closed ? (
+              // Permanently closed (Fix 7): no "I've been here" / booking CTA —
+              // just a clear notice. The venue stays live (no 404) for reference.
+              <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
+                <Store className="mt-0.5 h-4 w-4 shrink-0" />
+                <span>This venue has <strong>permanently closed</strong>.</span>
+              </div>
+            ) : (
+              <CheckInButton
+                restaurantId={restaurant.id}
+                restaurantName={restaurant.name}
+                isAuthed={Boolean(user)}
+                initial={myCheckIn}
+              />
+            )}
+            {!restaurant.permanently_closed && (metrics.visited > 0 || metrics.saved > 0) && (
               <div className="flex items-center gap-4 border-t border-border-subtle pt-4 text-sm">
                 {metrics.visited > 0 && (
                   <span className="flex items-center gap-1.5 text-text-secondary">

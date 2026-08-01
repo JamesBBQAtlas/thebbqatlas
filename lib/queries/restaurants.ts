@@ -23,7 +23,12 @@ async function getSupabaseRestaurants(): Promise<Restaurant[] | null> {
       return null;
     }
     if (!data?.length) return null;
-    return data as Restaurant[];
+    // Permanently-closed venues are excluded from every public listing surface —
+    // map, directory, Featured, "nearby", and the public spot count all read
+    // through here (Fix 7). The individual venue page uses getRestaurantBySlug
+    // (below), which does NOT filter, so a closed venue still renders with its
+    // "Permanently closed" banner rather than 404-ing.
+    return (data as Restaurant[]).filter((r) => !r.permanently_closed);
   } catch (e) {
     console.error("[queries.restaurants] unexpected read error — serving seed fallback:", e);
     return null;

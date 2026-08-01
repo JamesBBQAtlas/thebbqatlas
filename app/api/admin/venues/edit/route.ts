@@ -1,0 +1,151 @@
+import { NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/auth/admin";
+import { geocodeAddress } from "@/lib/geo/geocode";
+import { canonicalCountry } from "@/lib/constants/countries";
+import { settlementCity } from "@/lib/admin/address";
+import { revalidateVenues } from "@/lib/cache/venues";
+import { BBQ_STYLES } from "@/lib/constants/styles";
+
+export const dynamic = "force-dynamic";
+export const maxDuration = 60;
+
+const str = (v: unknown): string | null =>
+  typeof v === "string" ? v.trim() : null;
+const validCoord = (a: unknown, b: unknown) =>
+  typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
+
+/**
+ * Full manual venue editor (Fix 3). Lets the operator hand-edit EVERY field —
+ * the house-voice copy (hook + description), name, address/pin, city, country,
+ * socials, phone, hours, price band, BBQ style, offerings, and the featured /
+ * permanently-closed flags — and saves it live. Editing the copy marks the venue
+ * `manual_copy` so a later AI enrich/rewrite must confirm before overwriting the
+ * operator's words (their edits are sacred). Everything revalidates so the venue
+ * page, map and directory reflect the change on the next load.
+ */
+export async function POST(request: Request) {
+  const ctx = await requireAdmin();
+  if (!ctx) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const body = await request.json().catch(() => ({}));
+  const restaurantId = String(body.restaurantId ?? "");
+  if (!restaurantId) return NextResponse.json({ error: "restaurantId required." }, { status: 400 });
+
+  const { data: row, error: loadErr } = await ctx.db
+    .from("restaurants")
+    .select("id, address, city, country, lat, lng, is_featured, permanently_closed")
+    .eq("id", restaurantId)
+    .single();
+  if (loadErr || !row) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
+
+  const patch: Record<string, unknown> = {};
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
+
+  // ---- Copy (hook + description) — deliberate human edit → manual_copy -------
+  let touchedCopy = false;
+  if (has("hook")) { patch.hook = str(body.hook) ?? ""; touchedCopy = true; }
+  if (has("description")) { patch.description = str(body.description) ?? ""; touchedCopy = true; }
+  if (touchedCopy) {
+    patch.manual_copy = true;
+    patch.manual_copy_at = new Date().toISOString();
+  }
+
+  // ---- Plain text fields ----------------------------------------------------
+  if (has("name")) { const v = str(body.name); if (v) patch.name = v; }
+  if (has("location_label")) patch.location_label = str(body.location_label) || null;
+  if (has("phone")) patch.phone = str(body.phone) || null;
+  if (has("website")) patch.website = str(body.website) || null;
+  if (has("instagram_url")) patch.instagram_url = str(body.instagram_url) || null;
+  if (has("instagram_handle")) {
+    const h = str(body.instagram_handle);
+    patch.instagram_handle = h ? h.replace(/^@/, "").replace(/\/+$/, "").toLowerCase() : null;
+  }
+  if (has("x_url")) patch.x_url = str(body.x_url) || null;
+  if (has("facebook_url")) patch.facebook_url = str(body.facebook_url) || null;
+  if (has("tiktok_url")) patch.tiktok_url = str(body.tiktok_url) || null;
+  if (has("youtube_url")) patch.youtube_url = str(body.youtube_url) || null;
+
+  // ---- Enumerations / numerics ----------------------------------------------
+  if (has("style")) {
+    const s = str(body.style);
+    if (s && (BBQ_STYLES as readonly string[]).includes(s)) patch.style = s;
+  }
+  if (has("price_level")) {
+    const n = Number(body.price_level);
+    if (Number.isFinite(n) && n >= 1 && n <= 4) patch.price_level = Math.round(n);
+  }
+  if (has("offerings")) {
+    patch.offerings = Array.isArray(body.offerings)
+      ? (body.offerings as unknown[]).map((o) => str(o)).filter((o): o is string => Boolean(o))
+      : [];
+  }
+  if (has("hours")) {
+    // Accept an object keyed mon..sun (or null to clear).
+    patch.hours = body.hours && typeof body.hours === "object" ? body.hours : null;
+  }
+
+  // ---- Flags ----------------------------------------------------------------
+  let closing = false;
+  if (has("permanently_closed")) {
+    patch.permanently_closed = Boolean(body.permanently_closed);
+    closing = Boolean(body.permanently_closed);
+  }
+  if (has("is_featured")) patch.is_featured = Boolean(body.is_featured);
+  // A permanently-closed venue can never be Featured (Fix 7).
+  if (closing) patch.is_featured = false;
+
+  // ---- Location (address / city / country / pin) ----------------------------
+  const editingLocation = has("address") || has("city") || has("country") || has("lat") || has("lng") || has("regeocode");
+  if (editingLocation) {
+    const address = has("address") ? str(body.address) ?? "" : (row.address as string);
+    const rawCity = has("city") ? str(body.city) ?? "" : (row.city as string);
+    const country = canonicalCountry(has("country") && str(body.country) ? String(body.country) : (row.country as string));
+    patch.address = address;
+    patch.city = settlementCity(rawCity) || rawCity;
+    patch.country = country;
+
+    const hasManualPin = validCoord(body.lat, body.lng);
+    if (hasManualPin && !body.regeocode) {
+      patch.lat = body.lat;
+      patch.lng = body.lng;
+    } else {
+      // Re-geocode from the address; fall back to the postcode alone, then to a
+      // manual pin if one was supplied. Never silently save (0,0) (Fix B).
+      let geo = await geocodeAddress({ address, city: rawCity, country });
+      if (!geo || !validCoord(geo.lat, geo.lng)) {
+        const postcode = address.split(",").pop()?.trim();
+        if (postcode && postcode !== address) {
+          geo = await geocodeAddress({ address: postcode, city: rawCity, country });
+        }
+      }
+      if (geo && validCoord(geo.lat, geo.lng)) {
+        patch.lat = geo.lat;
+        patch.lng = geo.lng;
+        if (geo.country_code) patch.country_code = geo.country_code;
+      } else if (hasManualPin) {
+        patch.lat = body.lat;
+        patch.lng = body.lng;
+      } else if (!validCoord(row.lat, row.lng)) {
+        // Couldn't locate and no pin to fall back on — flag rather than 0,0.
+        patch.needs_attention = true;
+        patch.attention_reason = "Couldn't locate — check address / set pin manually";
+      }
+    }
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "Nothing to save." }, { status: 400 });
+  }
+
+  const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
+  if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+
+  revalidateVenues();
+  return NextResponse.json({
+    ok: true,
+    lat: patch.lat ?? row.lat,
+    lng: patch.lng ?? row.lng,
+    manual_copy: Boolean(patch.manual_copy),
+    saved: Object.keys(patch),
+  });
+}

@@ -652,12 +652,12 @@ export async function writeVenueCopy(
   const branchNote = opts?.branchOf
     ? `\n\nThis venue is the ${label} location of ${opts.branchOf}, a multi-location barbecue business — NOT the original. The dossier's brand-level facts — style, pitmaster/founders, history, cook method, wood/fuel, specialities, character — are SHARED across every outpost; treat them as real, known facts and convey that shared identity. But write copy that is SPECIFIC to THIS ${label} location: give it its own opening and angle, weaving in what's distinct here (its address, city, hours, setting) so the piece could not be mistaken for another branch. The "established" year is the BRAND's founding, not this branch's — do NOT imply this outpost has existed that long; only "opening_date" tells you when THIS location opened. Do NOT invent any location-specific fact you weren't given.`
     : opts?.isFlagship
-      ? `\n\nThis is the FLAGSHIP / original record for a multi-location barbecue business — the brand's home. Its "established" year is the business's founding, and you may write it as where the whole thing began. Other locations are covered separately.`
+      ? `\n\nThis is the FLAGSHIP / original record for a multi-location barbecue business — the brand's home and its story/destination page. Its "established" year is the business's founding, and you may write it as where the whole thing began. Other locations are covered separately.\n\nLENGTH — for THIS flagship ONLY, write a FULLER description: roughly 5–7 sentences / about 120–180 words (this OVERRIDES the usual "2–3 sentences, no more" brevity). Where the dossier supports it, cover: the origin/founding, the pitmaster/people behind it, the method + wood/fuel, the signature dish or what to order, and why it's the original. Same house voice — dry, warm, understated, certain, wry — just more of it: MORE STORY, not more adjectives. No purple prose, no marketing-speak. Facts ONLY: never invent or inflate to reach a length — if the flagship's facts are genuinely thin, write what IS supported and stop short rather than padding.`
       : "";
   // The writer is NON-NEGOTIABLE on the enrich path: even a sparse dossier must
   // yield honest house-voice copy — never an empty/needs_attention refusal.
   const writeMandate = opts?.alwaysWrite
-    ? `\n\nIMPORTANT — you MUST write copy: ALWAYS return a hook and a 2-3 sentence description built from the facts present. Do NOT return needs_attention and do NOT leave hook/description empty. Even a spare venue deserves honest copy — write plainly from what IS known (its name, city, what_it_is, style, and any facts given), and simply say less where facts are missing. Still NEVER invent a fact, dish, date, or person.`
+    ? `\n\nIMPORTANT — write HONEST copy from the facts present: return a hook and a short description built ONLY from what IS known (name, city, what_it_is, style, and any dossier facts). Say LESS where facts are missing — a spare venue gets a spare, honest line, and that is the correct outcome. NEVER invent, guess, or fill in specifics you weren't given: no made-up menu items or signature dishes, no opening year, no pitmaster or owner names, no awards, no origin story. Confident filler is worse than honest brevity. If the dossier genuinely contains almost nothing beyond a name and an address (no what_it_is, no style, no website/socials, no people, no specialities), do NOT fabricate a personality — write one plain factual sentence from what's known and set needs_attention true with a reason so a human reviews it before it can publish.`
     : "";
   const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}${writeMandate}
 
@@ -672,7 +672,9 @@ Return ONLY the JSON described in your instructions.`;
         user,
         search: false,
         model: CLAUDE_WRITER_MODEL,
-        maxTokens: 512,
+        // A flagship gets the fuller (~120–180 word) write-up, so give it room;
+        // everyone else stays tight on the cheap 512 cap.
+        maxTokens: opts?.isFlagship ? 768 : 512,
       })
     : grokJSON<{ hook?: string; description?: string; needs_attention?: boolean; reason?: string }>({
         system: COPY_SYSTEM,
@@ -683,13 +685,27 @@ Return ONLY the JSON described in your instructions.`;
 
   const description = asStr(data.description);
   const hook = asStr(data.hook);
-  // In alwaysWrite mode the writer must produce copy: only flag attention if it
-  // returned genuinely NOTHING (both empty) despite the mandate.
   const flaggedThin = data.needs_attention === true || (!description && !hook);
   const dossierThin =
     !dossier.what_it_is && !dossier.website && !dossier.instagram;
+  // GENUINELY EMPTY research (Fix 10): a placeholder seed where the dossier has
+  // essentially nothing to write with authority from — only a name/address, none
+  // of the substance that makes an honest listing. Such a venue must be HELD for
+  // review (needs_attention), never published with confident filler, even though
+  // the writer was told to produce copy. This is stricter than `dossierThin`: it
+  // requires the ABSENCE of every substantive signal.
+  const noRealFacts =
+    !dossier.what_it_is &&
+    !dossier.bbq_style &&
+    !dossier.website &&
+    !dossier.instagram &&
+    !dossier.founders_pitmaster &&
+    !dossier.setting_vibe &&
+    !dossier.established &&
+    (dossier.specialities?.length ?? 0) === 0 &&
+    (dossier.awards_press?.length ?? 0) === 0;
   const needs_attention = opts?.alwaysWrite
-    ? !description && !hook
+    ? (!description && !hook) || data.needs_attention === true || noRealFacts
     : flaggedThin || (dossierThin && !description);
 
   return {
@@ -697,7 +713,10 @@ Return ONLY the JSON described in your instructions.`;
     description,
     needs_attention,
     attention_reason: needs_attention
-      ? asStr(data.reason) ?? "Dossier too thin to write an honest page."
+      ? asStr(data.reason) ??
+        (noRealFacts
+          ? "Insufficient information to write with authority — review before publishing."
+          : "Dossier too thin to write an honest page.")
       : null,
     usage: usage ?? { in_tokens: 0, out_tokens: 0 },
     model,

@@ -181,25 +181,42 @@ export async function PATCH(request: Request) {
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "");
   const status = body.status === "approved" ? "approved" : body.status === "rejected" ? "rejected" : null;
+  const override = Boolean(body.override);
   if (!restaurantId || !status) {
     return NextResponse.json({ error: "Bad request." }, { status: 400 });
   }
 
-  // Guard: never publish an un-geocoded seed draft (it would pin at 0,0 in the
-  // ocean). Catches both the (0,0) placeholder AND a null pin (a geocode failure
-  // that was flagged needs_attention). Enrich it, or drop a manual pin via the
-  // location editor, first.
   if (status === "approved") {
     const { data: row } = await ctx.db
       .from("restaurants")
-      .select("lat, lng")
+      .select("lat, lng, needs_attention, attention_reason")
       .eq("id", restaurantId)
       .single();
+    // Guard 1: never publish an un-geocoded seed draft (it would pin at 0,0 in
+    // the ocean). Catches both the (0,0) placeholder AND a null pin (a geocode
+    // failure that was flagged needs_attention). Enrich it, or drop a manual pin
+    // via the location editor, first. This one is HARD — no override.
     const badPin =
       row && (row.lat == null || row.lng == null || (row.lat === 0 && row.lng === 0));
     if (badPin) {
       return NextResponse.json(
         { error: "This venue has no map location yet — enrich it or set a pin first." },
+        { status: 422 }
+      );
+    }
+    // Guard 2 (Fix 10): a venue flagged needs_attention — most importantly one
+    // whose research was too thin to write with authority — must NOT quietly go
+    // live with filler. Block it and surface the reason for a human decision;
+    // publishing anyway requires an EXPLICIT override from the operator.
+    if (row?.needs_attention && !override) {
+      return NextResponse.json(
+        {
+          error:
+            (row.attention_reason as string) ||
+            "This venue is flagged for attention — review it before publishing.",
+          needs_override: true,
+          attention_reason: (row.attention_reason as string) ?? null,
+        },
         { status: 422 }
       );
     }
