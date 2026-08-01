@@ -1363,8 +1363,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 // The full manual venue editor (Fix 3 + Fix 4 + Fix 5 + Fix 7). Every field is
 // hand-editable — copy included — with an interactive tap-to-place map pin, the
-// featured/closed flags, and delete / chain-membership controls.
-function EditorPanel({
+// featured/closed flags, and delete / chain-membership controls. Exported so the
+// Moderation Queue reuses the exact same editor on a materialised submission.
+export function EditorPanel({
   venue,
   styleOptions,
   flagshipChoices,

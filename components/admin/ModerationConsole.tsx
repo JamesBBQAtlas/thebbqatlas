@@ -18,6 +18,7 @@ import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
 import { restaurantSlug } from "@/lib/utils/slug";
 import type { Submission } from "@/lib/types/database";
 import { cn } from "@/lib/utils/cn";
+import { SubmissionEnrichTools } from "@/components/admin/SubmissionEnrichTools";
 
 export type ReviewItem = {
   id: string;
@@ -220,7 +221,7 @@ export function ModerationConsole({
                 key={s.id}
                 className="rounded-xl border border-border-subtle bg-surface-0 p-6"
               >
-                <div className="flex flex-wrap items-start justify-between gap-4">
+                <div>
                   <div className="min-w-0">
                     <h3 className="font-heading text-lg font-bold text-text-primary">
                       {s.name}
@@ -279,26 +280,13 @@ export function ModerationConsole({
                       · {fmtDate(s.created_at)}
                     </p>
                   </div>
-                  <div className="flex flex-col items-end gap-2">
-                    <Actions
-                      busy={busy === s.id}
-                      onApprove={() => act("submission", s.id, "approve", "subs")}
-                      onReject={() => act("submission", s.id, "reject", "subs")}
-                      approveLabel={s.possible_duplicate_of ? "Approve as new" : undefined}
-                    />
-                    {s.possible_duplicate_of && (
-                      <button
-                        type="button"
-                        disabled={busy === s.id}
-                        onClick={() =>
-                          act("submission", s.id, "merge", "subs", "Merged into the existing venue")
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-md border border-brand-gold/50 px-3 py-1.5 text-xs font-semibold text-brand-gold transition-colors hover:bg-brand-gold/10 disabled:opacity-40"
-                      >
-                        Merge into existing
-                      </button>
-                    )}
-                  </div>
+                  <SubmissionEnrichTools
+                    submissionId={s.id}
+                    hasDuplicate={Boolean(s.possible_duplicate_of)}
+                    onResolved={(id) => setSubs((p) => p.filter((x) => x.id !== id))}
+                    onReject={(id) => act("submission", id, "reject", "subs")}
+                    onMerge={(id) => act("submission", id, "merge", "subs", "Merged into the existing venue")}
+                  />
                 </div>
               </div>
             ))}

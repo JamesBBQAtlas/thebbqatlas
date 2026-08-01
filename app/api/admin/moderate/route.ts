@@ -71,6 +71,8 @@ export async function POST(request: Request) {
   const id: string = body.id ?? body.submissionId;
   const action: Action = body.action;
   const notes: string | undefined = body.notes;
+  // Explicit operator override to publish a needs_attention (thin-data) venue.
+  const override: boolean = Boolean(body.override);
 
   if (!id || (action !== "approve" && action !== "reject" && action !== "merge")) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
@@ -132,6 +134,16 @@ export async function POST(request: Request) {
       }
 
       if (action === "reject") {
+        // If it was materialised into a pending (non-public) venue for in-queue
+        // enrichment, discard that too — but only while it's still pending, never
+        // an already-published venue.
+        if (submission.materialized_restaurant_id) {
+          await admin
+            .from("restaurants")
+            .delete()
+            .eq("id", submission.materialized_restaurant_id)
+            .eq("status", "pending");
+        }
         await admin
           .from("submissions")
           .update({ moderation_status: "rejected", admin_notes: notes ?? null })
@@ -156,27 +168,68 @@ export async function POST(request: Request) {
 
       // Approve — behaviour depends on the kind of submission.
       if (kind === "new_venue") {
-        await admin.from("restaurants").insert({
-          slug: restaurantSlug(submission.name, submission.city),
-          name: submission.name,
-          description: submission.description,
-          style: submission.style,
-          lat: submission.lat,
-          lng: submission.lng,
-          address: submission.address,
-          city: submission.city,
-          country: submission.country,
-          country_code: resolveCountryCode(null, submission.country),
-          website: submission.website,
-          // Copyright-safe: never seed a stock hero. Approved venues start with
-          // no hero (branded placeholder) unless an approved photo exists.
-          hero_image_url: safeVenueImage(submission.hero_image_url),
-          price_level: 2,
-          avg_rating: 0,
-          review_count: 0,
-          is_featured: false,
-          status: "approved",
-        });
+        if (submission.materialized_restaurant_id) {
+          // Enriched-in-queue: publish the pending venue the operator already
+          // reviewed — NEVER insert a raw duplicate. The same guards as the
+          // Listings publish apply: no un-located pin, and a thin-data
+          // needs_attention venue can't go live without an explicit override
+          // (Fix 10) — so the public form can't be a backdoor for junk.
+          const { data: venue } = await admin
+            .from("restaurants")
+            .select("id, status, lat, lng, needs_attention, attention_reason")
+            .eq("id", submission.materialized_restaurant_id)
+            .single();
+          if (!venue) {
+            return NextResponse.json(
+              { error: "The materialised venue no longer exists — re-run Enrich." },
+              { status: 409 }
+            );
+          }
+          if (venue.status !== "approved") {
+            const badPin =
+              venue.lat == null || venue.lng == null || (venue.lat === 0 && venue.lng === 0);
+            if (badPin) {
+              return NextResponse.json(
+                { error: "This venue has no map location yet — set a pin in the editor first." },
+                { status: 422 }
+              );
+            }
+            if (venue.needs_attention && !override) {
+              return NextResponse.json(
+                {
+                  error:
+                    (venue.attention_reason as string) ||
+                    "This venue is flagged for attention — review it before publishing.",
+                  needs_override: true,
+                },
+                { status: 422 }
+              );
+            }
+            await admin.from("restaurants").update({ status: "approved" }).eq("id", venue.id);
+          }
+        } else {
+          await admin.from("restaurants").insert({
+            slug: restaurantSlug(submission.name, submission.city),
+            name: submission.name,
+            description: submission.description,
+            style: submission.style,
+            lat: submission.lat,
+            lng: submission.lng,
+            address: submission.address,
+            city: submission.city,
+            country: submission.country,
+            country_code: resolveCountryCode(null, submission.country),
+            website: submission.website,
+            // Copyright-safe: never seed a stock hero. Approved venues start with
+            // no hero (branded placeholder) unless an approved photo exists.
+            hero_image_url: safeVenueImage(submission.hero_image_url),
+            price_level: 2,
+            avg_rating: 0,
+            review_count: 0,
+            is_featured: false,
+            status: "approved",
+          });
+        }
       } else if (kind === "closure" && submission.target_restaurant_id) {
         // Approving a closure report marks the target venue permanently closed.
         await admin
