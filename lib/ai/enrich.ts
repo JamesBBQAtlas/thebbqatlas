@@ -564,7 +564,11 @@ export interface ChainBranch {
   city: string | null;
 }
 
-const ROSTER_SYSTEM = `You enumerate a barbecue brand's locations from its OWN official "Locations"/"Find us" page. You are given the brand name and (usually) that page's URL. Read that page — and at most 1-2 follow-up pages ONLY if it paginates — and return the CANONICAL, COMPLETE list of physical branches. For each branch: {name, address, city}. Facts only from the official pages. Do NOT write descriptions, do NOT enrich, do NOT crawl the open web. If NO URL is given, do exactly ONE search for "[brand] official locations" and read the official result. Respond ONLY with JSON: {"locations": [{"name":"","address":"","city":""}]}.`;
+const ROSTER_SYSTEM = `You enumerate a barbecue brand's locations from its OWN official "Locations"/"Find us" page. You are given the brand name and (usually) that page's URL. Read that page — and at most 1-2 follow-up pages ONLY if it paginates — and return the CANONICAL, COMPLETE list of physical branches. For each branch return {name, address, city} where:
+- "address" is that branch's FULL STREET address — building number + street (+ unit) — exactly as printed on the locations page. Capture it whenever the page shows it; a precise street lets us pin the branch to the building instead of the city centre. Put ONLY the street line here — NOT the city/region/postcode.
+- "city" is the town/locality the branch sits in.
+- If the page genuinely lists only a city with NO street for a branch, set "address" to "" (empty) and still include the branch — never put the city name in the address field as a stand-in for a street.
+Facts only from the official pages. Do NOT write descriptions, do NOT enrich, do NOT crawl the open web. If NO URL is given, do exactly ONE search for "[brand] official locations" and read the official result. Respond ONLY with JSON: {"locations": [{"name":"","address":"","city":""}]}.`;
 
 /**
  * Chain roster scan (§09.1.2b) — one bounded call whose ONLY job is to read the

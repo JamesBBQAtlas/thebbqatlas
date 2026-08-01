@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
-import { composeAddress, normStreet, settlementCity } from "@/lib/admin/address";
+import { composeAddress, normStreet, normCity, settlementCity } from "@/lib/admin/address";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
@@ -51,15 +51,30 @@ function hasCoords(lat: number | null | undefined, lng: number | null | undefine
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** A distinct BRANCH label (its own name), never a bare city — "" if none. */
-function branchLabelKey(name: string | null, city: string | null, brand: string): string {
-  const label = (name ?? "").trim();
-  if (!label || label === brand) return "";
-  const l = label.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-  const c = (city ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
-  // Only a label that is genuinely distinct from the city is a safe identity key
-  // ("Greater London" as a label would just re-introduce the city collision).
-  return l && l !== c ? l : "";
+/** Settlement-normalised city identity key ("City of Westminster" → "london"). */
+function cityKeyOf(city: string | null): string {
+  return normCity(settlementCity(city));
+}
+
+/** Known street-type tokens (after normStreet's abbreviation) that mark a road. */
+const STREET_TYPES = new Set([
+  "st", "ave", "rd", "blvd", "dr", "ln", "ct", "pl", "pkwy", "hwy",
+  "way", "sq", "square", "terrace", "close", "walk", "row", "cres", "crescent",
+  "gate", "wharf", "quay", "mews", "hill", "grove", "gardens", "parade",
+]);
+
+/**
+ * Does this address carry a DISTINCT STREET (a real building line), versus being
+ * just a bare city/settlement name? A roster seed like "Syracuse" or "Hamburg"
+ * has no street — it geocodes to the city centre, not the building, so it must
+ * NOT be treated as a precise location for dedupe. A real street has either a
+ * building number (a digit) or a street-type token, and isn't just the city.
+ */
+function hasDistinctStreet(streetKey: string, cityKey: string): boolean {
+  if (!streetKey) return false;
+  if (streetKey === cityKey) return false; // the "street" is literally the city
+  if (/\d/.test(streetKey)) return true; // has a building number
+  return streetKey.split(" ").some((w) => STREET_TYPES.has(w)); // named road
 }
 
 /**
@@ -111,8 +126,12 @@ export async function seedChainLocations(
   // a real pin. A candidate that fails to geocode gets geo=null.
   interface Candidate {
     loc: SeedLocation;
-    street: string;
-    label: string;
+    /** Normalised street identity key (may be empty, or just the city). */
+    streetKey: string;
+    /** True only when it carries a real building line, not a bare city. */
+    hasStreet: boolean;
+    /** Settlement-normalised city key, for the city-only dedupe rule. */
+    cityKey: string;
     lat: number | null;
     lng: number | null;
     country_code: string | null;
@@ -121,7 +140,6 @@ export async function seedChainLocations(
   const candidates: Candidate[] = [];
   for (let i = 0; i < locations.length; i++) {
     const loc = locations[i];
-    const composed = composeAddress({ street: loc.address, city: loc.city });
     let lat: number | null = null;
     let lng: number | null = null;
     let country_code: string | null = null;
@@ -134,10 +152,15 @@ export async function seedChainLocations(
       country_code = geo.country_code;
       geoCity = geo.city;
     }
+    // Street key from the branch's OWN address line only (not folded with the
+    // city), so a city-only entry reads as "no distinct street".
+    const cityKey = cityKeyOf(loc.city);
+    const streetKey = normStreet(loc.address);
     candidates.push({
       loc,
-      street: normStreet(composed),
-      label: branchLabelKey(loc.name, loc.city, brand),
+      streetKey,
+      hasStreet: hasDistinctStreet(streetKey, cityKey),
+      cityKey,
       lat,
       lng,
       country_code,
@@ -146,22 +169,26 @@ export async function seedChainLocations(
   }
 
   const matches = (c: Candidate, e: ExistingRow): boolean => {
-    // 1. Same normalised street address — the strongest identity signal.
-    const eStreet = normStreet(e.address);
-    if (c.street && eStreet && c.street === eStreet) return true;
+    const eStreetKey = normStreet(e.address);
+    const eCityKey = cityKeyOf(e.city);
+    const eHasStreet = hasDistinctStreet(eStreetKey, eCityKey);
+    // 1. Same real street address — the strongest identity signal (both sides
+    //    must actually HAVE a distinct street; a bare-city "street" doesn't count).
+    if (c.hasStreet && eHasStreet && c.streetKey === eStreetKey) return true;
     // 2. Geographic proximity — both sides have real (non-0,0) coordinates.
     if (hasCoords(c.lat, c.lng) && hasCoords(e.lat, e.lng)) {
       if (haversineKm(c.lat as number, c.lng as number, e.lat as number, e.lng as number) <= SAME_PLACE_KM) {
         return true;
       }
     }
-    // 3. Fallback ONLY when neither side has a street to compare: an identical
-    //    distinct BRANCH label (never a bare city) — keeps re-runs of an
-    //    address-less seed idempotent without the "Greater London" collision.
-    if (!c.street && !eStreet) {
-      const eLabel = branchLabelKey(e.location_label, e.city, brand);
-      if (c.label && eLabel && c.label === eLabel) return true;
-    }
+    // 3. CITY-ONLY candidate (no distinct street of its own): it geocodes to the
+    //    city centre and carries nothing to tell it apart from a member already
+    //    in that settlement, so it must NEVER spawn a same-city duplicate of the
+    //    flagship or a sibling (the Dinosaur "Syracuse" seed vs the 246 W Willow
+    //    St flagship, ~700 m apart, that street+geo dedupe alone kept). A
+    //    candidate WITH a distinct street is exempt — that's how genuine
+    //    same-city branches (Bodean's Soho vs Tower Hill) are both kept.
+    if (!c.hasStreet && c.cityKey && c.cityKey === eCityKey) return true;
     return false;
   };
 
