@@ -69,6 +69,22 @@ export default async function ModerationPage() {
   ]);
 
   const allSubs = (subsRes.data ?? []) as Submission[];
+  // Submitter provenance (IP / country) captured by the guarded submit endpoint —
+  // shown on each card, no Submission-type change needed.
+  const subMeta: Record<string, { country: string | null; ip: string | null }> = {};
+  for (const raw of (subsRes.data ?? []) as Array<Record<string, unknown>>) {
+    subMeta[String(raw.id)] = {
+      country: (raw.submitter_country as string) ?? null,
+      ip: (raw.submitter_ip as string) ?? null,
+    };
+  }
+  // Anti-spam intel: how many automated attempts we've dropped lately (operator
+  // awareness + future Cloudflare rule-building).
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+  const { count: spamBlocked7d } = await db
+    .from("submission_abuse_log")
+    .select("id", { count: "exact", head: true })
+    .gte("created_at", sevenDaysAgo);
   const submissions = allSubs.filter(
     (s) => (s.submission_type ?? "new_venue") === "new_venue"
   );
@@ -177,6 +193,8 @@ export default async function ModerationPage() {
         reviews={reviews}
         photos={photos}
         dupTargets={dupTargets}
+        subMeta={subMeta}
+        spamBlocked7d={spamBlocked7d ?? 0}
       />
     </div>
   );

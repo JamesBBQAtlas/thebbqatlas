@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { BBQ_STYLES, STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
-import { createClient } from "@/lib/supabase/client";
 import { LocationPicker, type LocationData } from "@/components/submit/LocationPicker";
 import { normalizeWebsite, normalizeInstagram } from "@/lib/utils/normalize";
 import { cn } from "@/lib/utils/cn";
@@ -29,7 +28,10 @@ export function SubmitForm() {
     { id: string; name: string; city: string | null; slug: string | null; reason: string }[]
   >([]);
   const [dupAck, setDupAck] = useState(false);
-  const supabase = createClient();
+  // Anti-spam: a honeypot field (must stay empty) + the moment the form rendered
+  // (a near-instant submit is a bot). Both are checked server-side.
+  const [hp, setHp] = useState("");
+  const [renderedAt] = useState(() => Date.now());
 
   const toggleStyle = (style: BbqStyle) => {
     setStyles((prev) =>
@@ -94,53 +96,39 @@ export function SubmitForm() {
 
     setLoading(true);
     setStatus("idle");
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
 
-    const payload: Record<string, unknown> = {
-      name,
-      description,
-      style: styles[0],
-      styles,
-      address: location.address || `${location.city}, ${location.country}`,
-      city: location.city,
-      country: location.country,
-      lat: location.lat,
-      lng: location.lng,
-      website: normalizedWebsite,
-      contact_email: contactEmail || null,
-      instagram_handle: normalizedInstagram,
-      submitted_by: user?.id ?? null,
-      moderation_status: "pending",
-      // If they submitted past a duplicate warning, tag it so the moderator sees
-      // the flag with the reason.
-      ...(dupMatches.length
-        ? {
-            possible_duplicate_of: dupMatches[0].id,
-            duplicate_reason: dupMatches[0].reason,
-          }
-        : {}),
-    };
+    // Submit through the guarded server endpoint (honeypot + time-trap + rate
+    // limit + validation, and it stamps the IP/country for us). No direct DB
+    // insert from the browser anymore.
+    const res = await fetch("/api/submissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        description,
+        style: styles[0],
+        styles,
+        address: location.address || `${location.city}, ${location.country}`,
+        city: location.city,
+        country: location.country,
+        lat: location.lat,
+        lng: location.lng,
+        website: normalizedWebsite,
+        contact_email: contactEmail || null,
+        instagram_handle: normalizedInstagram,
+        consent,
+        company: hp, // honeypot — must be empty
+        rt: renderedAt, // form-render timestamp (time trap)
+        ...(dupMatches.length
+          ? { possible_duplicate_of: dupMatches[0].id, duplicate_reason: dupMatches[0].reason }
+          : {}),
+      }),
+    }).catch(() => null);
 
-    let { error } = await supabase.from("submissions").insert(payload);
-
-    if (error?.message?.includes("styles") || error?.message?.includes("contact_email")) {
-      const { styles: _s, contact_email, instagram_handle, ...fallback } = payload;
-      const styleNote = `Styles: ${styles.map((s) => STYLE_LABELS[s]).join(", ")}`;
-      const contactNote = [
-        contact_email ? `Email: ${contact_email}` : null,
-        instagram_handle ? `Instagram: ${instagram_handle}` : null,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-      fallback.description = [description, styleNote, contactNote].filter(Boolean).join("\n\n");
-      ({ error } = await supabase.from("submissions").insert(fallback));
-    }
-
-    if (error) {
+    const data = res ? await res.json().catch(() => ({})) : null;
+    if (!res || !res.ok) {
       setStatus("error");
-      setMessage(error.message);
+      setMessage((data && data.error) || "Something went wrong — please try again.");
     } else {
       setStatus("success");
       setMessage("Thanks — our team will review your submission within 48 hours.");
@@ -165,6 +153,21 @@ export function SubmitForm() {
 
   return (
     <form onSubmit={submit} className="space-y-8 rounded-xl border border-white/10 bg-black/60 p-8">
+      {/* Honeypot — invisible to people, catches form-stuffing bots. Must stay
+          empty; a filled value is dropped server-side. Not type=hidden (bots
+          skip those) — visually removed instead, and kept out of the tab order. */}
+      <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "auto", width: 1, height: 1, overflow: "hidden" }}>
+        <label htmlFor="company">Company (leave this blank)</label>
+        <input
+          id="company"
+          name="company"
+          type="text"
+          tabIndex={-1}
+          autoComplete="off"
+          value={hp}
+          onChange={(e) => setHp(e.target.value)}
+        />
+      </div>
       <div className="space-y-4">
         <div>
           <Label htmlFor="name">Restaurant Name *</Label>

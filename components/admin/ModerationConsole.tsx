@@ -123,6 +123,8 @@ export function ModerationConsole({
   reviews: initialReviews,
   photos: initialPhotos,
   dupTargets = {},
+  subMeta = {},
+  spamBlocked7d = 0,
 }: {
   submissions: Submission[];
   corrections: CorrectionItem[];
@@ -131,6 +133,10 @@ export function ModerationConsole({
   photos: PhotoItem[];
   /** submissionId → the venue it may duplicate (for the flag link). */
   dupTargets?: Record<string, { name: string; slug: string }>;
+  /** submissionId → submitter provenance (IP / country) from the guarded form. */
+  subMeta?: Record<string, { country: string | null; ip: string | null }>;
+  /** Automated submissions blocked in the last 7 days (anti-spam intel). */
+  spamBlocked7d?: number;
 }) {
   const [tab, setTab] = useState<Tab>("submissions");
   const [subs, setSubs] = useState(initialSubs);
@@ -211,11 +217,18 @@ export function ModerationConsole({
       </div>
 
       {/* Submissions */}
-      {tab === "submissions" &&
-        (subs.length === 0 ? (
-          <EmptyState label="No pending submissions. Queue is clear." />
-        ) : (
-          <div className="space-y-4">
+      {tab === "submissions" && (
+        <>
+          {spamBlocked7d > 0 && (
+            <p className="mb-4 flex items-center gap-1.5 rounded-lg border border-border-subtle bg-surface-0 px-3 py-2 text-xs text-text-muted">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+              {spamBlocked7d} automated submission{spamBlocked7d === 1 ? "" : "s"} blocked in the last 7 days — logged (IP · country) for future Cloudflare rules.
+            </p>
+          )}
+          {subs.length === 0 ? (
+            <EmptyState label="No pending submissions. Queue is clear." />
+          ) : (
+            <div className="space-y-4">
             {subs.map((s) => (
               <div
                 key={s.id}
@@ -279,6 +292,13 @@ export function ModerationConsole({
                       </span>{" "}
                       · {fmtDate(s.created_at)}
                     </p>
+                    {(subMeta[s.id]?.country || subMeta[s.id]?.ip) && (
+                      <p className="mt-1 text-xs text-text-muted">
+                        Submitted from:{" "}
+                        <span className="text-text-secondary">{subMeta[s.id]?.country ?? "unknown"}</span>
+                        {subMeta[s.id]?.ip ? <span className="text-text-muted"> · {subMeta[s.id]?.ip}</span> : null}
+                      </p>
+                    )}
                   </div>
                   <SubmissionEnrichTools
                     submissionId={s.id}
@@ -290,8 +310,10 @@ export function ModerationConsole({
                 </div>
               </div>
             ))}
-          </div>
-        ))}
+            </div>
+          )}
+        </>
+      )}
 
       {/* Corrections & closures */}
       {tab === "corrections" &&

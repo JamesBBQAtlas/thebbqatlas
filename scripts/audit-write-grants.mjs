@@ -38,6 +38,9 @@ const SERVICE_ROLE = new Set([
   // Append-only AI usage ledger — inserted only by admin AI routes via the
   // service-role client; RLS-on with no policies, service role bypasses.
   "ai_usage_log",
+  // Append-only anti-spam intel log for the public submission form — written by
+  // the guarded server endpoint via the service-role client; RLS-on, no policies.
+  "submission_abuse_log",
 ]);
 
 const WRITE_METHODS = /\.(insert|update|delete|upsert)\s*\(/;
