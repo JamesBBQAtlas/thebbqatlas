@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { revalidateVenues } from "@/lib/cache/venues";
+import { auditFromPatch } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,7 @@ export async function POST(request: Request) {
 
   const { data: row, error } = await ctx.db
     .from("restaurants")
-    .select("id, pending_changes")
+    .select("id, pending_changes, name, description, hook, style, address, city, country, instagram_handle, website")
     .eq("id", restaurantId)
     .single();
   if (error || !row) {
@@ -43,7 +44,15 @@ export async function POST(request: Request) {
     .update(patch)
     .eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
-  // Approving changes live copy/fields — refresh the public read path now.
-  if (action === "approve") revalidateVenues();
+  // Approving applies the AI-proposed copy/fields live now — audit each changed
+  // tracked field (the change originated from enrichment; the operator approved).
+  if (action === "approve") {
+    await auditFromPatch(ctx.db, restaurantId, row as Record<string, unknown>, proposed, {
+      source: "ai_enrichment",
+      changedBy: ctx.userId,
+      note: "approved pending changes",
+    });
+    revalidateVenues();
+  }
   return NextResponse.json({ ok: true, action });
 }

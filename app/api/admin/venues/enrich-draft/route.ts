@@ -21,6 +21,7 @@ import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { desiredVenueSlug } from "@/lib/admin/slug";
 import { composeAddress, preferFullerAddress, settlementCity } from "@/lib/admin/address";
+import { auditFromPatch } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, slug, name, location_label, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
+      "id, slug, name, description, hook, style, location_label, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, hero_image_url, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
     )
     .eq("id", restaurantId)
     .single();
@@ -554,6 +555,17 @@ export async function POST(request: Request) {
 
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+
+  // Editorial audit (§): for a DRAFT venue the proposed fields land live now, so
+  // audit them as ai_enrichment. For an approved venue they wait in
+  // pending_changes and are audited when the operator approves (approve-copy).
+  if (row.status !== "approved") {
+    await auditFromPatch(ctx.db, restaurantId, row as Record<string, unknown>, proposed, {
+      source: "ai_enrichment",
+      changedBy: null,
+      note: `enrich · ${grokModel} + ${claudeModel}`,
+    });
+  }
 
   return NextResponse.json({
     ok: true,

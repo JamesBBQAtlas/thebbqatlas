@@ -4,6 +4,7 @@ import { geocodeAddress } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { settlementCity } from "@/lib/admin/address";
 import { revalidateVenues } from "@/lib/cache/venues";
+import { auditFromPatch } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -69,6 +70,12 @@ export async function POST(request: Request) {
 
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+
+  await auditFromPatch(ctx.db, restaurantId, row as Record<string, unknown>, patch, {
+    source: "manual_edit",
+    changedBy: ctx.userId,
+    note: "location edit",
+  });
 
   revalidateVenues();
   return NextResponse.json({ ok: true, lat: patch.lat, lng: patch.lng, address, city, country });

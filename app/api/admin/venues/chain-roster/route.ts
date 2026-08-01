@@ -4,6 +4,7 @@ import { GROK_ENABLED, GROK_MODEL } from "@/lib/ai/grok";
 import { researchChainRoster } from "@/lib/ai/enrich";
 import { grokCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage } from "@/lib/ai/usage-log";
+import { auditField } from "@/lib/admin/content-audit";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
 import { revalidateVenues } from "@/lib/cache/venues";
 
@@ -158,6 +159,13 @@ export async function POST(request: Request) {
   // Every seeded branch is also "flagship not set" (badge suppressed; each offers
   // "Set as flagship").
   await ctx.db.from("restaurants").update({ flagship_unset: true }).eq("chain_parent_id", restaurantId);
+
+  // Audit the roster build on the parent (source=roster).
+  await auditField(ctx.db, restaurantId, "chain", null, { rostered: true, added: result.added.length, found: result.found }, {
+    source: "roster",
+    changedBy: ctx.userId,
+    note: "roster built",
+  });
 
   // Roster membership can change what the public chain/venue pages show — refresh.
   revalidateVenues();

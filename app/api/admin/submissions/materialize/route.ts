@@ -5,6 +5,7 @@ import { canonicalCountry } from "@/lib/constants/countries";
 import { settlementCity, composeAddress } from "@/lib/admin/address";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { BBQ_STYLES } from "@/lib/constants/styles";
+import { auditCreated } from "@/lib/admin/content-audit";
 import { toHubVenue } from "@/lib/admin/hub";
 import type { Restaurant } from "@/lib/types/database";
 
@@ -123,6 +124,12 @@ export async function POST(request: Request) {
     .from("submissions")
     .update({ materialized_restaurant_id: inserted.id })
     .eq("id", submissionId);
+
+  await auditCreated(ctx.db, inserted.id, { name, city, status: "pending" }, {
+    source: "manual_edit",
+    changedBy: ctx.userId,
+    note: "materialised from public submission",
+  });
 
   return NextResponse.json({ ok: true, restaurantId: inserted.id, venue: toHubVenue(inserted as Restaurant) });
 }

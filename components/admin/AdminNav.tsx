@@ -13,6 +13,7 @@ const TABS: { href: string; label: string; badge?: BadgeKey; primary?: boolean }
   { href: "/admin/audit", label: "Change Log" },
   { href: "/admin/email", label: "Email Log" },
   { href: "/admin/listings", label: "Listings" },
+  { href: "/admin/members", label: "Members" },
   { href: "/admin/gear", label: "Gear" },
   { href: "/admin/voice", label: "Voice" },
   { href: "/admin/enrich", label: "AI Enrichment" },

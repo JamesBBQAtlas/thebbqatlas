@@ -4,6 +4,7 @@ import { geocodeAddress } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { settlementCity } from "@/lib/admin/address";
 import { revalidateVenues } from "@/lib/cache/venues";
+import { auditFromPatch } from "@/lib/admin/content-audit";
 import { BBQ_STYLES } from "@/lib/constants/styles";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +34,9 @@ export async function POST(request: Request) {
 
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
-    .select("id, address, city, country, lat, lng, is_featured, permanently_closed")
+    .select(
+      "id, name, description, hook, style, address, city, country, lat, lng, instagram_handle, website, hero_image_url, is_featured, permanently_closed, status, chain_parent_id, flagship_unset"
+    )
     .eq("id", restaurantId)
     .single();
   if (loadErr || !row) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
@@ -139,6 +142,13 @@ export async function POST(request: Request) {
 
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+
+  // Editorial audit trail — one row per changed tracked field (manual edit).
+  await auditFromPatch(ctx.db, restaurantId, row as Record<string, unknown>, patch, {
+    source: "manual_edit",
+    changedBy: ctx.userId,
+    note: touchedCopy ? "manual copy edit" : "manual field edit",
+  });
 
   revalidateVenues();
   return NextResponse.json({

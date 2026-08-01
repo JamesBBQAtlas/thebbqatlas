@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { revalidateVenues } from "@/lib/cache/venues";
+import { auditFromPatch } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
 
@@ -30,8 +31,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No flag to change." }, { status: 400 });
   }
 
+  const { data: before } = await ctx.db
+    .from("restaurants")
+    .select("is_featured, permanently_closed")
+    .eq("id", restaurantId)
+    .single();
+
   const { error } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await auditFromPatch(ctx.db, restaurantId, (before as Record<string, unknown>) ?? null, patch, {
+    source: "manual_edit",
+    changedBy: ctx.userId,
+    note: "flag toggle",
+  });
 
   revalidateVenues();
   return NextResponse.json({ ok: true, ...patch });

@@ -41,6 +41,9 @@ const SERVICE_ROLE = new Set([
   // Append-only anti-spam intel log for the public submission form — written by
   // the guarded server endpoint via the service-role client; RLS-on, no policies.
   "submission_abuse_log",
+  // Append-only editorial/status audit trail — inserted by admin routes via the
+  // service-role client; admin-read RLS, UPDATE blocked by trigger.
+  "content_audit",
 ]);
 
 const WRITE_METHODS = /\.(insert|update|delete|upsert)\s*\(/;

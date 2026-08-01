@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { revalidateVenues } from "@/lib/cache/venues";
+import { auditField } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +43,11 @@ export async function POST(request: Request) {
       .update({ chain_parent_id: null, flagship_unset: false, chain_candidate: false })
       .eq("id", restaurantId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await auditField(ctx.db, restaurantId, "chain", { chain_parent_id: "(previous)" }, null, {
+      source: "roster",
+      changedBy: ctx.userId,
+      note: "detached from chain",
+    });
     revalidateVenues();
     return NextResponse.json({ ok: true, action, message: "Detached — now a standalone venue." });
   }
@@ -82,6 +88,11 @@ export async function POST(request: Request) {
 
   const { error } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await auditField(ctx.db, restaurantId, "chain", null, { chain_parent_id: parentId }, {
+    source: "roster",
+    changedBy: ctx.userId,
+    note: "attached to chain",
+  });
   revalidateVenues();
   return NextResponse.json({ ok: true, action, message: "Attached to the chain as a branch." });
 }

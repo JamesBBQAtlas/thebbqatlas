@@ -5,6 +5,7 @@ import { uniqueRestaurantSlug, resolveOrCreateBrand } from "@/lib/admin/venues";
 import { BBQ_STYLES } from "@/lib/constants/styles";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { canonicalCountry } from "@/lib/constants/countries";
+import { auditField, auditCreated } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -169,6 +170,13 @@ export async function POST(request: Request) {
     // ignore — provenance is secondary
   }
 
+  // Editorial audit — creation provenance.
+  await auditCreated(ctx.db, data.id, { name, city, status: data.status }, {
+    source: "manual_edit",
+    changedBy: ctx.userId,
+    note: "venue created (admin)",
+  });
+
   if (data.status === "approved") revalidateVenues();
   return NextResponse.json({ id: data.id, slug: data.slug, status: data.status });
 }
@@ -222,11 +230,25 @@ export async function PATCH(request: Request) {
     }
   }
 
+  const { data: prev } = await ctx.db
+    .from("restaurants")
+    .select("status")
+    .eq("id", restaurantId)
+    .single();
+
   const { error } = await ctx.db
     .from("restaurants")
     .update({ status })
     .eq("id", restaurantId);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  // Audit the publish/unpublish (status) change.
+  await auditField(ctx.db, restaurantId, "published", prev?.status ?? null, status, {
+    source: "manual_edit",
+    changedBy: ctx.userId,
+    note: status === "approved" ? "published" : "unpublished/declined",
+  });
+
   // Publishing/unpublishing changes what the public site shows — refresh now.
   revalidateVenues();
   return NextResponse.json({ ok: true, status });

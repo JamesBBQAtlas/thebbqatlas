@@ -12,6 +12,7 @@ import {
 } from "@/lib/ai/enrich";
 import { claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
+import { auditCreated } from "@/lib/admin/content-audit";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { parseFactsSheet, rowToDossier, factsHandle } from "@/lib/admin/facts-import";
@@ -123,7 +124,7 @@ async function processRow(
   }
 
   const slug = await uniqueRestaurantSlug(db, dossier.name || handle || "venue");
-  await db.from("restaurants").insert({
+  const { data: createdRow } = await db.from("restaurants").insert({
     slug,
     name: dossier.name || handle || "Unnamed venue",
     description: copy.description ?? "",
@@ -154,7 +155,14 @@ async function processRow(
     needs_attention: copy.needs_attention,
     attention_reason: copy.attention_reason,
     location_label: dossier.location_label,
-  });
+  }).select("id").single();
+  if (createdRow) {
+    await auditCreated(db, createdRow.id, { name: dossier.name ?? handle, city: dossier.city, status: "pending" }, {
+      source: "import",
+      changedBy: null,
+      note: "facts-sheet import",
+    });
+  }
   return { created: true, attention: copy.needs_attention };
 }
 

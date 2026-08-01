@@ -3,6 +3,7 @@ import { uniqueRestaurantSlug } from "./venues";
 import { loadExistingVenues } from "@/lib/venues/dedupe-server";
 import { findDuplicates, normName, type VenueLike } from "@/lib/venues/dedupe";
 import { normCity, settlementCity } from "@/lib/admin/address";
+import { auditCreated } from "@/lib/admin/content-audit";
 
 /**
  * Bulk venue seed import. Parses the follow-list seed sheet, keeps only real
@@ -280,6 +281,15 @@ export async function importSeedRows(
       if (uncertain) flaggedUncertain++;
       // Register the new seed so later rows in THIS import dedupe against it too.
       if (inserted) existingVenues.push(inserted as VenueLike);
+      // Editorial audit — creation provenance for the 623 (source='import').
+      if (inserted) {
+        await auditCreated(
+          db,
+          inserted.id,
+          { name: inserted.name ?? c.name, city: c.city, status: "pending" },
+          { source: "import", changedBy: null, note: "seed import" }
+        );
+      }
     }
   }
 

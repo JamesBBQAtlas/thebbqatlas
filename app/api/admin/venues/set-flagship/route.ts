@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { revalidateVenues } from "@/lib/cache/venues";
+import { auditField } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -113,6 +114,21 @@ export async function POST(request: Request) {
       if (!m[col] && brandSocials[col]) patch[col] = brandSocials[col];
     }
     await ctx.db.from("restaurants").update(patch).eq("id", m.id);
+  }
+
+  // Audit the flagship decision on the chosen venue + each re-pointed sibling.
+  await auditField(ctx.db, chosenRow.id, "flagship", null, { flagship: true, chosen: chosenRow.name }, {
+    source: "roster",
+    changedBy: ctx.userId,
+    note: "flagship set by operator",
+  });
+  for (const m of members) {
+    if (m.id === chosenRow.id) continue;
+    await auditField(ctx.db, m.id, "chain", null, { chain_parent_id: chosenRow.id }, {
+      source: "roster",
+      changedBy: ctx.userId,
+      note: `sibling of ${chosenRow.name}`,
+    });
   }
 
   revalidateVenues();

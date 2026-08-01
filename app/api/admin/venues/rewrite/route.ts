@@ -9,6 +9,7 @@ import {
 } from "@/lib/ai/enrich";
 import { claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
+import { auditFromPatch } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -38,7 +39,7 @@ export async function POST(request: Request) {
 
   const { data: row, error } = await ctx.db
     .from("restaurants")
-    .select("id, status, dossier, enrichment_cost")
+    .select("id, status, dossier, enrichment_cost, hook, description")
     .eq("id", restaurantId)
     .single();
   if (error || !row) {
@@ -86,6 +87,16 @@ export async function POST(request: Request) {
     .update(patch)
     .eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+
+  // Audit the copy change now if it landed live (draft); an approved venue's
+  // rewrite waits in pending_changes and is audited on approve-copy.
+  if (row.status !== "approved") {
+    await auditFromPatch(ctx.db, restaurantId, row as Record<string, unknown>, patch, {
+      source: "ai_enrichment",
+      changedBy: null,
+      note: `rewrite · ${copy.model}`,
+    });
+  }
 
   const hasCopy = Boolean(copy.hook || copy.description);
   return NextResponse.json({

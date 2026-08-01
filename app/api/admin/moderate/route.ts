@@ -7,6 +7,7 @@ import { resolveCountryCode } from "@/lib/constants/countries";
 import { safeVenueImage } from "@/lib/restaurants/image";
 import { sendModerationOutcome } from "@/lib/email/senders";
 import { emailFirstName } from "@/lib/email/recipient";
+import { auditField, auditCreated } from "@/lib/admin/content-audit";
 
 type ModType = "submission" | "review" | "photo";
 type Action = "approve" | "reject" | "merge";
@@ -206,29 +207,45 @@ export async function POST(request: Request) {
               );
             }
             await admin.from("restaurants").update({ status: "approved" }).eq("id", venue.id);
+            await auditField(admin, venue.id, "published", venue.status, "approved", {
+              source: "manual_edit",
+              changedBy: user.id,
+              note: "published from moderation queue",
+            });
           }
         } else {
-          await admin.from("restaurants").insert({
-            slug: restaurantSlug(submission.name, submission.city),
-            name: submission.name,
-            description: submission.description,
-            style: submission.style,
-            lat: submission.lat,
-            lng: submission.lng,
-            address: submission.address,
-            city: submission.city,
-            country: submission.country,
-            country_code: resolveCountryCode(null, submission.country),
-            website: submission.website,
-            // Copyright-safe: never seed a stock hero. Approved venues start with
-            // no hero (branded placeholder) unless an approved photo exists.
-            hero_image_url: safeVenueImage(submission.hero_image_url),
-            price_level: 2,
-            avg_rating: 0,
-            review_count: 0,
-            is_featured: false,
-            status: "approved",
-          });
+          const { data: created } = await admin
+            .from("restaurants")
+            .insert({
+              slug: restaurantSlug(submission.name, submission.city),
+              name: submission.name,
+              description: submission.description,
+              style: submission.style,
+              lat: submission.lat,
+              lng: submission.lng,
+              address: submission.address,
+              city: submission.city,
+              country: submission.country,
+              country_code: resolveCountryCode(null, submission.country),
+              website: submission.website,
+              // Copyright-safe: never seed a stock hero. Approved venues start with
+              // no hero (branded placeholder) unless an approved photo exists.
+              hero_image_url: safeVenueImage(submission.hero_image_url),
+              price_level: 2,
+              avg_rating: 0,
+              review_count: 0,
+              is_featured: false,
+              status: "approved",
+            })
+            .select("id")
+            .single();
+          if (created) {
+            await auditCreated(admin, created.id, { name: submission.name, city: submission.city, status: "approved" }, {
+              source: "manual_edit",
+              changedBy: user.id,
+              note: "approved from public submission",
+            });
+          }
         }
       } else if (kind === "closure" && submission.target_restaurant_id) {
         // Approving a closure report marks the target venue permanently closed.
@@ -236,6 +253,11 @@ export async function POST(request: Request) {
           .from("restaurants")
           .update({ permanently_closed: true })
           .eq("id", submission.target_restaurant_id);
+        await auditField(admin, submission.target_restaurant_id, "permanently_closed", false, true, {
+          source: "manual_edit",
+          changedBy: user.id,
+          note: "closure report approved",
+        });
       }
       // For a generic "correction" we simply mark it resolved; an admin applies
       // the specific edit to the venue directly.
