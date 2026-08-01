@@ -46,7 +46,7 @@ import { VenueVisitors } from "@/components/restaurants/VenueVisitors";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { getGearForStyle } from "@/lib/queries/gear";
-import { hoursRows } from "@/lib/restaurants/hours";
+import { groupedHours } from "@/lib/restaurants/hours";
 import { GearProductCard } from "@/components/gear/GearProductCard";
 import { AffiliateDisclosure } from "@/components/monetization/AffiliateDisclosure";
 import { getSiblingLocations } from "@/lib/queries/brands";
@@ -156,7 +156,7 @@ export default async function RestaurantPage({ params }: Props) {
         ).data
       )
     : false;
-  const hours = hoursRows(restaurant.hours);
+  const hours = groupedHours(restaurant.hours);
 
   const code = resolveCountryCode(restaurant.country_code, restaurant.country);
   const cityCountry = [restaurant.city, restaurant.country].filter(Boolean).join(", ");
@@ -608,10 +608,10 @@ export default async function RestaurantPage({ params }: Props) {
                     <dd className="mt-1 space-y-0.5">
                       {hours.map((h) => (
                         <div
-                          key={h.day}
+                          key={h.days}
                           className="flex justify-between gap-4 text-[0.8125rem]"
                         >
-                          <span className="text-text-muted">{h.day}</span>
+                          <span className="text-text-muted">{h.days}</span>
                           <span className="text-right text-text-primary">
                             {h.value}
                           </span>

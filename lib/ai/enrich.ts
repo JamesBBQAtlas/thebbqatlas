@@ -294,17 +294,25 @@ const asNum = (v: unknown): number | null =>
  *  pass fits inside a shared total-search budget. */
 export async function researchDossier(
   lead: VenueLead,
-  opts?: { maxSearches?: number }
+  opts?: { maxSearches?: number; knownFacts?: string | null }
 ): Promise<{ dossier: VenueDossier; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number }; model: string }> {
   const known = Object.entries(lead)
     .filter(([, v]) => v && String(v).trim())
     .map(([k, v]) => `- ${k}: ${v}`)
     .join("\n");
 
+  // Operator-supplied AUTHORITATIVE context (current listing details + any facts
+  // the operator wrote into the copy). When present, the researcher must build ON
+  // it: read the operator's website/Instagram FIRST, treat these facts as true,
+  // fill gaps around them, and never blank/contradict one without cited evidence.
+  const operatorBlock = opts?.knownFacts
+    ? `\n\nOPERATOR-SUPPLIED KNOWN FACTS — AUTHORITATIVE. These were added by our team from real sources; treat them as TRUE and BUILD ON them. If the operator gave a website or Instagram, READ THOSE FIRST (they are the best sources we have) before any open-web search. Fill gaps and enrich AROUND these facts; do NOT drop, blank, or contradict one unless you find strong CITED web evidence it's wrong — if so, keep the operator's value AND name the conflict in "unknowns". Extract any concrete facts embedded in the operator's description text below (a chef/pitmaster name, "cash only", a founding year, a second location, an event) and carry them into the correct dossier fields.\n${opts.knownFacts}`
+    : "";
+
   const user = `Research this ONE barbecue venue and return the facts-only JSON dossier.
 
 Known so far:
-${known || "- (almost nothing — start from the name/handle above)"}
+${known || "- (almost nothing — start from the name/handle above)"}${operatorBlock}
 
 Return ONLY the dossier JSON described in your instructions. Facts only — no descriptive or marketing copy.`;
 
@@ -463,6 +471,49 @@ export function inheritBrandFacts(
     sibling.unknowns = sibling.unknowns.filter((u) => !brand.has(u));
   }
   return sibling;
+}
+
+/** Operator-supplied authoritative structured facts (current listing state). */
+export interface KnownFacts {
+  website?: string | null;
+  instagram?: string | null;
+  phone?: string | null;
+  hours?: Record<string, string> | null;
+}
+
+const normUrl = (u: string | null | undefined): string =>
+  (u ?? "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/\/+$/, "").trim();
+
+/**
+ * Merge operator-supplied facts into a researched dossier as AUTHORITATIVE
+ * (Part A): the operator found these by hand, so they win. The dossier is filled
+ * where it was empty, and where the AI research DISAGREED with an operator fact
+ * we KEEP the operator's value and return the field name as a conflict for the
+ * human to see — we never silently overwrite the operator's work. Mutates the
+ * dossier; returns the list of conflicting field keys.
+ */
+export function mergeKnownFacts(dossier: VenueDossier, known: KnownFacts): string[] {
+  const conflicts: string[] = [];
+  if (known.website) {
+    if (dossier.website && normUrl(dossier.website) !== normUrl(known.website)) conflicts.push("website");
+    dossier.website = known.website;
+  }
+  if (known.instagram) {
+    if (dossier.instagram && normUrl(dossier.instagram) !== normUrl(known.instagram)) conflicts.push("instagram");
+    dossier.instagram = known.instagram;
+  }
+  if (known.phone) {
+    const digits = (s: string) => s.replace(/\D/g, "");
+    if (dossier.phone && digits(dossier.phone) !== digits(known.phone)) conflicts.push("phone");
+    dossier.phone = known.phone;
+  }
+  if (known.hours && Object.keys(known.hours).length) {
+    // Operator-curated hours are authoritative — keep them, but let research FILL
+    // any day the operator left blank.
+    const merged: Record<string, string> = { ...(dossier.hours ?? {}) , ...known.hours };
+    dossier.hours = merged;
+  }
+  return conflicts;
 }
 
 /**
@@ -642,7 +693,7 @@ Output ONLY JSON: {"hook": "...", "description": "..."} — or {"needs_attention
  */
 export async function writeVenueCopy(
   dossier: VenueDossier,
-  opts?: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite?: boolean }
+  opts?: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite?: boolean; priorCopy?: string | null }
 ): Promise<VenueCopy> {
   const label = dossier.location_label || dossier.city || "this";
   // For one location of a chain: the brand-level facts are SHARED across every
@@ -659,7 +710,13 @@ export async function writeVenueCopy(
   const writeMandate = opts?.alwaysWrite
     ? `\n\nIMPORTANT — write HONEST copy from the facts present: return a hook and a short description built ONLY from what IS known (name, city, what_it_is, style, and any dossier facts). Say LESS where facts are missing — a spare venue gets a spare, honest line, and that is the correct outcome. NEVER invent, guess, or fill in specifics you weren't given: no made-up menu items or signature dishes, no opening year, no pitmaster or owner names, no awards, no origin story. Confident filler is worse than honest brevity. If the dossier genuinely contains almost nothing beyond a name and an address (no what_it_is, no style, no website/socials, no people, no specialities), do NOT fabricate a personality — write one plain factual sentence from what's known and set needs_attention true with a reason so a human reviews it before it can publish.`
     : "";
-  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}${writeMandate}
+  // The operator may have written real facts into the existing copy. Preserve
+  // every concrete fact they stated — never drop a chef/owner name, a founding
+  // year, "cash only", a second location, an award — while re-voicing to house style.
+  const priorCopyNote = opts?.priorCopy
+    ? `\n\nEXISTING COPY (may contain operator-written FACTS — preserve every concrete fact in it: names, dates, "cash only", other locations, awards; re-voice to house style but never lose a fact):\n"""${opts.priorCopy}"""`
+    : "";
+  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}${writeMandate}${priorCopyNote}
 
 DOSSIER:
 ${JSON.stringify(dossier)}

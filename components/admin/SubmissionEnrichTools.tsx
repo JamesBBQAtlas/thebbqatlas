@@ -73,7 +73,7 @@ export function SubmissionEnrichTools({
     setNote({});
     const id = await ensureVenue();
     if (!id) { setBusy(null); return; }
-    const { res, data } = await postJson("/api/admin/venues/enrich-draft", { restaurantId: id, mode: "full" });
+    const { res, data } = await postJson("/api/admin/venues/enrich-draft", { restaurantId: id, mode: "full", useExisting: true });
     setBusy(null);
     if (!res.ok) { setNote({ err: (data.error as string) ?? "Enrich failed." }); return; }
     const c = (data.copy as { hook: string | null; description: string | null } | undefined) ?? null;

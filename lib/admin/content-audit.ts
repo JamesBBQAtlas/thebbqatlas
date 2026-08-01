@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * per changed tracked field, written at the mutation points. Best-effort — an
  * audit-write failure must never break the operation it records.
  */
-export type AuditSource = "ai_enrichment" | "manual_edit" | "roster" | "import" | "system";
+export type AuditSource = "ai_enrichment" | "manual_edit" | "roster" | "import" | "system" | "operator";
 
 export interface AuditOpts {
   source: AuditSource;

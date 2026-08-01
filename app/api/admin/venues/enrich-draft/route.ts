@@ -7,6 +7,7 @@ import {
   researchInstagram,
   writeVenueCopy,
   inheritBrandFacts,
+  mergeKnownFacts,
   matchBbqStyle,
   priceBandToLevel,
   mapSocials,
@@ -48,6 +49,9 @@ export async function POST(request: Request) {
   const mode: "full" | "light" = body.mode === "light" ? "light" : "full";
   // Explicit operator override to let a re-enrich overwrite hand-edited copy.
   const overwriteManual = Boolean(body.overwriteManual);
+  // Part A: default ON — re-enrich BUILDS ON the venue's current details & copy
+  // instead of starting cold. Toggle off (useExisting=false) for a from-scratch redo.
+  const useExisting = body.useExisting !== false;
   if (!restaurantId) {
     return NextResponse.json({ error: "restaurantId required." }, { status: 400 });
   }
@@ -55,7 +59,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, slug, name, description, hook, style, location_label, instagram_url, instagram_handle, website, address, city, country, lat, lng, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, hero_image_url, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
+      "id, slug, name, description, hook, style, location_label, instagram_url, instagram_handle, website, phone, address, city, country, lat, lng, hours, price_level, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, hero_image_url, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
     )
     .eq("id", restaurantId)
     .single();
@@ -100,17 +104,46 @@ export async function POST(request: Request) {
       `established date, specialities, cook method, wood/fuel, setting/vibe, website, and Instagram.`;
   }
 
+  const rowInstagram =
+    row.instagram_url ?? (row.instagram_handle ? `https://www.instagram.com/${row.instagram_handle}/` : undefined);
   const lead: VenueLead = {
     name: row.name ?? undefined,
-    instagram:
-      row.instagram_url ??
-      (row.instagram_handle ? `https://www.instagram.com/${row.instagram_handle}/` : undefined),
+    instagram: rowInstagram,
     website: row.website ?? parentWebsite ?? undefined,
     address: row.address || undefined,
     city: row.city || undefined,
     country: row.country || undefined,
+    phone: row.phone || undefined,
     notes: branchNote,
   };
+
+  // Part A — assemble the venue's CURRENT state as an authoritative "known facts"
+  // seed for the researcher/writer to BUILD ON (only in full mode, when enabled).
+  const builtOn: string[] = [];
+  let knownFactsBlock: string | null = null;
+  const knownFacts: { website?: string | null; instagram?: string | null; phone?: string | null; hours?: Record<string, string> | null } = {};
+  if (mode === "full" && useExisting) {
+    const lines: string[] = [];
+    if (row.website) { lines.push(`- website (operator-supplied, READ FIRST): ${row.website}`); knownFacts.website = row.website; builtOn.push("website"); }
+    if (rowInstagram) { lines.push(`- instagram (operator-supplied, READ FIRST): ${rowInstagram}`); knownFacts.instagram = rowInstagram; builtOn.push("Instagram"); }
+    if (row.phone) { lines.push(`- phone: ${row.phone}`); knownFacts.phone = row.phone; builtOn.push("phone"); }
+    if (row.address) lines.push(`- address: ${row.address}`);
+    if (row.city) lines.push(`- city: ${row.city}`);
+    if (row.country) lines.push(`- country: ${row.country}`);
+    if (row.hours && typeof row.hours === "object" && Object.keys(row.hours).length) {
+      lines.push(`- opening hours: ${JSON.stringify(row.hours)}`);
+      knownFacts.hours = row.hours as Record<string, string>;
+      builtOn.push("hours");
+    }
+    if (row.price_level) lines.push(`- price level: ${"£".repeat(Math.max(1, Math.min(4, Number(row.price_level))))}`);
+    if (row.style) lines.push(`- bbq style: ${row.style}`);
+    const desc = (row.description as string | null)?.trim();
+    if (desc) {
+      lines.push(`\nOPERATOR'S CURRENT DESCRIPTION (extract every concrete fact from this prose and carry it forward):\n"""${desc}"""`);
+      builtOn.push("current description");
+    }
+    if (lines.length) knownFactsBlock = lines.join("\n");
+  }
 
   // ---- light mode: one lean, targeted IG search --------------------------
   if (mode === "light") {
@@ -211,19 +244,12 @@ export async function POST(request: Request) {
     });
   }
 
-  // Manual copy is sacred (Fix 3): if a human hand-edited this venue's copy, a
-  // full re-enrich would overwrite their words. Stop BEFORE spending a cent and
-  // ask the operator to confirm; they re-run with overwriteManual to proceed.
-  if (mode === "full" && row.manual_copy && !overwriteManual) {
-    return NextResponse.json({
-      ok: true,
-      mode,
-      name: row.name,
-      manual_copy_guard: true,
-      message:
-        "This venue has hand-edited copy. Re-enriching will overwrite it — confirm to overwrite, or edit it directly instead.",
-    });
-  }
+  // Manual copy is sacred (Fix 3 / Part A): if a human hand-edited this venue's
+  // copy, a re-enrich must NOT overwrite it. Rather than refuse the whole run, we
+  // still enrich the STRUCTURED gaps (hours, phone, socials, price, styles) and
+  // hold any freshly-written copy as pending_changes for the operator to review —
+  // their live words stay untouched. `overwriteManual` (explicit confirm) lifts this.
+  const protectCopy = Boolean(row.manual_copy) && !overwriteManual;
 
   // ---- full mode: bounded dossier + Haiku copy ---------------------------
   // Research runs in at most a few bounded passes sharing ONE hard total-search
@@ -266,7 +292,7 @@ export async function POST(request: Request) {
   };
 
   try {
-    const res = await researchDossier(lead);
+    const res = await researchDossier(lead, { knownFacts: knownFactsBlock });
     dossier = res.dossier;
     recordPass("pass1", res);
   } catch (err) {
@@ -278,6 +304,11 @@ export async function POST(request: Request) {
   if (row.chain_parent_id && parentDossier) {
     inheritBrandFacts(dossier, parentDossier);
   }
+
+  // Part A — fold the operator's authoritative facts into the dossier (operator
+  // wins; any disagreement with what the AI found is surfaced, never silently
+  // overwritten).
+  const factConflicts = useExisting ? mergeKnownFacts(dossier, knownFacts) : [];
 
   // ── Step 1: chain DETECTION ONLY — never auto-crown ───────────────────────
   // Enrich is a plain, reliable single-venue pass. If the venue LOOKS like part
@@ -309,9 +340,14 @@ export async function POST(request: Request) {
   // from the facts on hand, even if research came back thin. A single-venue
   // enrich must never return empty copy.
   const isSiblingRow = Boolean(row.chain_parent_id);
-  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean } = {
+  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean; priorCopy?: string | null } = {
     alwaysWrite: true,
   };
+  // Part A — carry the facts the operator wrote into the existing copy through to
+  // the new copy (whether it lands live or in pending_changes).
+  if (useExisting && (row.description as string | null)?.trim()) {
+    writeOpts.priorCopy = row.description as string;
+  }
   if (isSiblingRow) {
     writeOpts.branchOf = dossier.name ?? row.name;
   } else if (isConfirmedFlagship) {
@@ -418,14 +454,17 @@ export async function POST(request: Request) {
   const proposed: Record<string, unknown> = {};
   if (dossier.name) proposed.name = dossier.name;
   if (dossier.location_label) proposed.location_label = dossier.location_label;
-  // Only propose copy when we actually wrote some — never overwrite existing
-  // copy (or create a blank "pending change") when the dossier was too thin.
-  if (!thin) {
-    if (copy.hook) proposed.hook = copy.hook;
-    if (copy.description) proposed.description = copy.description;
-    // AI just (re)authored the copy — it's no longer a protected manual edit.
-    // (For an approved venue this rides in pending_changes and applies on approve.)
-    if (copy.hook || copy.description) proposed.manual_copy = false;
+  // Copy handling (Part A). Normally the new copy applies with the rest of the
+  // change set. But when manual copy is PROTECTED (operator hand-edited it and
+  // hasn't explicitly asked to overwrite), we must NOT touch their live words —
+  // the fresh copy is held for review in pending_changes instead. Approving it
+  // later clears manual_copy. A too-thin result writes no copy at all.
+  const copyProposal: Record<string, unknown> = {};
+  if (!thin && (copy.hook || copy.description)) {
+    if (copy.hook) copyProposal.hook = copy.hook;
+    if (copy.description) copyProposal.description = copy.description;
+    copyProposal.manual_copy = false;
+    if (!protectCopy) Object.assign(proposed, copyProposal);
   }
   if (style) proposed.style = style;
   if (address) proposed.address = address;
@@ -517,6 +556,7 @@ export async function POST(request: Request) {
     overCeiling ||
     searchRunaway ||
     noValidLocation ||
+    factConflicts.length > 0 ||
     (effectivelySibling ? locationFactsMissing : copy.needs_attention);
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
@@ -530,9 +570,11 @@ export async function POST(request: Request) {
             : effectivelySibling
               ? "This outpost's own location facts (address) are missing — add them, then re-enrich."
               : "No address to place this venue on the map — add one, then re-enrich."
-          : effectivelySibling
-            ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
-            : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
+          : factConflicts.length
+            ? `Research disagreed with your ${factConflicts.join(", ")} — kept your value; please verify.`
+            : effectivelySibling
+              ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
+              : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
     : null;
 
   // For an approved (live) venue, hold changes as pending — but only if there's
@@ -541,17 +583,26 @@ export async function POST(request: Request) {
   const rowKnown = row as unknown as Record<string, unknown>;
   const differsFromRow = (key: string, val: unknown) =>
     !(key in rowKnown) || String(rowKnown[key] ?? "") !== String(val ?? "");
-  const meaningful =
-    "hook" in proposed ||
-    "description" in proposed ||
-    Object.entries(proposed).some(([k, v]) => differsFromRow(k, v));
+  const isMeaningful = (bag: Record<string, unknown>) =>
+    "hook" in bag || "description" in bag || Object.entries(bag).some(([k, v]) => differsFromRow(k, v));
 
-  const patch =
-    row.status === "approved"
-      ? meaningful
-        ? { ...metadata, pending_changes: proposed }
-        : metadata
-      : { ...metadata, ...proposed };
+  // Protected manual copy is offered for REVIEW (pending_changes), never applied live.
+  const pendingCopy = protectCopy ? copyProposal : {};
+  let patch: Record<string, unknown>;
+  let pendingReview = false;
+  if (row.status === "approved") {
+    // Approved venue: the whole change set (incl. any protected copy) waits for approval.
+    const bag = { ...proposed, ...pendingCopy };
+    pendingReview = isMeaningful(bag);
+    patch = pendingReview ? { ...metadata, pending_changes: bag } : metadata;
+  } else {
+    // Draft venue: structured changes land live now; protected copy waits in pending.
+    patch = { ...metadata, ...proposed };
+    if (Object.keys(pendingCopy).length) {
+      patch.pending_changes = pendingCopy;
+      pendingReview = true;
+    }
+  }
 
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
@@ -563,7 +614,7 @@ export async function POST(request: Request) {
     await auditFromPatch(ctx.db, restaurantId, row as Record<string, unknown>, proposed, {
       source: "ai_enrichment",
       changedBy: null,
-      note: `enrich · ${grokModel} + ${claudeModel}`,
+      note: `enrich · ${grokModel} + ${claudeModel}${useExisting && builtOn.length ? ` · built on ${builtOn.join(", ")}` : ""}`,
     });
   }
 
@@ -575,9 +626,14 @@ export async function POST(request: Request) {
     attention_reason: metadata.attention_reason,
     thin, // dossier too thin → no copy written
     has_copy: Boolean(copy.hook || copy.description),
-    // Did an approved venue actually get proposed changes to review?
-    has_pending: row.status === "approved" && meaningful,
-    pending: row.status === "approved" && meaningful,
+    // Pending review = an approved venue's proposed changes, OR protected manual
+    // copy held for review on a draft.
+    has_pending: pendingReview,
+    pending: pendingReview,
+    // Part A read-outs.
+    built_on: useExisting ? builtOn : [],
+    fact_conflicts: factConflicts,
+    copy_protected: protectCopy && Object.keys(copyProposal).length > 0,
     copy: { hook: copy.hook, description: copy.description },
     cost: thisCost,
     over_ceiling: overCeiling,

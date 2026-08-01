@@ -28,6 +28,7 @@ import {
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 import { PinMap } from "@/components/admin/PinMap";
+import { HoursEditor } from "@/components/admin/HoursEditor";
 
 export interface HubVenue {
   id: string;
@@ -191,6 +192,8 @@ export function VenueHub({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState(initialStatus);
+  // Part A — re-enrich builds ON the venue's current details & copy (default ON).
+  const [useExisting, setUseExisting] = useState(true);
   const [country, setCountry] = useState("all");
   const [photoF, setPhotoF] = useState("all"); // all | yes | no
   const [igF, setIgF] = useState("all");
@@ -390,7 +393,7 @@ export function VenueHub({
   async function runOne(id: string, kind: ActionKind): Promise<RunState> {
     setState(id, "running");
     try {
-      const res = await callAction(id, kind);
+      const res = await callAction(id, kind, kind === "enrich" ? { useExisting } : undefined);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setState(id, "error", data.error ?? "Failed");
@@ -493,14 +496,6 @@ export function VenueHub({
       setRowResult((p) => ({ ...p, [v.id]: { err: data.error ?? "Failed" } }));
       return;
     }
-    // Fix 3 — a re-enrich that would overwrite hand-edited copy stops first and
-    // asks; nothing was spent yet. Confirm → re-run with the overwrite flag.
-    if (data.manual_copy_guard) {
-      const ok = typeof window !== "undefined" && window.confirm(`${data.message}\n\nOverwrite the manual copy with a fresh AI write-up?`);
-      if (ok) return single(v, kind, { overwriteManual: true });
-      setRowResult((p) => ({ ...p, [v.id]: { warn: "Kept your manual copy — enrich cancelled." } }));
-      return;
-    }
     if (kind === "findig") {
       // Report EXACTLY what was saved (Fix 2): only claim "Instagram" when a
       // handle/URL was actually persisted; a true empty says so plainly. No post
@@ -527,6 +522,10 @@ export function VenueHub({
     }
     // enrich or rewrite
     const costNote = typeof data.cost === "number" ? ` · ${fmtUsd(data.cost)}` : "";
+    // Part A — show the operator their existing details were used, and that any
+    // protected hand-written copy was kept (new copy offered for review).
+    const builtOnNote = Array.isArray(data.built_on) && data.built_on.length ? ` · built on ${data.built_on.join(", ")}` : "";
+    const copyKeptNote = data.copy_protected ? " · kept your copy (new copy proposed for review)" : "";
     // Branch-first discovery: we enriched a branch, the true flagship was created
     // & populated with the brand facts, and this row was demoted to a clean
     // sibling. Show the helpful next-step message — no preview, no attention flag.
@@ -559,7 +558,7 @@ export function VenueHub({
         msg:
           (mode === "pending_copy"
             ? "Proposed changes ready — review & approve"
-            : "Draft ready — review & publish") + costNote + chainNote,
+            : "Draft ready — review & publish") + costNote + builtOnNote + copyKeptNote + chainNote,
       },
     }));
     router.refresh();
@@ -729,7 +728,7 @@ export function VenueHub({
     if (data.enrich_flagship) {
       const fv = venueById.get(String(data.flagship_id ?? v.id));
       if (fv) {
-        await single(fv, "enrich");
+        await single(fv, "enrich", { useExisting });
         return;
       }
     }
@@ -1001,6 +1000,14 @@ export function VenueHub({
       {running && <p className="mb-3 text-xs text-text-muted">One venue at a time. Pause/Stop halts after the current venue — never mid-record.</p>}
       <p className="mb-3 text-xs text-text-muted">Cost-capped: bounded search + Haiku writer, hard ceiling {fmtUsd(COST_PER_VENUE_CEILING)}/venue. Estimates shown per batch; anything over {fmtUsd(BATCH_CONFIRM_THRESHOLD)} asks first.</p>
 
+      {/* Part A — re-enrich builds ON the venue's current details & copy. */}
+      <label className="mb-3 inline-flex items-start gap-2 rounded-lg border border-border-subtle bg-surface-0 px-3 py-2 text-xs text-text-secondary">
+        <input type="checkbox" checked={useExisting} onChange={(e) => setUseExisting(e.target.checked)} className="mt-0.5 h-3.5 w-3.5 accent-[#D4AF37]" />
+        <span>
+          <span className="font-semibold text-text-primary">Use existing details &amp; copy as sources</span> — re-enrich reads any website/Instagram you&apos;ve added FIRST, treats your details as authoritative, and pulls facts out of the current description instead of starting cold. Protected hand-written copy is never overwritten (new copy is proposed for review). Uncheck for a from-scratch redo.
+        </span>
+      </label>
+
       {/* Legend — what the row actions do */}
       <p className="mb-3 text-xs text-text-muted">
         <span className="font-semibold text-text-secondary">Actions:</span>{" "}
@@ -1157,7 +1164,7 @@ export function VenueHub({
                               is rich (the sibling inherits its brand facts). */}
                           <button
                             type="button"
-                            onClick={() => single(v, "enrich")}
+                            onClick={() => single(v, "enrich", { useExisting })}
                             disabled={busy || blockSibling}
                             title={blockSibling ? PARENT_FIRST_MSG : "Enrich this location"}
                             className="inline-flex items-center gap-1 rounded-md bg-brand-sienna px-2.5 py-1 text-xs font-bold uppercase text-text-inverse transition-colors hover:bg-brand-sienna/90 disabled:opacity-40"
@@ -1213,7 +1220,7 @@ export function VenueHub({
                       {/* Compact, single-line actions (icon-only) so rows never
                           wrap/fatten at narrow widths. Titles carry the labels. */}
                       <div className="flex flex-nowrap items-center justify-end gap-1">
-                        <IconBtn title={blockSibling ? PARENT_FIRST_MSG : "Re-research + rewrite (Grok researches, Claude writes)"} busy={busy || blockSibling} onClick={() => single(v, "enrich")}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
+                        <IconBtn title={blockSibling ? PARENT_FIRST_MSG : "Re-research + rewrite (Grok researches, Claude writes)"} busy={busy || blockSibling} onClick={() => single(v, "enrich", { useExisting })}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
                         <IconBtn title={blockSibling ? PARENT_FIRST_MSG : "Rewrite copy from saved research (Claude only)"} busy={busy || blockSibling} onClick={() => single(v, "rewrite")}><PenLine className="h-3.5 w-3.5" /></IconBtn>
                         <IconBtn title={v.hasIG ? "IG ✓ — re-run Find IG" : "Find IG (handle + recent posts)"} busy={busy} onClick={() => single(v, "findig")}>
                           <Instagram className={`h-3.5 w-3.5 ${v.hasIG ? "text-emerald-400" : ""}`} />
@@ -1409,8 +1416,8 @@ export function EditorPanel({
   const [offerings, setOfferings] = useState(
     Array.isArray(f.offerings) ? (f.offerings as string[]).join(", ") : ""
   );
-  const [hoursText, setHoursText] = useState(
-    f.hours && typeof f.hours === "object" ? JSON.stringify(f.hours, null, 0) : ""
+  const [hours, setHours] = useState<Record<string, string> | null>(
+    f.hours && typeof f.hours === "object" ? (f.hours as Record<string, string>) : null
   );
   const [attachTo, setAttachTo] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1421,18 +1428,6 @@ export function EditorPanel({
     setBusy(true);
     setErr("");
     setMsg("");
-    let hours: unknown = undefined;
-    if (hoursText.trim()) {
-      try {
-        hours = JSON.parse(hoursText);
-      } catch {
-        setBusy(false);
-        setErr("Hours must be valid JSON, e.g. {\"mon\":\"11–21\"}. Fix or clear it.");
-        return;
-      }
-    } else {
-      hours = null;
-    }
     const body: Record<string, unknown> = {
       restaurantId: venue.id,
       name,
@@ -1523,7 +1518,12 @@ export function EditorPanel({
         <Field label="TikTok URL"><input value={ttUrl} onChange={(e) => setTtUrl(e.target.value)} className={fieldInput} /></Field>
         <Field label="YouTube URL"><input value={ytUrl} onChange={(e) => setYtUrl(e.target.value)} className={fieldInput} /></Field>
         <Field label="Offerings (comma-separated)"><input value={offerings} onChange={(e) => setOfferings(e.target.value)} className={fieldInput} placeholder="brisket, ribs, burnt ends" /></Field>
-        <Field label="Hours (JSON: {&quot;mon&quot;:&quot;11–21&quot;})"><input value={hoursText} onChange={(e) => setHoursText(e.target.value)} className={fieldInput} placeholder='{"mon":"11–21","tue":"11–21"}' /></Field>
+      </div>
+
+      {/* Opening hours — friendly editor + natural-text parser */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Opening hours</p>
+        <HoursEditor value={hours} onChange={setHours} />
       </div>
 
       {/* Address & map pin (Fix 4) */}
