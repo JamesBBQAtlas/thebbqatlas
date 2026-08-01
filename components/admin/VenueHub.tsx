@@ -503,10 +503,11 @@ export function VenueHub({
     }
     if (kind === "findig") {
       // Report EXACTLY what was saved (Fix 2): only claim "Instagram" when a
-      // handle/URL was actually persisted; a true empty says so plainly.
-      const posts = data.posts ?? 0;
+      // handle/URL was actually persisted; a true empty says so plainly. No post
+      // COUNT — a saved handle with 0 stored posts is not an empty account (we
+      // don't mirror feeds), so a "0 posts" suffix reads as dead when it isn't.
       const result = data.saved_ig
-        ? { msg: `Instagram saved${data.handle ? ` · @${data.handle}` : ""} · ${posts} post${posts === 1 ? "" : "s"}` }
+        ? { msg: `Instagram saved${data.handle ? ` · @${data.handle}` : ""}` }
         : { warn: "No Instagram found" };
       setRowResult((p) => ({ ...p, [v.id]: result }));
       router.refresh();
@@ -1786,7 +1787,7 @@ function PreviewModal({ venue, mode, onClose, onResolved }: { venue: HubVenue; m
             )
           )}
 
-          <p className="mt-4 text-xs text-text-muted">{venue.hasIG ? `Instagram: ${venue.postsCount} post${venue.postsCount === 1 ? "" : "s"} on file` : "No Instagram on file"}</p>
+          <p className="mt-4 text-xs text-text-muted">{venue.hasIG ? "Instagram linked" : "No Instagram on file"}</p>
 
           {/* Decision buttons */}
           <div className="mt-5 flex flex-wrap items-center justify-end gap-2 border-t border-border-subtle pt-4">

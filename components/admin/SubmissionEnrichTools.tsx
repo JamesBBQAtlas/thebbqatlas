@@ -96,8 +96,10 @@ export function SubmissionEnrichTools({
     const { res, data } = await postJson("/api/admin/venues/enrich-draft", { restaurantId: id, mode: "light" });
     setBusy(null);
     if (!res.ok) { setNote({ err: (data.error as string) ?? "Find IG failed." }); return; }
+    // No post COUNT — a saved handle with 0 stored posts is not a dead account
+    // (we link out, we don't mirror feeds), so "0 posts" would mislead.
     setNote(data.saved_ig
-      ? { msg: `Instagram saved${data.handle ? ` · @${data.handle}` : ""} · ${data.posts ?? 0} posts` }
+      ? { msg: `Instagram saved${data.handle ? ` · @${data.handle}` : ""}` }
       : { warn: "No Instagram found" });
     await loadVenue(id);
   }
