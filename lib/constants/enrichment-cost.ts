@@ -10,6 +10,7 @@ export const COST_PER_VENUE_CEILING = 0.04;
 export const ACTION_COST: Record<string, number> = {
   enrich: 0.024, // grok-4-fast dossier (~$0.02) + Haiku copy (~$0.004)
   rewrite: 0.004, // Haiku only, from stored dossier
+  ops: 0.018, // grok-4-fast operational refresh, no Haiku (Update details)
   findig: 0.01, // one lean grok-4-fast search
   facts: 0.004, // Haiku only (Grok skipped — facts imported)
   publish: 0,

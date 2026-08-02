@@ -24,6 +24,7 @@ import {
   Link2,
   SquarePen,
   Ban,
+  RefreshCw,
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
@@ -67,7 +68,7 @@ export interface HubVenue {
   lng: number;
 }
 
-type ActionKind = "enrich" | "rewrite" | "findig" | "publish" | "reject";
+type ActionKind = "enrich" | "rewrite" | "ops" | "findig" | "publish" | "reject";
 type RunState = "idle" | "queued" | "running" | "done" | "attention" | "error";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -114,15 +115,16 @@ function fmtVal(key: string, val: unknown): string {
 const ACTIONS: { kind: ActionKind; label: string; icon: typeof Sparkles }[] = [
   { kind: "enrich", label: "Enrich", icon: Sparkles },
   { kind: "rewrite", label: "Rewrite", icon: PenLine },
+  { kind: "ops", label: "Update details", icon: RefreshCw },
   { kind: "findig", label: "Find IG", icon: Instagram },
   { kind: "publish", label: "Publish", icon: Check },
   { kind: "reject", label: "Reject", icon: X },
 ];
 
-// The slim floating bar carries only the three research actions — the ones you
-// reach for while scanning a long list. Publish/Reject stay in the top bar.
+// The slim floating bar carries only the research actions — the ones you reach
+// for while scanning a long list. Publish/Reject stay in the top bar.
 const FLOAT_ACTIONS = ACTIONS.filter(
-  (a) => a.kind === "enrich" || a.kind === "rewrite" || a.kind === "findig"
+  (a) => a.kind === "enrich" || a.kind === "rewrite" || a.kind === "ops" || a.kind === "findig"
 );
 
 // Enrichment (Grok research + Claude write) is genuinely slow — up to a couple
@@ -153,6 +155,13 @@ async function callAction(id: string, kind: ActionKind, extra?: Record<string, u
   if (kind === "rewrite") {
     return fetchWithTimeout(
       "/api/admin/venues/rewrite",
+      { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: id, ...extra }) },
+      240_000
+    );
+  }
+  if (kind === "ops") {
+    return fetchWithTimeout(
+      "/api/admin/venues/ops-refresh",
       { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: id, ...extra }) },
       240_000
     );
@@ -557,6 +566,24 @@ export function VenueHub({
     }
     if (kind === "reject") {
       setRowResult((p) => ({ ...p, [v.id]: { msg: v.status === "approved" ? "Unpublished" : "Declined" } }));
+      router.refresh();
+      return;
+    }
+    if (kind === "ops") {
+      // Operational-only refresh: no copy, no preview — just report what moved.
+      const opsCost = typeof data.cost === "number" ? ` · ${fmtUsd(data.cost)}` : "";
+      const n = Number(data.updated_count ?? 0);
+      if (data.needs_attention) {
+        setRowResult((p) => ({
+          ...p,
+          [v.id]: { warn: `Details updated${n ? ` (${n} field${n === 1 ? "" : "s"})` : ""} — ${data.attention_reason ?? "needs a look"}${opsCost}` },
+        }));
+      } else {
+        setRowResult((p) => ({
+          ...p,
+          [v.id]: { msg: (n ? `Details updated · ${n} field${n === 1 ? "" : "s"} changed` : "Details checked · already current") + opsCost },
+        }));
+      }
       router.refresh();
       return;
     }
@@ -1062,6 +1089,7 @@ export function VenueHub({
         <span className="font-semibold text-text-secondary">Actions:</span>{" "}
         <Sparkles className="inline h-3 w-3 align-[-2px]" /> Enrich (research + write) ·{" "}
         <PenLine className="inline h-3 w-3 align-[-2px]" /> Rewrite (re-word from saved research) ·{" "}
+        <RefreshCw className="inline h-3 w-3 align-[-2px]" /> Update details (refresh facts only — leaves copy alone) ·{" "}
         <Instagram className="inline h-3 w-3 align-[-2px]" /> Find IG ·{" "}
         <ImageIcon className="inline h-3 w-3 align-[-2px]" /> Hero ·{" "}
         <Eye className="inline h-3 w-3 align-[-2px]" /> Preview ·{" "}
@@ -1271,6 +1299,7 @@ export function VenueHub({
                       <div className="flex flex-nowrap items-center justify-end gap-1">
                         <IconBtn title={blockSibling ? PARENT_FIRST_MSG : "Re-research + rewrite (Grok researches, Claude writes)"} busy={busy || blockSibling} onClick={() => single(v, "enrich", { useExisting })}><Sparkles className="h-3.5 w-3.5" /></IconBtn>
                         <IconBtn title={blockSibling ? PARENT_FIRST_MSG : "Rewrite copy from saved research (Claude only)"} busy={busy || blockSibling} onClick={() => single(v, "rewrite")}><PenLine className="h-3.5 w-3.5" /></IconBtn>
+                        <IconBtn title="Update details — refresh hours, phone, price, socials & closed/moved only (leaves the copy untouched)" busy={busy} onClick={() => single(v, "ops")}><RefreshCw className="h-3.5 w-3.5" /></IconBtn>
                         <IconBtn title={v.hasIG ? "IG ✓ — re-run Find IG" : "Find IG (handle + recent posts)"} busy={busy} onClick={() => single(v, "findig")}>
                           <Instagram className={`h-3.5 w-3.5 ${v.hasIG ? "text-emerald-400" : ""}`} />
                         </IconBtn>

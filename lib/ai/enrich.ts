@@ -619,6 +619,128 @@ export async function researchInstagram(
   };
 }
 
+// ===========================================================================
+// "Update details" — a lean, OPERATIONAL-ONLY refresh (OPS-REFRESH-SPEC). Grok
+// re-checks the facts that DRIFT (hours, phone, price, socials, whether it's
+// closed) and NOTHING ELSE. It never writes copy, never touches the story
+// fields, and — unlike a full enrich — skips the Claude writer entirely. Cheap,
+// fast, and safe to run often on a stale row without churning good copy.
+// ===========================================================================
+
+/** Grok's operational-facts-only output for ONE venue (no story, no copy). */
+export interface OpsFacts {
+  hours: Record<string, string> | null;
+  phone: string | null;
+  /** £ … ££££ or null. */
+  price_band: string | null;
+  website: string | null;
+  instagram: string | null;
+  other_socials: string[];
+  /** true only on clear evidence the business has closed for good; else false/null. */
+  permanently_closed: boolean | null;
+  /** true ONLY if research clearly shows the venue has MOVED to a new address. */
+  moved: boolean;
+  /** New location, populated ONLY when `moved` is true (else all null). */
+  address: string | null;
+  city: string | null;
+  region_state: string | null;
+  postcode: string | null;
+  lat: number | null;
+  lng: number | null;
+  sources: string[];
+  unknowns: string[];
+}
+
+const OPS_SYSTEM = `You are a factual barbecue-venue researcher for The BBQ Atlas. Your ONLY job on this pass is to re-check a venue's OPERATIONAL facts — the details that change over time — and return them as strict JSON. You are NOT writing any description, story, or marketing copy, and you must NOT research the venue's history, founders, cook method, awards, or "vibe". Operational facts ONLY.
+
+BE EFFICIENT — THIS VENUE ONLY. HARD LIMIT: at most 3 web searches, then STOP and return what you have. Read the venue's OWN sources first and mainly:
+- Its OWN website (homepage + contact/hours/location page) — the authority for hours, phone, price, and whether it has moved or closed.
+- Its INSTAGRAM — recent posts often announce new hours, a move, a temporary or permanent closure.
+One search of a map/listing is allowed ONLY if the site lacks hours/phone (plain facts only; never cite Google Maps).
+
+Return ONLY these operational fields:
+- "hours": object keyed mon,tue,wed,thu,fri,sat,sun with strings like "11:00-20:00" or "Closed", or null if you cannot verify.
+- "phone": the venue's current public phone, or null.
+- "price_band": one of £, ££, £££, ££££, or null.
+- "website": the venue's current official website URL, or null.
+- "instagram": the venue's official Instagram profile URL, or null.
+- "other_socials": full https URLs for X/Twitter, Facebook, TikTok, YouTube, etc. [] if none.
+- "permanently_closed": true ONLY if you find CLEAR evidence the business has closed for good (its own farewell post, "permanently closed" on its site, credible local press). false if it is clearly still trading. null if you genuinely cannot tell — NEVER guess a closure.
+- "moved": true ONLY if you find CLEAR evidence the venue has relocated to a DIFFERENT street address since our records. Otherwise false. If false, leave address/city/region_state/postcode/lat/lng all null — do NOT restate the existing address.
+- When "moved" is true: "address" (new full street line — number + street, no city/postcode), "city", "region_state", "postcode", and "lat"/"lng" if verifiable; else null for any you cannot confirm.
+
+Rules: FACTS ONLY (facts aren't copyrightable) — never reproduce review text, blurbs, or photos. Only report a value you can corroborate from the venue's own site, its socials, or credible press; if you cannot verify a field, return null (or [] / false) and add its name to "unknowns" — NEVER invent hours, a phone number, a price, or a closure. Put a source URL for each non-obvious fact in "sources".
+
+Respond ONLY with a JSON object with exactly these keys: hours, phone, price_band, website, instagram, other_socials, permanently_closed, moved, address, city, region_state, postcode, lat, lng, sources, unknowns.`;
+
+/**
+ * "Update details" research leg — one bounded, Grok-only, operational-facts pass.
+ * Reads the venue's own website + Instagram first (per re-enrich-uses-existing),
+ * and returns ONLY the fields that drift. Writes nothing; the caller merges the
+ * result (keeping operator-entered values on conflict) and logs the usage.
+ */
+export async function researchOps(
+  lead: VenueLead,
+  opts?: { maxSearches?: number; knownFacts?: string | null }
+): Promise<{ facts: OpsFacts; citations: string[]; usage: { in_tokens: number; out_tokens: number; searches: number }; model: string }> {
+  const known = Object.entries(lead)
+    .filter(([, v]) => v && String(v).trim())
+    .map(([k, v]) => `- ${k}: ${v}`)
+    .join("\n");
+
+  // Operator-supplied current details — read the operator's website/Instagram
+  // FIRST (best sources we have); treat them as the baseline to re-verify.
+  const operatorBlock = opts?.knownFacts
+    ? `\n\nCURRENT DETAILS ON FILE (operator-supplied — READ the website/Instagram here FIRST, then re-verify these operational facts). Confirm or correct them; do NOT invent replacements:\n${opts.knownFacts}`
+    : "";
+
+  const user = `Re-check the OPERATIONAL details for this ONE barbecue venue (hours, phone, price, socials, and whether it has closed or moved). Operational facts only — no description or story.
+
+Known so far:
+${known || "- (almost nothing — start from the name/handle above)"}${operatorBlock}
+
+Return ONLY the operational JSON described in your instructions.`;
+
+  const { data, citations, usage, model } = await grokJSON<Partial<OpsFacts>>({
+    system: OPS_SYSTEM,
+    user,
+    maxSearchResults: 8,
+    maxSearches: Math.max(1, Math.min(3, opts?.maxSearches ?? 3)),
+    xSearch: false,
+  });
+
+  const hours =
+    data.hours && typeof data.hours === "object" && !Array.isArray(data.hours)
+      ? (data.hours as Record<string, string>)
+      : null;
+  const moved = data.moved === true;
+
+  const facts: OpsFacts = {
+    hours,
+    phone: asStr(data.phone),
+    price_band: asStr(data.price_band),
+    website: asStr(data.website),
+    instagram:
+      asStr(data.instagram) && /instagram\.com/.test(String(data.instagram))
+        ? String(data.instagram)
+        : null,
+    other_socials: asArray(data.other_socials),
+    permanently_closed:
+      typeof data.permanently_closed === "boolean" ? data.permanently_closed : null,
+    moved,
+    // Location fields are ONLY meaningful when the venue has actually moved.
+    address: moved ? asStr(data.address) : null,
+    city: moved ? asStr(data.city) : null,
+    region_state: moved ? asStr(data.region_state) : null,
+    postcode: moved ? asStr(data.postcode) : null,
+    lat: moved ? asNum(data.lat) : null,
+    lng: moved ? asNum(data.lng) : null,
+    sources: asArray(data.sources),
+    unknowns: asArray(data.unknowns),
+  };
+  return { facts, citations, usage, model };
+}
+
 export interface ChainBranch {
   name: string | null;
   address: string | null;
