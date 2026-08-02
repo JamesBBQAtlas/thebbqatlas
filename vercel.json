@@ -1,10 +1,6 @@
 {
   "crons": [
     {
-      "path": "/api/admin/selfheal?limit=5",
-      "schedule": "0 6 * * *"
-    },
-    {
       "path": "/api/cron/lifecycle-day3",
       "schedule": "0 8 * * *"
     }
