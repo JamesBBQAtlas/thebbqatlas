@@ -57,34 +57,27 @@ function collectText(content: unknown): { text: string; urls: string[] } {
 export async function claudeJSON<T>({
   system,
   user,
-  search = true,
+  // COST FIX: the Anthropic web_search tool (server-side) is what drove the silent
+  // ~$10 spend. It is now permanently OFF — this client NEVER attaches web_search
+  // and NEVER runs the pricey research leg. Claude is used ONLY as the cheap Haiku
+  // copy WRITER (search-free); Grok is our sole live-web researcher.
+  search: _search = false,
   temperature = 0.2,
   model,
   maxTokens,
 }: ClaudeJSONOptions): Promise<ClaudeJSONResult<T>> {
+  void _search;
   if (!CLAUDE_ENABLED) {
     throw new ClaudeError("Claude isn't switched on — set ANTHROPIC_API_KEY.");
   }
 
   const body: Record<string, unknown> = {
-    model: model ?? CLAUDE_MODEL,
-    max_tokens: maxTokens ?? 4096,
+    model: model ?? CLAUDE_WRITER_MODEL,
+    max_tokens: maxTokens ?? 1024,
     temperature,
     system,
     messages: [{ role: "user", content: user }],
   };
-  if (search) {
-    body.tools = [
-      {
-        type: "web_search_20250305",
-        name: "web_search",
-        max_uses: 8,
-        // Match Grok's API-level Maps exclusion so Claude's research leg never
-        // pulls Google Maps / short-link results into enrichment (F-13).
-        blocked_domains: ["maps.google.com", "maps.app.goo.gl", "goo.gl"],
-      },
-    ];
-  }
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 120_000);

@@ -3,75 +3,36 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
-import { ExternalLink } from "lucide-react";
-import { SuggestionActions } from "@/components/admin/SuggestionActions";
-import { RunSweepButton } from "@/components/admin/RunSweepButton";
+import { CircleDot, AlertTriangle, Ban, Crown, Inbox } from "lucide-react";
+import { freshnessTone, FRESHNESS_DAYS } from "@/lib/admin/freshness";
 
-export const metadata = { title: "Self-Healing" };
+export const metadata = { title: "Status" };
 export const dynamic = "force-dynamic";
 
-interface Suggestion {
-  id: string;
-  kind: string;
-  title: string;
-  summary: string;
-  current: Record<string, unknown> | null;
-  proposed: Record<string, unknown> | null;
-  agreement: Record<string, { by: string; grok?: string; claude?: string }> | null;
-  models: string[] | null;
-  sources: string[] | null;
-  confidence: number | null;
-  restaurant_id: string | null;
-  created_at: string;
-  restaurants: { name: string; slug: string } | null;
+interface Tile {
+  href: string;
+  label: string;
+  value: number;
+  sub?: string;
+  tone: "green" | "amber" | "red" | "gold" | "default";
+  icon: typeof CircleDot;
 }
 
-function AgreementBadge({
-  a,
-}: {
-  a?: { by: string; grok?: string; claude?: string };
-}) {
-  if (!a) return <span className="text-text-muted">—</span>;
-  if (a.by === "both")
-    return (
-      <span className="rounded-full bg-brand-gold/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-gold">
-        Both agree
-      </span>
-    );
-  if (a.by === "conflict")
-    return (
-      <span
-        className="rounded-full bg-destructive/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.05em] text-destructive"
-        title={`Grok: ${a.grok ?? "—"} · Claude: ${a.claude ?? "—"}`}
-      >
-        Differ
-      </span>
-    );
-  return (
-    <span className="rounded-full bg-brand-sienna/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.05em] text-brand-sienna-light">
-      {a.by === "claude" ? "Claude only" : "Grok only"}
-    </span>
-  );
+function toneClasses(tone: Tile["tone"]) {
+  switch (tone) {
+    case "green": return "text-emerald-400 border-emerald-500/30";
+    case "amber": return "text-amber-400 border-amber-500/30";
+    case "red": return "text-red-400 border-red-500/30";
+    case "gold": return "text-brand-gold border-brand-gold/30";
+    default: return "text-text-primary border-border-subtle";
+  }
 }
 
-function fmt(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "—";
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
-}
-
-export default async function OptimizePage() {
+export default async function StatusPage() {
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
   if (profile?.role !== "admin") {
     return (
       <div className="mx-auto max-w-3xl px-6 py-24 text-center">
@@ -81,136 +42,88 @@ export default async function OptimizePage() {
     );
   }
 
-  const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? createAdminClient()
-    : supabase;
+  const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY ? createAdminClient() : supabase;
 
-  const { data } = await db
-    .from("suggestions")
-    .select("*, restaurants(name, slug)")
-    .eq("status", "pending")
-    .order("created_at", { ascending: true });
-  const rows = (data ?? []) as unknown as Suggestion[];
+  // One read of the fields the status rule + flags need. Public listings are
+  // approved venues; but freshness/attention span the whole catalogue.
+  const { data: rows } = await db
+    .from("restaurants")
+    .select("enriched_at, needs_attention, permanently_closed, flagship_unset, status")
+    .limit(5000);
+  const all = (rows ?? []) as {
+    enriched_at: string | null;
+    needs_attention: boolean | null;
+    permanently_closed: boolean | null;
+    flagship_unset: boolean | null;
+    status: string | null;
+  }[];
+
+  let green = 0, amber = 0, red = 0, attn = 0, closed = 0, flagship = 0;
+  for (const r of all) {
+    const tone = freshnessTone(r.enriched_at);
+    if (tone === "green") green++; else if (tone === "amber") amber++; else red++;
+    if (r.needs_attention) attn++;
+    if (r.permanently_closed) closed++;
+    if (r.flagship_unset) flagship++;
+  }
+
+  // Moderation queue (submissions + reviews + photos pending).
+  const countPending = async (table: string, col: string, val: string) => {
+    try {
+      const { count } = await db.from(table).select("id", { count: "exact", head: true }).eq(col, val);
+      return count ?? 0;
+    } catch { return 0; }
+  };
+  const [subs, revs, phts] = await Promise.all([
+    countPending("submissions", "moderation_status", "pending"),
+    countPending("reviews", "status", "pending"),
+    countPending("review_photos", "status", "pending"),
+  ]);
+  const modPending = subs + revs + phts;
+
+  const freshness: Tile[] = [
+    { href: "/admin/listings?fresh=green", label: "Fresh", value: green, sub: `≤ ${FRESHNESS_DAYS.greenMaxDays}d`, tone: "green", icon: CircleDot },
+    { href: "/admin/listings?fresh=amber", label: "Ageing", value: amber, sub: `${FRESHNESS_DAYS.greenMaxDays}–${FRESHNESS_DAYS.amberMaxDays}d`, tone: "amber", icon: CircleDot },
+    { href: "/admin/listings?fresh=red", label: "Stale / never", value: red, sub: `> ${FRESHNESS_DAYS.amberMaxDays}d`, tone: "red", icon: CircleDot },
+  ];
+  const flags: Tile[] = [
+    { href: "/admin/listings?attn=1", label: "Needs attention", value: attn, tone: "amber", icon: AlertTriangle },
+    { href: "/admin/listings?closed=1", label: "Permanently closed", value: closed, tone: "red", icon: Ban },
+    { href: "/admin/listings?flagship=1", label: "Flagship unset", value: flagship, tone: "gold", icon: Crown },
+    { href: "/admin/moderation", label: "Moderation queue", value: modPending, tone: modPending ? "gold" : "default", icon: Inbox },
+  ];
+
+  const TileCard = ({ t }: { t: Tile }) => (
+    <Link href={t.href} className={`rounded-xl border bg-surface-0 p-5 transition-colors hover:border-brand-gold/50 ${toneClasses(t.tone)}`}>
+      <div className="flex items-center gap-2">
+        <t.icon className="h-4 w-4" />
+        <span className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">{t.label}</span>
+      </div>
+      <div className={`mt-2 font-heading text-3xl font-bold ${toneClasses(t.tone).split(" ")[0]}`}>{t.value}</div>
+      {t.sub && <div className="mt-0.5 text-xs text-text-muted">{t.sub}</div>}
+    </Link>
+  );
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-16 sm:px-10">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="font-heading text-3xl font-bold text-text-primary">
-            Self-Healing
-          </h1>
-          <p className="mt-1 max-w-xl text-text-muted">
-            Grok proposes fixes and gap-fills for your venues. Nothing changes on
-            the live site until you approve it here.
-          </p>
-        </div>
-        <RunSweepButton />
+    <div className="mx-auto max-w-6xl px-6 py-16 sm:px-10">
+      <h1 className="font-heading text-3xl font-bold text-text-primary">Catalogue status</h1>
+      <p className="mt-1 max-w-2xl text-text-muted">
+        Health at a glance, by the one freshness rule (green ≤ {FRESHNESS_DAYS.greenMaxDays} days · amber ≤ {FRESHNESS_DAYS.amberMaxDays} days · red older/never, by <code>enriched_at</code> age). Each tile opens Listings pre-filtered — from there, select all and “Enrich selected” to refresh.
+      </p>
+
+      <h2 className="mb-3 mt-8 font-heading text-lg font-bold text-text-primary">Freshness</h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {freshness.map((t) => <TileCard key={t.href} t={t} />)}
       </div>
 
-      {rows.length === 0 ? (
-        <p className="rounded-xl border border-border-subtle bg-surface-0 p-8 text-text-muted">
-          No pending suggestions. Run a sweep, or wait for the scheduled one — new
-          proposals land here for your review.
-        </p>
-      ) : (
-        <div className="space-y-5">
-          {rows.map((s) => {
-            const fields = Object.keys(s.proposed ?? {});
-            return (
-              <div
-                key={s.id}
-                className="rounded-xl border border-border-subtle bg-surface-0 p-5"
-              >
-                <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em] ${
-                          s.kind === "closure"
-                            ? "bg-destructive/15 text-destructive"
-                            : "bg-brand-gold/15 text-brand-gold"
-                        }`}
-                      >
-                        {s.kind === "closure" ? "Possible closure" : "Gap fill"}
-                      </span>
-                      {s.confidence != null && (
-                        <span className="text-xs text-text-muted">
-                          {Math.round(s.confidence * 100)}% confident
-                        </span>
-                      )}
-                      {Array.isArray(s.models) && s.models.length > 0 && (
-                        <span className="text-xs text-text-muted">
-                          · {s.models.length === 2 ? "Grok + Claude" : s.models[0] === "claude" ? "Claude" : "Grok"}
-                        </span>
-                      )}
-                    </div>
-                    <h2 className="mt-1.5 font-heading text-lg font-bold text-text-primary">
-                      {s.restaurants?.slug ? (
-                        <Link
-                          href={`/restaurants/${s.restaurants.slug}`}
-                          className="hover:text-brand-gold"
-                        >
-                          {s.restaurants?.name ?? "Venue"}
-                        </Link>
-                      ) : (
-                        (s.restaurants?.name ?? "Venue")
-                      )}
-                    </h2>
-                    <p className="text-sm text-text-muted">{s.summary}</p>
-                  </div>
-                  <SuggestionActions suggestionId={s.id} />
-                </div>
+      <h2 className="mb-3 mt-8 font-heading text-lg font-bold text-text-primary">Attention</h2>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {flags.map((t) => <TileCard key={t.href} t={t} />)}
+      </div>
 
-                <div className="overflow-hidden rounded-lg border border-border-subtle">
-                  <table className="w-full text-left text-sm">
-                    <thead className="bg-surface-1 text-xs uppercase tracking-[0.06em] text-text-muted">
-                      <tr>
-                        <th className="px-3 py-2 font-semibold">Field</th>
-                        <th className="px-3 py-2 font-semibold">Current</th>
-                        <th className="px-3 py-2 font-semibold">Proposed</th>
-                        <th className="px-3 py-2 font-semibold">AI</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fields.map((f) => (
-                        <tr key={f} className="border-t border-border-subtle align-top">
-                          <td className="px-3 py-2 font-semibold text-text-secondary">{f}</td>
-                          <td className="px-3 py-2 text-text-muted">
-                            {fmt(s.current?.[f])}
-                          </td>
-                          <td className="px-3 py-2 text-brand-gold">
-                            {fmt(s.proposed?.[f])}
-                          </td>
-                          <td className="px-3 py-2">
-                            <AgreementBadge a={s.agreement?.[f]} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {Array.isArray(s.sources) && s.sources.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {s.sources.slice(0, 6).map((u) => (
-                      <a
-                        key={u}
-                        href={u}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-xs text-brand-gold hover:underline"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        <span className="max-w-[220px] truncate">{u}</span>
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <p className="mt-8 text-sm text-text-muted">
+        The old scheduled “self-heal” sweep has been retired (it silently ran a pricey model). Refreshing stale venues is now: <Link href="/admin/listings?fresh=red" className="text-brand-gold hover:underline">open the Red set</Link>, select all, hit “Enrich selected”, confirm the cost. Same cheap Grok → Haiku pipeline, no cron, no separate engine.
+      </p>
     </div>
   );
 }

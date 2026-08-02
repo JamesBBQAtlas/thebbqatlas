@@ -4,9 +4,13 @@ import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
 
 export type Engine = "grok" | "claude";
 
-/** Route a JSON hunt to the chosen engine (same prompt, independent opinions). */
+/**
+ * Live-web research runs on GROK ONLY. The Claude/Sonnet + Anthropic web_search
+ * research leg was removed (it drove a silent ~$10 bleed and its usage wasn't
+ * logged). Claude remains ONLY as the cheap Haiku copy writer (search-free).
+ */
 function runEngine<T>(
-  engine: Engine,
+  _engine: Engine,
   opts: {
     system: string;
     user: string;
@@ -18,7 +22,8 @@ function runEngine<T>(
     maxTokens?: number;
   }
 ) {
-  return engine === "claude" ? claudeJSON<T>(opts) : grokJSON<T>(opts);
+  void _engine;
+  return grokJSON<T>(opts);
 }
 import { OFFERINGS } from "@/lib/constants/offerings";
 import type { BbqStyle } from "@/lib/constants/styles";
@@ -74,6 +79,9 @@ export interface EnrichedVenue {
   /** Per-field notes / caveats for the human reviewer. */
   reviewer_notes: string | null;
   citations: string[];
+  /** Real API usage for this hunt — so callers can log it (no more leaks). */
+  usage: { in_tokens: number; out_tokens: number; searches: number };
+  model: string;
 }
 
 const VENUE_SYSTEM = `You are a meticulous research assistant for The BBQ Atlas, a global directory of barbecue venues. You are given whatever fragments are known about a real-world barbecue business and must HUNT the live web to verify and complete the record.
@@ -117,7 +125,7 @@ ${known || "- (almost nothing — start from the name/handle above)"}
 
 Return the JSON object described in your instructions.`;
 
-  const { data, citations } = await runEngine<Partial<EnrichedVenue>>(engine, {
+  const { data, citations, usage, model } = await runEngine<Partial<EnrichedVenue>>(engine, {
     system: VENUE_SYSTEM,
     user,
   });
@@ -177,6 +185,8 @@ Return the JSON object described in your instructions.`;
     confidence,
     reviewer_notes: data.reviewer_notes ?? null,
     citations,
+    usage: usage ?? { in_tokens: 0, out_tokens: 0, searches: 0 },
+    model,
   };
 }
 

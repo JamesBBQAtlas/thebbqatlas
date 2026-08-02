@@ -6,7 +6,6 @@ import { getGuides } from "@/lib/queries/guides";
 import { getNews } from "@/lib/queries/news";
 import { groupByCountry, groupByCity } from "@/lib/seo/hubs";
 import { BBQ_STYLES } from "@/lib/constants/styles";
-import { RunSweepButton } from "@/components/admin/RunSweepButton";
 import type { Restaurant } from "@/lib/types/database";
 
 export const metadata = { title: "SEO Health" };
@@ -141,11 +140,11 @@ export default async function HealthPage() {
         <div>
           <h1 className="font-heading text-3xl font-bold text-text-primary">SEO Health</h1>
           <p className="mt-1 max-w-xl text-text-muted">
-            Where the catalogue needs attention. Data gaps feed the self-healing
-            queue — run a sweep to turn them into reviewable fixes.
+            Where the catalogue needs attention. To refresh stale or incomplete
+            venues, use the freshness filter + “Enrich selected” in the Status
+            dashboard and Listings.
           </p>
         </div>
-        <RunSweepButton />
       </div>
 
       <div className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -182,17 +181,17 @@ export default async function HealthPage() {
       <IssueList
         title="Thin descriptions"
         items={thinDesc}
-        note="Under 40 characters — weak for search and AI. Self-healing can propose a fuller one."
+        note="Under 40 characters — weak for search and AI. Enrich these from Listings to fill them out."
       />
 
       <p className="mt-10 rounded-xl border border-border-subtle bg-surface-0 p-5 text-sm text-text-muted">
         Slugs auto-redirect to canonical URLs, the sitemap regenerates hourly with
         every hub, and structured data (Restaurant, ItemList, CollectionPage,
-        Article) is emitted site-wide. To fix data gaps above, use{" "}
+        Article) is emitted site-wide. To fix data gaps above, open{" "}
         <Link href="/admin/optimize" className="text-brand-gold hover:underline">
-          Self-Healing
+          Status
         </Link>{" "}
-        (Grok proposes, you approve).
+        or filter Listings, then “Enrich selected” (cheap Grok → Haiku).
       </p>
     </div>
   );

@@ -103,7 +103,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-export default async function ListingsPage() {
+export default async function ListingsPage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
+  const sp = searchParams ?? {};
+  const one = (k: string) => (Array.isArray(sp[k]) ? (sp[k] as string[])[0] : (sp[k] as string | undefined));
+  const initialFilters = {
+    fresh: one("fresh"),
+    attn: one("attn") === "1",
+    closed: one("closed") === "1",
+    flagship: one("flagship") === "1",
+  };
   const supabase = await createClient();
   const {
     data: { user },
@@ -127,7 +139,7 @@ export default async function ListingsPage() {
     ? createAdminClient()
     : supabase;
 
-  const [{ data: venueData }, checkIns, saves, mediaApproved, mediaPending, reviewsApproved, reviewsPending, guides, news, bookmarks, suggestionsPending] =
+  const [{ data: venueData }, checkIns, saves, mediaApproved, mediaPending, reviewsApproved, reviewsPending, guides, news, bookmarks] =
     await Promise.all([
       db
         .from("restaurants")
@@ -147,7 +159,6 @@ export default async function ListingsPage() {
       count(db, "guides"),
       count(db, "news"),
       count(db, "bookmarks"),
-      count(db, "suggestions", { col: "status", val: "pending" }),
     ]);
 
   const all = (venueData ?? []) as Restaurant[];
@@ -313,12 +324,6 @@ export default async function ListingsPage() {
           <Stat label="News" value={news} />
           <Stat label="Bookmarks" value={bookmarks} />
         </div>
-        {suggestionsPending > 0 && (
-          <p className="mt-3 text-sm text-brand-gold">
-            {suggestionsPending} self-healing suggestion{suggestionsPending === 1 ? "" : "s"} awaiting
-            your review in Self-Healing.
-          </p>
-        )}
       </Section>
 
       {/* Spend by provider — exact, from the append-only AI usage ledger */}
@@ -385,7 +390,7 @@ export default async function ListingsPage() {
 
       {/* Control hub — the same surface for existing venues and new imports */}
       <Section title="Venue control hub">
-        <VenueHub venues={hubVenues} styleOptions={STYLE_OPTIONS} />
+        <VenueHub venues={hubVenues} styleOptions={STYLE_OPTIONS} initialFilters={initialFilters} />
       </Section>
     </div>
   );

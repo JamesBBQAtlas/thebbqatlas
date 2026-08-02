@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { GROK_ENABLED, GrokError } from "@/lib/ai/grok";
 import { enrichVenue, type VenueLead } from "@/lib/ai/enrich";
+import { grokCost, round4 } from "@/lib/ai/cost";
+import { logAiUsage } from "@/lib/ai/usage-log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -83,6 +85,20 @@ export async function POST(request: Request) {
           : "Enrichment failed.";
     return NextResponse.json({ error: msg }, { status: 502 });
   }
+
+  // Exact per-call AI ledger row — this Grok hunt used to be UNLOGGED (the leak).
+  await logAiUsage(ctx.db, {
+    provider: "xai",
+    model: enriched.model,
+    task: "enrich",
+    entity_type: "restaurant",
+    entity_id: body.restaurantId ?? null,
+    input_tokens: enriched.usage.in_tokens,
+    output_tokens: enriched.usage.out_tokens,
+    search_count: enriched.usage.searches,
+    cost: round4(grokCost(enriched.usage, enriched.model)),
+    usage_raw: enriched.usage,
+  });
 
   // Provenance: log the hunt (and its sources). Best-effort — a logging failure
   // must never lose a successful enrichment.

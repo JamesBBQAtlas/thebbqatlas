@@ -88,14 +88,12 @@ export default async function AdminLayout({
 
   const [
     mediaPending,
-    suggestionsPending,
     subsPending,
     reviewsPending,
     photosPending,
     draftsPending,
   ] = await Promise.all([
     count(db, "media", { col: "status", val: "pending" }),
-    count(db, "suggestions", { col: "status", val: "pending" }),
     count(db, "submissions", { col: "moderation_status", val: "pending" }),
     count(db, "reviews", { col: "status", val: "pending" }),
     count(db, "review_photos", { col: "status", val: "pending" }),
@@ -121,7 +119,6 @@ export default async function AdminLayout({
           <AdminNav
             counts={{
               media: mediaPending,
-              suggestions: suggestionsPending,
               pending: pendingTotal,
               drafts: draftsPending,
             }}

@@ -3,12 +3,12 @@
 import { Link, usePathname } from "@/i18n/navigation";
 import { cn } from "@/lib/utils/cn";
 
-type BadgeKey = "media" | "suggestions" | "pending" | "drafts";
+type BadgeKey = "media" | "pending" | "drafts";
 
 const TABS: { href: string; label: string; badge?: BadgeKey; primary?: boolean }[] = [
   { href: "/admin/venues", label: "Pending Venues", badge: "drafts" },
   { href: "/admin/media", label: "Media", badge: "media" },
-  { href: "/admin/optimize", label: "Self-Healing", badge: "suggestions" },
+  { href: "/admin/optimize", label: "Status" },
   { href: "/admin/health", label: "SEO Health" },
   { href: "/admin/audit", label: "Change Log" },
   { href: "/admin/email", label: "Email Log" },
@@ -24,7 +24,7 @@ const TABS: { href: string; label: string; badge?: BadgeKey; primary?: boolean }
 export function AdminNav({
   counts,
 }: {
-  counts: { media: number; suggestions: number; pending: number; drafts: number };
+  counts: { media: number; pending: number; drafts: number };
 }) {
   const pathname = usePathname();
   const isActive = (href: string) =>

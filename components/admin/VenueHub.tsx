@@ -183,10 +183,13 @@ export function VenueHub({
   venues,
   styleOptions,
   initialStatus = "all",
+  initialFilters,
 }: {
   venues: HubVenue[];
   styleOptions: { slug: string; label: string }[];
   initialStatus?: string;
+  /** Deep-link filters from the dashboard tiles (e.g. ?fresh=red). */
+  initialFilters?: { fresh?: string; attn?: boolean; closed?: boolean; flagship?: boolean };
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -197,11 +200,16 @@ export function VenueHub({
   const [country, setCountry] = useState("all");
   const [photoF, setPhotoF] = useState("all"); // all | yes | no
   const [igF, setIgF] = useState("all");
-  const [staleF, setStaleF] = useState(false);
+  // Freshness / status filters (Part C) — the staleness workflow.
+  const [freshF, setFreshF] = useState(initialFilters?.fresh ?? "all"); // all | green | amber | red
+  const [attnF, setAttnF] = useState(Boolean(initialFilters?.attn)); // needs_attention
+  const [closedF, setClosedF] = useState(Boolean(initialFilters?.closed)); // permanently_closed
+  const [flagshipF, setFlagshipF] = useState(Boolean(initialFilters?.flagship)); // flagship_unset
+  const [oldestFirst, setOldestFirst] = useState(false);
   const [status, setStatus] = useState<Record<string, { state: RunState; msg?: string }>>({});
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [progress, setProgress] = useState({ done: 0, attention: 0, total: 0, kind: "" as string });
+  const [progress, setProgress] = useState({ done: 0, attention: 0, skipped: 0, total: 0, kind: "" as string });
   const [heroOpen, setHeroOpen] = useState<string | null>(null);
   const [locOpen, setLocOpen] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
@@ -292,18 +300,28 @@ export function VenueHub({
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return venues.filter((v) => {
+    const list = venues.filter((v) => {
       if (statusF !== "all" && v.status !== statusF) return false;
       if (country !== "all" && v.country !== country) return false;
       if (photoF === "yes" && !v.hasRealPhoto) return false;
       if (photoF === "no" && v.hasRealPhoto) return false;
       if (igF === "yes" && !v.hasIG) return false;
       if (igF === "no" && v.hasIG) return false;
-      if (staleF && freshness(v.enriched_at).tone !== "red") return false;
+      if (freshF !== "all" && freshness(v.enriched_at).tone !== freshF) return false;
+      if (attnF && !v.needs_attention) return false;
+      if (closedF && !v.permanentlyClosed) return false;
+      if (flagshipF && !v.flagshipUnset) return false;
       if (needle && !`${v.name} ${v.city ?? ""} ${v.country ?? ""}`.toLowerCase().includes(needle)) return false;
       return true;
     });
-  }, [venues, q, statusF, country, photoF, igF, staleF]);
+    // Oldest-first by enrichment age (never-enriched = oldest). Chains still group
+    // under their parent (the group anchors at its oldest member's position).
+    if (oldestFirst) {
+      const rank = (v: HubVenue) => (v.enriched_at ? new Date(v.enriched_at).getTime() : 0);
+      list.sort((a, b) => rank(a) - rank(b));
+    }
+    return list;
+  }, [venues, q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF, oldestFirst]);
 
   // Group a chain's sibling seeds directly beneath their parent so a detected
   // chain reads as one block ("parent + its N seeds"), not scattered rows.
@@ -424,15 +442,37 @@ export function VenueHub({
 
   async function doBatch(kind: ActionKind) {
     setConfirmBatch(null);
-    const ids = shown.filter((v) => selected.has(v.id)).map((v) => v.id);
-    if (!ids.length || running) return;
+    let ids = shown.filter((v) => selected.has(v.id)).map((v) => v.id);
+    // 14-day cooldown: never re-enrich a venue enriched in the last fortnight —
+    // it wastes spend and the copy won't have meaningfully changed.
+    let skipped = 0;
+    if (kind === "enrich") {
+      const recent = new Set(
+        shown
+          .filter((v) => {
+            if (!selected.has(v.id)) return false;
+            const d = v.enriched_at ? (Date.now() - new Date(v.enriched_at).getTime()) / 86_400_000 : Infinity;
+            return d < 14;
+          })
+          .map((v) => v.id)
+      );
+      skipped = recent.size;
+      if (skipped) {
+        ids = ids.filter((id) => !recent.has(id));
+        recent.forEach((id) => setRowResult((p) => ({ ...p, [id]: { msg: "Skipped — enriched in the last 14 days" } })));
+      }
+    }
+    if (!ids.length || running) {
+      if (skipped && !running) setProgress({ done: 0, attention: 0, skipped, total: 0, kind });
+      return;
+    }
     setRunning(true);
     setPaused(false);
     pauseRef.current = false;
     stopRef.current = false;
     let done = 0;
     let attention = 0;
-    setProgress({ done: 0, attention: 0, total: ids.length, kind });
+    setProgress({ done: 0, attention: 0, skipped, total: ids.length, kind });
     for (const id of ids) setState(id, "queued");
     for (const id of ids) {
       if (stopRef.current) break;
@@ -441,7 +481,7 @@ export function VenueHub({
       const r = await runOne(id, kind);
       if (r === "done") done++;
       else if (r === "attention") attention++;
-      setProgress({ done, attention, total: ids.length, kind });
+      setProgress({ done, attention, skipped, total: ids.length, kind });
     }
     setRunning(false);
     setPaused(false);
@@ -902,7 +942,16 @@ export function VenueHub({
           <option value="yes">Has IG</option>
           <option value="no">No IG</option>
         </select>
-        <button type="button" onClick={() => setStaleF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${staleF ? "border-amber-500/60 bg-amber-500/10 text-amber-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Stale only</button>
+        <select value={freshF} onChange={(e) => setFreshF(e.target.value)} className="rounded-md border border-border-default bg-surface-0 px-2 py-2 text-sm text-text-primary focus:outline-none" title="Freshness by enrichment age">
+          <option value="all">Any freshness</option>
+          <option value="green">🟢 Fresh</option>
+          <option value="amber">🟠 Ageing</option>
+          <option value="red">🔴 Stale / never</option>
+        </select>
+        <button type="button" onClick={() => setAttnF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${attnF ? "border-amber-500/60 bg-amber-500/10 text-amber-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Needs attention</button>
+        <button type="button" onClick={() => setClosedF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${closedF ? "border-destructive/60 bg-destructive/10 text-destructive" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Closed</button>
+        <button type="button" onClick={() => setFlagshipF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${flagshipF ? "border-amber-500/60 bg-amber-500/10 text-amber-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Flagship unset</button>
+        <button type="button" onClick={() => setOldestFirst((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${oldestFirst ? "border-brand-gold/60 bg-brand-gold/10 text-brand-gold" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`} title="Sort by enrichment age, oldest first">Oldest first</button>
         <span className="text-xs text-text-muted">{shown.length} shown</span>
       </div>
 
@@ -913,7 +962,7 @@ export function VenueHub({
         <div className="mx-1 h-5 w-px bg-border-subtle" />
         {running ? (
           <>
-            <span className="text-sm text-text-secondary">{progress.kind}: {progress.done + progress.attention} of {progress.total} · {progress.attention} need attention</span>
+            <span className="text-sm text-text-secondary">{progress.kind}: {progress.done + progress.attention} of {progress.total} · {progress.attention} need attention{progress.skipped ? ` · ${progress.skipped} skipped (14-day cooldown)` : ""}</span>
             <button type="button" onClick={() => { pauseRef.current = !pauseRef.current; setPaused(pauseRef.current); }} className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold">{paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{paused ? "Resume" : "Pause"}</button>
             <button type="button" onClick={() => { stopRef.current = true; pauseRef.current = false; setPaused(false); }} className="inline-flex items-center gap-1.5 rounded-md border border-destructive/60 px-3 py-2 text-xs font-semibold text-destructive hover:bg-destructive/10"><Square className="h-3.5 w-3.5" />Stop</button>
           </>
@@ -1297,6 +1346,7 @@ export function VenueHub({
                 <span className="whitespace-nowrap px-1 text-xs font-semibold text-text-secondary">
                   {progress.kind}: {progress.done + progress.attention}/{progress.total}
                   {progress.attention ? ` · ${progress.attention} attn` : ""}
+                  {progress.skipped ? ` · ${progress.skipped} skipped` : ""}
                 </span>
                 <button type="button" onClick={() => { pauseRef.current = !pauseRef.current; setPaused(pauseRef.current); }} className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border-default px-2.5 py-1 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold">
                   {paused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}{paused ? "Resume" : "Pause"}
