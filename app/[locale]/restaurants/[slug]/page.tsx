@@ -47,6 +47,7 @@ import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { getGearForStyle } from "@/lib/queries/gear";
 import { groupedHours } from "@/lib/restaurants/hours";
+import { SmallHoursAside } from "@/components/restaurants/SmallHoursAside";
 import { GearProductCard } from "@/components/gear/GearProductCard";
 import { AffiliateDisclosure } from "@/components/monetization/AffiliateDisclosure";
 import { getSiblingLocations } from "@/lib/queries/brands";
@@ -617,6 +618,7 @@ export default async function RestaurantPage({ params }: Props) {
                           </span>
                         </div>
                       ))}
+                      <SmallHoursAside hours={restaurant.hours} />
                     </dd>
                   </div>
                 </div>

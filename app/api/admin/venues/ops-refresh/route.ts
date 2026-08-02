@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, status, website, instagram_url, instagram_handle, phone, hours, price_level, address, city, country, lat, lng, permanently_closed, x_url, facebook_url, tiktok_url, youtube_url, enrichment_cost, needs_attention, attention_reason"
+      "id, name, status, website, instagram_url, instagram_handle, phone, hours, price_level, address, city, country, lat, lng, permanently_closed, x_url, facebook_url, tiktok_url, youtube_url, enrichment_cost, needs_attention, attention_reason, pending_changes"
     )
     .eq("id", restaurantId)
     .single();
@@ -168,21 +168,27 @@ export async function POST(request: Request) {
   if (socials.tiktok_url && !row.tiktok_url) setField("tiktok_url", "tiktok_url", null, socials.tiktok_url);
   if (socials.youtube_url && !row.youtube_url) setField("youtube_url", "youtube_url", null, socials.youtube_url);
 
-  // permanently_closed — apply either direction, but a NEW closure is
-  // consequential: apply AND flag so a human verifies it before it lingers.
+  // ── The two CONSEQUENTIAL changes are STAGED, not applied live ────────────
+  // A wrong phone is trivially reversible; a venue falsely shown permanently
+  // CLOSED, or with a wrongly-moved pin, is reputationally costly. So a closure
+  // flip and a relocation are held in `pending_changes` for one-click human
+  // approval — the public listing does NOT change until the operator confirms.
+  const staged: Record<string, unknown> = {};
+
+  // permanently_closed — stage either direction; a NEW closure is the scary one.
   let closureFlag = false;
   if (typeof facts.permanently_closed === "boolean" && facts.permanently_closed !== Boolean(row.permanently_closed)) {
-    setField("permanently_closed", "permanently_closed", Boolean(row.permanently_closed), facts.permanently_closed);
-    if (facts.permanently_closed) {
-      closureFlag = true;
-      notes.push("Research indicates this venue may have permanently CLOSED — verify.");
-    } else {
-      notes.push("Research indicates this venue has RE-OPENED — un-marked closed.");
-    }
+    staged.permanently_closed = facts.permanently_closed;
+    closureFlag = true;
+    notes.push(
+      facts.permanently_closed
+        ? "Research indicates this venue may have permanently CLOSED — approve to mark it closed."
+        : "Research indicates this venue has RE-OPENED — approve to un-mark closed."
+    );
   }
 
-  // moved — only on clear evidence + a real new address. Apply the new location
-  // and flag it (a relocation is consequential and worth a human glance).
+  // moved — only on clear evidence + a real new address. Stage the new location
+  // (address/city/coords) for approval; never move a live pin without a human.
   let moveFlag = false;
   if (facts.moved && facts.address) {
     const composed = composeAddress({
@@ -193,26 +199,26 @@ export async function POST(request: Request) {
     });
     const newAddress = preferFullerAddress(composed, row.address);
     if (newAddress && newAddress !== row.address) {
-      setField("address", "address", row.address, newAddress);
+      staged.address = newAddress;
       moveFlag = true;
       const newCity = facts.city ? settlementCity(facts.city) || facts.city : null;
-      if (newCity && newCity !== row.city) setField("city", "city", row.city, newCity);
+      if (newCity && newCity !== row.city) staged.city = newCity;
       // Coordinates: use verified dossier coords, else geocode the new address.
       const validCoord = (a: number | null, b: number | null) =>
         typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
       if (validCoord(facts.lat, facts.lng)) {
-        patch.lat = facts.lat;
-        patch.lng = facts.lng;
+        staged.lat = facts.lat;
+        staged.lng = facts.lng;
       } else {
         const geo = await geocodeAddress({ address: facts.address, city: facts.city ?? row.city, country: row.country });
         if (geo && validCoord(geo.lat, geo.lng)) {
-          patch.lat = geo.lat;
-          patch.lng = geo.lng;
-          if (geo.country_code) patch.country_code = geo.country_code;
-          if (geo.country) patch.country = canonicalCountry(geo.country);
+          staged.lat = geo.lat;
+          staged.lng = geo.lng;
+          if (geo.country_code) staged.country_code = geo.country_code;
+          if (geo.country) staged.country = canonicalCountry(geo.country);
         }
       }
-      notes.push("Research indicates this venue has MOVED — new address applied; verify the pin.");
+      notes.push("Research indicates this venue has MOVED — approve to apply the new address & pin.");
     }
   }
 
@@ -232,9 +238,19 @@ export async function POST(request: Request) {
     patch.enrichment_sources = [...new Set([...citations, ...facts.sources])];
   }
 
+  // Stage the consequential changes for one-click approval — merged onto any
+  // existing pending bag so a queued copy proposal isn't lost. The operator
+  // approves them via the existing "Review diff → Approve" flow (approve-copy),
+  // which applies the whole bag and audits the tracked fields at that point.
+  const stagedCount = Object.keys(staged).length;
+  if (stagedCount) {
+    const existingPending = (row as { pending_changes?: Record<string, unknown> | null }).pending_changes;
+    patch.pending_changes = { ...(existingPending && typeof existingPending === "object" ? existingPending : {}), ...staged };
+  }
+
   // Flag for review only when there's something a human should look at — a
-  // conflict we refused to overwrite, a closure, or a move. Otherwise DON'T touch
-  // needs_attention (never mask a flag an enrich raised, never falsely clear one).
+  // conflict we refused to overwrite, or a staged closure/move. Otherwise DON'T
+  // touch needs_attention (never mask a flag an enrich raised, never falsely clear one).
   const raiseFlag = conflicts.length > 0 || closureFlag || moveFlag;
   if (raiseFlag) {
     patch.needs_attention = true;
@@ -285,6 +301,9 @@ export async function POST(request: Request) {
     conflicts,
     closed_changed: closureFlag,
     moved: moveFlag,
+    // A closure/move is STAGED (held for one-click approval), not applied live.
+    staged: stagedCount > 0,
+    has_pending: stagedCount > 0,
     needs_attention: raiseFlag,
     attention_reason: raiseFlag ? patch.attention_reason : null,
     cost,

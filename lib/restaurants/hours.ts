@@ -105,6 +105,55 @@ export function serializeDayValue(d: DayHours): string {
   return slots.map((s) => `${s.open}–${s.close}`).join(", ");
 }
 
+// getDay() order (0 = Sunday) mapped to our 3-letter keys.
+const GETDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+const hhmmToMin = (s: string): number | null => {
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+};
+
+/**
+ * Open / closed / unknown for a specific instant, from the canonical hours map.
+ * Best-effort and timezone-naive by design (it reads `at` in whatever timezone
+ * the Date carries) — used only for the small-hours aside, never for anything
+ * authoritative. Handles slots that wrap past midnight (e.g. Fri 18:00–02:00 is
+ * still open at 01:00 Sat). "unknown" when we simply have no hours to judge by.
+ */
+export function openStateAt(hours: unknown, at: Date): "open" | "closed" | "unknown" {
+  const map = asMap(hours);
+  if (!map) return "unknown";
+  const idx = at.getDay();
+  const todayKey = GETDAY_KEYS[idx];
+  const yestKey = GETDAY_KEYS[(idx + 6) % 7];
+  const mins = at.getHours() * 60 + at.getMinutes();
+  const today = map[todayKey];
+  const yest = map[yestKey];
+  if (today === undefined && yest === undefined) return "unknown";
+
+  if (today !== undefined) {
+    const d = parseDayValue(today);
+    if (d.allDay) return "open";
+    for (const s of d.slots) {
+      const o = hhmmToMin(s.open);
+      const c = hhmmToMin(s.close);
+      if (o === null || c === null) continue;
+      if (c > o) { if (mins >= o && mins < c) return "open"; }
+      else if (c < o) { if (mins >= o) return "open"; } // wraps into tomorrow
+    }
+  }
+  // A previous-day slot that wraps past midnight can still be open now.
+  if (yest !== undefined) {
+    const d = parseDayValue(yest);
+    for (const s of d.slots) {
+      const o = hhmmToMin(s.open);
+      const c = hhmmToMin(s.close);
+      if (o === null || c === null) continue;
+      if (c < o && mins < c) return "open";
+    }
+  }
+  return "closed";
+}
+
 // ---------------------------------------------------------------------------
 // Human display formatting
 // ---------------------------------------------------------------------------

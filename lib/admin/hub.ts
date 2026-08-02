@@ -57,6 +57,7 @@ export function toHubVenue(r: Restaurant): HubVenue {
       youtube_url: r.youtube_url ?? null,
       country: r.country || null,
       city: r.city || null,
+      permanently_closed: Boolean(r.permanently_closed),
       offerings: Array.isArray(r.offerings) ? r.offerings : [],
     },
     hook: r.hook ?? null,

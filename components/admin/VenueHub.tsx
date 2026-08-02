@@ -99,9 +99,12 @@ const DIFF_FIELDS: { key: string; label: string }[] = [
   { key: "facebook_url", label: "Facebook" },
   { key: "tiktok_url", label: "TikTok" },
   { key: "youtube_url", label: "YouTube" },
+  { key: "city", label: "City" },
+  { key: "permanently_closed", label: "Status" },
 ];
 
 function fmtVal(key: string, val: unknown): string {
+  if (key === "permanently_closed") return val ? "Permanently closed" : "—";
   if (val === null || val === undefined || val === "") return "—";
   if (key === "price_level") return "$".repeat(Math.max(1, Math.min(4, Number(val) || 1)));
   if (key === "hours" && typeof val === "object") {
@@ -571,18 +574,22 @@ export function VenueHub({
     }
     if (kind === "ops") {
       // Operational-only refresh: no copy, no preview — just report what moved.
+      // A closure/move is STAGED (not live): the row shows Review diff / Approve.
       const opsCost = typeof data.cost === "number" ? ` · ${fmtUsd(data.cost)}` : "";
       const n = Number(data.updated_count ?? 0);
-      if (data.needs_attention) {
+      const liveNote = n ? `Details updated · ${n} field${n === 1 ? "" : "s"} changed` : "Details checked · already current";
+      if (data.staged) {
         setRowResult((p) => ({
           ...p,
-          [v.id]: { warn: `Details updated${n ? ` (${n} field${n === 1 ? "" : "s"})` : ""} — ${data.attention_reason ?? "needs a look"}${opsCost}` },
+          [v.id]: { warn: `${data.attention_reason ?? "A change needs review"} → Review diff / Approve below.${opsCost}` },
+        }));
+      } else if (data.needs_attention) {
+        setRowResult((p) => ({
+          ...p,
+          [v.id]: { warn: `${liveNote} — ${data.attention_reason ?? "needs a look"}${opsCost}` },
         }));
       } else {
-        setRowResult((p) => ({
-          ...p,
-          [v.id]: { msg: (n ? `Details updated · ${n} field${n === 1 ? "" : "s"} changed` : "Details checked · already current") + opsCost },
-        }));
+        setRowResult((p) => ({ ...p, [v.id]: { msg: liveNote + opsCost } }));
       }
       router.refresh();
       return;

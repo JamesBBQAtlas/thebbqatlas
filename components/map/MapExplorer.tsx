@@ -13,6 +13,15 @@ import { resolveCountryCode, countryName } from "@/lib/constants/countries";
 import { FlagIcon } from "@/components/ui/FlagIcon";
 import { MapPreviewCard } from "./MapPreviewCard";
 import { cn } from "@/lib/utils/cn";
+import {
+  isRankingQuery,
+  CREED_TOAST,
+  LOW_AND_SLOW_PHRASES,
+  LOW_AND_SLOW_TOAST,
+  MEANING_PHRASES,
+  MEANING_TOAST,
+  EMPTY_STATE_LINE,
+} from "@/lib/eggs/registry";
 
 const GOLD = "#D4AF37";
 const SIENNA = "#C4622D";
@@ -282,6 +291,7 @@ export function MapExplorer({
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
   const pitMarkerRef = useRef<maplibregl.Marker | null>(null);
   const eggMarkersRef = useRef<maplibregl.Marker[]>([]);
+  const toastTimer = useRef<number | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -324,9 +334,10 @@ export function MapExplorer({
   const [selected, setSelected] = useState<Restaurant | null>(null);
   const [pitZero, setPitZero] = useState(false);
   const [homage, setHomage] = useState(false);
-  // Search-box eggs (§Eggs 6–9): the ephemeral card + the "back of the net" toast.
+  // Search-box eggs (§Eggs 6–9): the ephemeral card + a shared dry toast (used by
+  // "back of the net", the creed, "low and slow", and "the answer is barbecue").
   const [eggCard, setEggCard] = useState<EggCardState | null>(null);
-  const [netToast, setNetToast] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
   // Location (place) search — geocode a city/country/postcode and fly there.
   const [geoBusy, setGeoBusy] = useState(false);
@@ -654,6 +665,13 @@ export function MapExplorer({
     mapRef.current?.flyTo(animate({ center: [r.lng, r.lat], zoom: 12, speed: 1.4 }));
   }
 
+  // A shared, dry, auto-dismissing toast for the search eggs.
+  function flashToast(msg: string, ms = 2800) {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), ms);
+  }
+
   function openPreview(r: Restaurant) {
     setSelected(r);
     flyTo(r);
@@ -673,6 +691,30 @@ export function MapExplorer({
       triggerPitZero();
       return;
     }
+    // "42" / "meaning of life" → the answer, and a flight to where it all began.
+    if ((MEANING_PHRASES as readonly string[]).includes(lc)) {
+      flashToast(MEANING_TOAST);
+      triggerPitZero();
+      return;
+    }
+    // "low and slow" → the next map move eases in slow and smooth.
+    if ((LOW_AND_SLOW_PHRASES as readonly string[]).includes(lc)) {
+      const map = mapRef.current;
+      if (map) {
+        setQuery("");
+        if (isMobileViewport()) setSidebarOpen(false);
+        flashToast(LOW_AND_SLOW_TOAST);
+        map.flyTo(
+          animate({
+            center: map.getCenter().toArray() as [number, number],
+            zoom: Math.min(16, map.getZoom() + 1.2),
+            speed: 0.28,
+            curve: 1.7,
+          })
+        );
+      }
+      return;
+    }
     if (BACK_OF_NET_PHRASES.has(lc)) {
       triggerBackOfNet();
       return;
@@ -681,6 +723,11 @@ export function MapExplorer({
     if (egg) {
       triggerMapEgg(egg);
       return;
+    }
+    // "We don't rank" — a ranking search still returns the normal results; we
+    // just wink the creed back. NOTE: no early return — fall through to search.
+    if (isRankingQuery(q)) {
+      flashToast(CREED_TOAST);
     }
     clearPitZero();
     clearEggs();
@@ -869,8 +916,7 @@ export function MapExplorer({
     setSelected(pick);
     mapRef.current?.flyTo(animate({ center: [pick.lng, pick.lat], zoom: 13, speed: 1.6, curve: 1.4 }));
     if (isMobileViewport()) setSidebarOpen(false);
-    setNetToast(true);
-    window.setTimeout(() => setNetToast(false), 2600);
+    flashToast("Back of the net!");
   }
 
   function clearPlace() {
@@ -1066,7 +1112,14 @@ export function MapExplorer({
           ))}
           {listItems.length === 0 && (
             <li className="px-4 py-8 text-center text-sm text-text-muted">
-              No spots match those filters.
+              <p>{EMPTY_STATE_LINE}</p>
+              <button
+                type="button"
+                onClick={() => router.push("/submit")}
+                className="mt-2 font-semibold text-brand-gold transition-colors hover:text-brand-gold-light hover:underline"
+              >
+                Submit a spot →
+              </button>
             </li>
           )}
         </ul>
@@ -1206,11 +1259,11 @@ export function MapExplorer({
           </div>
         )}
 
-        {/* "Back of the net!" toast (Egg 9). */}
-        {netToast && (
-          <div className="pointer-events-none absolute inset-x-0 top-16 z-30 flex justify-center">
-            <span className="rounded-full border border-brand-gold/50 bg-surface-0/95 px-4 py-2 font-heading text-sm font-bold uppercase tracking-[0.08em] text-brand-gold shadow-xl backdrop-blur">
-              Back of the net!
+        {/* Shared dry toast — back of the net, the creed, low and slow, the answer. */}
+        {toast && (
+          <div className="pointer-events-none absolute inset-x-0 top-16 z-30 flex justify-center px-4">
+            <span className="rounded-full border border-brand-gold/50 bg-surface-0/95 px-4 py-2 text-center font-heading text-sm font-bold uppercase tracking-[0.08em] text-brand-gold shadow-xl backdrop-blur">
+              {toast}
             </span>
           </div>
         )}

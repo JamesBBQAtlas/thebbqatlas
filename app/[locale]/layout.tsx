@@ -21,6 +21,7 @@ import { MobileTabBar } from "@/components/layout/MobileTabBar";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { Analytics } from "@/components/analytics/Analytics";
 import { CookieConsent } from "@/components/analytics/CookieConsent";
+import { SiteEasterEggs } from "@/components/eggs/SiteEasterEggs";
 import { organizationJsonLd, websiteJsonLd } from "@/lib/seo/jsonld";
 import { getVoiceLines, linesForSlot } from "@/lib/queries/voice";
 import { BRAND } from "@/lib/constants/styles";
@@ -126,6 +127,7 @@ export default async function LocaleLayout({
           </FooterGate>
           <MobileTabBar />
           <CookieConsent />
+          <SiteEasterEggs />
         </NextIntlClientProvider>
       </body>
     </html>
