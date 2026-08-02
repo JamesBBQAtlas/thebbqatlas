@@ -8,7 +8,7 @@ export type Fresh = "green" | "amber" | "red";
  *   red   : older than `amberMaxDays`, OR never enriched
  * (permanently_closed and needs_attention are SEPARATE states — not on this scale.)
  */
-export const FRESHNESS_DAYS = { greenMaxDays: 30, amberMaxDays: 90 } as const;
+export const FRESHNESS_DAYS = { greenMaxDays: 90, amberMaxDays: 180 } as const;
 
 /** Classify an enriched_at into a colour by the one rule above. */
 export function freshnessTone(enrichedAt: string | null | undefined): Fresh {
