@@ -43,6 +43,35 @@ const COUNTRY_CANONICAL: Record<string, string> = {
   "republic of korea": "South Korea",
   "the netherlands": "Netherlands",
   holland: "Netherlands",
+  // Native-script / native-language country names → canonical English (Build:
+  // international venues default to English). toLowerCase + the NFD diacritic
+  // strip above leave CJK/Arabic/Hangul untouched, so these match verbatim.
+  brasil: "Brazil",
+  brazil: "Brazil",
+  eire: "Ireland", // "Éire" → diacritics stripped → "eire"
+  ireland: "Ireland",
+  "republic of ireland": "Ireland",
+  japan: "Japan",
+  "日本": "Japan",
+  "日本国": "Japan",
+  nippon: "Japan",
+  nihon: "Japan",
+  "대한민국": "South Korea",
+  "한국": "South Korea",
+  "الإمارات العربية المتحدة": "United Arab Emirates",
+  españa: "Spain",
+  espana: "Spain",
+  deutschland: "Germany",
+  italia: "Italy",
+  "türkiye": "Turkey",
+  turkiye: "Turkey",
+  "中国": "China",
+  "中國": "China",
+  "台灣": "Taiwan",
+  "台湾": "Taiwan",
+  "ประเทศไทย": "Thailand",
+  "việt nam": "Vietnam",
+  "viet nam": "Vietnam",
 };
 
 /**

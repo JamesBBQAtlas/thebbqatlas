@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { GROK_ENABLED, GROK_MODEL } from "@/lib/ai/grok";
-import { researchOps, priceBandToLevel, mapSocials, type VenueLead } from "@/lib/ai/enrich";
+import { researchOps, priceBandToLevel, mapSocials, describeConflicts, type VenueLead, type FactConflict } from "@/lib/ai/enrich";
 import { grokCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage } from "@/lib/ai/usage-log";
 import { geocodeAddress } from "@/lib/geo/geocode";
@@ -111,7 +111,8 @@ export async function POST(request: Request) {
 
   const patch: Record<string, unknown> = {};
   const changed: { field: string; old: unknown; new: unknown }[] = [];
-  const conflicts: string[] = [];
+  // Each conflict names the field AND both values, so a human can actually verify.
+  const conflicts: FactConflict[] = [];
   const notes: string[] = [];
   const setField = (col: string, auditKey: string, oldVal: unknown, newVal: unknown) => {
     patch[col] = newVal;
@@ -121,7 +122,8 @@ export async function POST(request: Request) {
   // website — operator-authoritative: fill if empty, else keep + flag on conflict.
   if (facts.website) {
     if (!row.website) setField("website", "website", null, facts.website);
-    else if (normUrl(facts.website) !== normUrl(row.website)) conflicts.push("website");
+    else if (normUrl(facts.website) !== normUrl(row.website))
+      conflicts.push({ field: "Website", yours: String(row.website), theirs: facts.website });
   }
   // instagram — operator-authoritative.
   if (facts.instagram) {
@@ -130,13 +132,14 @@ export async function POST(request: Request) {
       const h = normalizeHandle(facts.instagram);
       if (h && !row.instagram_handle) setField("instagram_handle", "instagram", row.instagram_handle, h);
     } else if (normUrl(facts.instagram) !== normUrl(rowInstagram)) {
-      conflicts.push("Instagram");
+      conflicts.push({ field: "Instagram", yours: String(rowInstagram), theirs: facts.instagram });
     }
   }
   // phone — operator-authoritative.
   if (facts.phone) {
     if (!row.phone) setField("phone", "phone", null, facts.phone);
-    else if (digits(facts.phone) !== digits(row.phone)) conflicts.push("phone");
+    else if (digits(facts.phone) !== digits(row.phone))
+      conflicts.push({ field: "Phone", yours: String(row.phone), theirs: facts.phone });
   }
   // hours — operator-authoritative: fill any DAY the operator left blank; keep
   // the operator's value for a day they set, and flag if research disagreed.
@@ -144,15 +147,21 @@ export async function POST(request: Request) {
     const existing = (row.hours && typeof row.hours === "object" ? row.hours : {}) as Record<string, string>;
     const merged: Record<string, string> = { ...existing };
     let filledAny = false;
-    let conflicted = false;
+    const clashDays: string[] = [];
     for (const [day, val] of Object.entries(facts.hours)) {
       if (!val) continue;
       const cur = existing[day];
       if (!cur) { merged[day] = val; filledAny = true; }
-      else if (cur.trim().toLowerCase() !== String(val).trim().toLowerCase()) conflicted = true;
+      else if (cur.trim().toLowerCase() !== String(val).trim().toLowerCase())
+        clashDays.push(`${day} ${cur}→${val}`);
     }
     if (filledAny && !sameHours(merged, existing)) setField("hours", "hours", existing, merged);
-    if (conflicted) conflicts.push("hours");
+    if (clashDays.length)
+      conflicts.push({
+        field: "Hours",
+        yours: clashDays.map((d) => d.split("→")[0]).join(", "),
+        theirs: clashDays.map((d) => `${d.split(" ")[0]} ${d.split("→")[1]}`).join(", "),
+      });
   }
 
   // price_level — not operator-protected (low stakes); apply when it changed.
@@ -210,7 +219,7 @@ export async function POST(request: Request) {
         staged.lat = facts.lat;
         staged.lng = facts.lng;
       } else {
-        const geo = await geocodeAddress({ address: facts.address, city: facts.city ?? row.city, country: row.country });
+        const geo = await geocodeAddress({ address: facts.address, city: facts.city ?? row.city, country: row.country, name: row.name });
         if (geo && validCoord(geo.lat, geo.lng)) {
           staged.lat = geo.lat;
           staged.lng = geo.lng;
@@ -219,6 +228,29 @@ export async function POST(request: Request) {
         }
       }
       notes.push("Research indicates this venue has MOVED — approve to apply the new address & pin.");
+    }
+  }
+
+  // Fix 3 — clear a lingering "couldn't locate" flag. A venue that stayed flagged
+  // even though it now has (or can get) a real pin should be un-flagged. This is
+  // NOT a relocation (that's staged above) — it's placing a venue that was never
+  // located. Only runs when the current flag is a locate reason.
+  const locateReason = /couldn.?t locate|set pin manually|place this venue|location facts/i;
+  const validRowCoord =
+    typeof row.lat === "number" && typeof row.lng === "number" &&
+    Number.isFinite(row.lat) && Number.isFinite(row.lng) && !(row.lat === 0 && row.lng === 0);
+  let clearedLocate = false;
+  if (row.needs_attention && locateReason.test(String(row.attention_reason ?? "")) && !moveFlag) {
+    if (validRowCoord) {
+      clearedLocate = true; // pin was fixed elsewhere; the flag just never cleared
+    } else if (row.address) {
+      const geo = await geocodeAddress({ address: row.address, city: row.city, country: row.country, name: row.name });
+      if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lng) && !(geo.lat === 0 && geo.lng === 0)) {
+        setField("lat", "lat", row.lat ?? null, geo.lat);
+        patch.lng = geo.lng;
+        if (geo.country_code) patch.country_code = geo.country_code;
+        clearedLocate = true;
+      }
     }
   }
 
@@ -250,16 +282,17 @@ export async function POST(request: Request) {
 
   // Flag for review only when there's something a human should look at — a
   // conflict we refused to overwrite, or a staged closure/move. Otherwise DON'T
-  // touch needs_attention (never mask a flag an enrich raised, never falsely clear one).
+  // touch needs_attention (never mask a flag an enrich raised) — EXCEPT when we
+  // just resolved a lingering "couldn't locate" flag, which we clear (Fix 3).
   const raiseFlag = conflicts.length > 0 || closureFlag || moveFlag;
   if (raiseFlag) {
     patch.needs_attention = true;
-    patch.attention_reason = [
-      conflicts.length ? `Research disagreed with your ${conflicts.join(", ")} — kept your value; please verify.` : null,
-      ...notes,
-    ]
+    patch.attention_reason = [describeConflicts(conflicts) || null, ...notes]
       .filter(Boolean)
       .join(" ");
+  } else if (clearedLocate) {
+    patch.needs_attention = false;
+    patch.attention_reason = null;
   }
 
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
@@ -298,9 +331,10 @@ export async function POST(request: Request) {
     name: row.name,
     updated_fields: updatedFields,
     updated_count: updatedFields.length,
-    conflicts,
+    conflicts: conflicts.map((c) => c.field),
     closed_changed: closureFlag,
     moved: moveFlag,
+    located: clearedLocate,
     // A closure/move is STAGED (held for one-click approval), not applied live.
     staged: stagedCount > 0,
     has_pending: stagedCount > 0,

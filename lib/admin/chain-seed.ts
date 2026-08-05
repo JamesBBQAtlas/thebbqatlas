@@ -57,6 +57,16 @@ function cityKeyOf(city: string | null): string {
   return normCity(settlementCity(city));
 }
 
+/**
+ * The city identity to dedupe a NO-STREET placeholder by: its city text if it
+ * has one, else fall back to its address line (a branch given only "Seoul" as its
+ * address, with no city field, must still dedupe as "seoul"). Only meaningful for
+ * a candidate/member that carries no distinct street.
+ */
+function placeholderCityKey(city: string | null, address: string | null): string {
+  return cityKeyOf(city) || (address ? cityKeyOf(address) : "");
+}
+
 /** Known street-type tokens (after normStreet's abbreviation) that mark a road. */
 const STREET_TYPES = new Set([
   "st", "ave", "rd", "blvd", "dr", "ln", "ct", "pl", "pkwy", "hwy",
@@ -127,9 +137,9 @@ export async function seedChainLocations(
   ];
   const consumed = new Set<string>(); // existing ids already matched this run
 
-  // Geocode each incoming candidate up front (throttled ≤1 req/sec for
-  // Nominatim). We need the coordinates both to dedupe by proximity AND to seed
-  // a real pin. A candidate that fails to geocode gets geo=null.
+  // Geocode each incoming candidate up front (lightly throttled for MapTiler).
+  // We need the coordinates both to dedupe by proximity AND to seed a real pin.
+  // A candidate that fails to geocode gets geo=null.
   interface Candidate {
     loc: SeedLocation;
     /** Normalised street identity key (may be empty, or just the city). */
@@ -138,6 +148,8 @@ export async function seedChainLocations(
     hasStreet: boolean;
     /** Settlement-normalised city key, for the city-only dedupe rule. */
     cityKey: string;
+    /** City identity for a no-street placeholder (city text, else address). */
+    effCityKey: string;
     lat: number | null;
     lng: number | null;
     country_code: string | null;
@@ -150,8 +162,8 @@ export async function seedChainLocations(
     let lng: number | null = null;
     let country_code: string | null = null;
     let geoCity: string | null = null;
-    if (i > 0) await sleep(1100); // Nominatim courtesy throttle
-    const geo = await geocodeAddress({ address: loc.address, city: loc.city, country });
+    if (i > 0) await sleep(200); // light courtesy throttle
+    const geo = await geocodeAddress({ address: loc.address, city: loc.city, country, name: loc.name });
     if (geo && hasCoords(geo.lat, geo.lng)) {
       lat = geo.lat;
       lng = geo.lng;
@@ -162,11 +174,13 @@ export async function seedChainLocations(
     // city), so a city-only entry reads as "no distinct street".
     const cityKey = cityKeyOf(loc.city);
     const streetKey = normStreet(loc.address);
+    const hasStreet = hasDistinctStreet(streetKey, cityKey);
     candidates.push({
       loc,
       streetKey,
-      hasStreet: hasDistinctStreet(streetKey, cityKey),
+      hasStreet,
       cityKey,
+      effCityKey: hasStreet ? "" : placeholderCityKey(loc.city, loc.address ?? null),
       lat,
       lng,
       country_code,
@@ -202,6 +216,35 @@ export async function seedChainLocations(
     const loc = c.loc;
     const label = loc.name && loc.name !== brand ? loc.name : loc.city;
     if (!label) continue;
+
+    // Fix 5 — placeholder collapse. A branch with NO distinct street is just a
+    // city-level (or worse, city-less) placeholder: it carries nothing to tell it
+    // apart from another member in the same city or at the same pin. So BEFORE the
+    // normal match/insert, drop it if ANY existing member (consumed or not) shares
+    // its city identity or its coordinates — this collapses a cluster of identical
+    // "Seoul" / same-pin, no-address branches to ONE instead of materialising N
+    // stacked duplicates. Branches WITH a real street are exempt (they insert as
+    // usual), so genuine same-city branches are never wrongly merged.
+    if (!c.hasStreet) {
+      const dup = existing.find((e) => {
+        const eStreetKey = normStreet(e.address);
+        const eHasStreet = hasDistinctStreet(eStreetKey, cityKeyOf(e.city));
+        const eEff = eHasStreet ? "" : placeholderCityKey(e.city, e.address);
+        if (c.effCityKey && eEff && c.effCityKey === eEff) return true;
+        if (
+          hasCoords(c.lat, c.lng) &&
+          hasCoords(e.lat, e.lng) &&
+          haversineKm(c.lat as number, c.lng as number, e.lat as number, e.lng as number) <= SAME_PLACE_KM
+        )
+          return true;
+        return false;
+      });
+      if (dup) {
+        if (dup.isParent) result.matchedParent += 1;
+        else result.updated.push({ label, city: settlementCity(loc.city) || loc.city });
+        continue; // never materialise a duplicate placeholder
+      }
+    }
 
     const match = existing.find((e) => !consumed.has(e.id) && matches(c, e));
 

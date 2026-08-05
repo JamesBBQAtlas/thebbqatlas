@@ -68,6 +68,7 @@ export async function POST(request: Request) {
     address: v.address,
     city: v.city,
     country: v.country,
+    name,
   });
   if (!geo) {
     return NextResponse.json(

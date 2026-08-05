@@ -8,12 +8,14 @@ import {
   writeVenueCopy,
   inheritBrandFacts,
   mergeKnownFacts,
+  describeConflicts,
   matchBbqStyle,
   priceBandToLevel,
   mapSocials,
   type VenueDossier,
   type VenueLead,
 } from "@/lib/ai/enrich";
+import { hasNonLatinScript } from "@/lib/utils/script";
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { geocodeAddress } from "@/lib/geo/geocode";
@@ -204,7 +206,7 @@ export async function POST(request: Request) {
     if (!row.youtube_url && socials.youtube_url) patch.youtube_url = socials.youtube_url;
     if (citations.length) patch.enrichment_sources = citations;
     if (row.lat === 0 && row.lng === 0) {
-      const geo = await geocodeAddress({ address: row.address, city: row.city, country: row.country });
+      const geo = await geocodeAddress({ address: row.address, city: row.city, country: row.country, name: row.name });
       if (geo) {
         patch.lat = geo.lat;
         patch.lng = geo.lng;
@@ -442,7 +444,7 @@ export async function POST(request: Request) {
     lat = dossier.lat;
     lng = dossier.lng;
   } else {
-    const geo = await geocodeAddress({ address: dossier.address ?? row.address, city, country });
+    const geo = await geocodeAddress({ address: dossier.address ?? row.address, city, country, name: dossier.name ?? row.name });
     if (geo && validCoord(geo.lat, geo.lng)) {
       lat = geo.lat;
       lng = geo.lng;
@@ -562,11 +564,21 @@ export async function POST(request: Request) {
   // If the search budget was blown (an API cap leak), stop trusting the result
   // and flag — never let a runaway pass through silently.
   const searchRunaway = grokSearches > MAX_TOTAL_SEARCHES;
+  // English-by-default guard: if research still returned a city/country/address in
+  // a non-Latin script, don't publish it silently — flag so an operator supplies
+  // the English/romanised form (the country is already normalised deterministically).
+  const nonLatinFields = [
+    hasNonLatinScript(storedCity as string) ? "city" : null,
+    hasNonLatinScript(country as string) ? "country" : null,
+    hasNonLatinScript(address as string) ? "address" : null,
+  ].filter(Boolean) as string[];
+  const nonLatin = nonLatinFields.length > 0;
   const attention =
     overCeiling ||
     searchRunaway ||
     noValidLocation ||
     factConflicts.length > 0 ||
+    nonLatin ||
     (effectivelySibling ? locationFactsMissing : copy.needs_attention);
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
@@ -581,10 +593,12 @@ export async function POST(request: Request) {
               ? "This outpost's own location facts (address) are missing — add them, then re-enrich."
               : "No address to place this venue on the map — add one, then re-enrich."
           : factConflicts.length
-            ? `Research disagreed with your ${factConflicts.join(", ")} — kept your value; please verify.`
-            : effectivelySibling
-              ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
-              : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
+            ? describeConflicts(factConflicts)
+            : nonLatin
+              ? `${nonLatinFields.join(", ")} still in non-Latin script — add an English/romanised form before publishing.`
+              : effectivelySibling
+                ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
+                : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
     : null;
 
   // For an approved (live) venue, hold changes as pending — but only if there's
@@ -642,7 +656,7 @@ export async function POST(request: Request) {
     pending: pendingReview,
     // Part A read-outs.
     built_on: useExisting ? builtOn : [],
-    fact_conflicts: factConflicts,
+    fact_conflicts: factConflicts.map((c) => c.field),
     copy_protected: protectCopy && Object.keys(copyProposal).length > 0,
     copy: { hook: copy.hook, description: copy.description },
     cost: thisCost,

@@ -266,6 +266,8 @@ CHAIN SIGNAL — cheap, costs NO extra search: if the venue's own site clearly s
 
 COPYRIGHT / SOURCING RULE: collect FACTS ONLY (facts aren't copyrightable). NEVER reproduce third-party expressive content — no review text, no editorial blurbs, no photos — from Google or anywhere. Do not scrape any site en masse. The dossier is raw facts + source URLs; all published copy is written fresh by us later.
 
+ENGLISH BY DEFAULT — the atlas is English-facing. Return "name", "address", "city", "region_state" and "country" in ENGLISH / LATIN script: romanise CJK (品川区 → "Shinagawa", 渋谷区 → "Shibuya", 新宿区 → "Shinjuku", 牛角 → "Ushigoro"), transliterate Arabic (مرسى دبي → "Dubai Marina"), and use the standard ENGLISH country name (الإمارات العربية المتحدة → "United Arab Emirates", 日本 → "Japan", 대한민국 → "South Korea", Brasil → "Brazil", Éire → "Ireland"). KEEP accented Latin exactly as written — do NOT strip diacritics (São Paulo, Cariló, Málaga are correct). For "name", use the venue's common ENGLISH/Latin form (e.g. "Ushigoro"), not the native script. Never output a city, country or address in a non-Latin script.
+
 For anything you cannot verify within the budget, use null (or [] for lists) and list the field name under "unknowns" — NEVER guess or invent. Put a source URL for each non-obvious fact in "sources".
 
 Field notes:
@@ -502,19 +504,41 @@ const normUrl = (u: string | null | undefined): string =>
  * human to see — we never silently overwrite the operator's work. Mutates the
  * dossier; returns the list of conflicting field keys.
  */
-export function mergeKnownFacts(dossier: VenueDossier, known: KnownFacts): string[] {
-  const conflicts: string[] = [];
+/** A named disagreement between an operator value and what research found — with
+ *  BOTH values, so a human can actually verify it. */
+export interface FactConflict {
+  field: string; // human label, e.g. "Website"
+  yours: string; // the operator's value we KEPT
+  theirs: string; // what research found and we rejected
+}
+
+/** One human-readable line naming each conflicting field and both values, so the
+ *  operator can verify — e.g. `Website: yours "a.com", research found "b.com" —
+ *  kept yours. Verify?` */
+export function describeConflicts(conflicts: FactConflict[]): string {
+  if (!conflicts.length) return "";
+  const parts = conflicts.map(
+    (c) => `${c.field}: yours "${c.yours}", research found "${c.theirs}" — kept yours.`
+  );
+  return `${parts.join(" ")} Verify?`;
+}
+
+export function mergeKnownFacts(dossier: VenueDossier, known: KnownFacts): FactConflict[] {
+  const conflicts: FactConflict[] = [];
   if (known.website) {
-    if (dossier.website && normUrl(dossier.website) !== normUrl(known.website)) conflicts.push("website");
+    if (dossier.website && normUrl(dossier.website) !== normUrl(known.website))
+      conflicts.push({ field: "Website", yours: known.website, theirs: dossier.website });
     dossier.website = known.website;
   }
   if (known.instagram) {
-    if (dossier.instagram && normUrl(dossier.instagram) !== normUrl(known.instagram)) conflicts.push("instagram");
+    if (dossier.instagram && normUrl(dossier.instagram) !== normUrl(known.instagram))
+      conflicts.push({ field: "Instagram", yours: known.instagram, theirs: dossier.instagram });
     dossier.instagram = known.instagram;
   }
   if (known.phone) {
     const digits = (s: string) => s.replace(/\D/g, "");
-    if (dossier.phone && digits(dossier.phone) !== digits(known.phone)) conflicts.push("phone");
+    if (dossier.phone && digits(dossier.phone) !== digits(known.phone))
+      conflicts.push({ field: "Phone", yours: known.phone, theirs: dossier.phone });
     dossier.phone = known.phone;
   }
   if (known.hours && Object.keys(known.hours).length) {
@@ -669,7 +693,7 @@ Return ONLY these operational fields:
 - "moved": true ONLY if you find CLEAR evidence the venue has relocated to a DIFFERENT street address since our records. Otherwise false. If false, leave address/city/region_state/postcode/lat/lng all null — do NOT restate the existing address.
 - When "moved" is true: "address" (new full street line — number + street, no city/postcode), "city", "region_state", "postcode", and "lat"/"lng" if verifiable; else null for any you cannot confirm.
 
-Rules: FACTS ONLY (facts aren't copyrightable) — never reproduce review text, blurbs, or photos. Only report a value you can corroborate from the venue's own site, its socials, or credible press; if you cannot verify a field, return null (or [] / false) and add its name to "unknowns" — NEVER invent hours, a phone number, a price, or a closure. Put a source URL for each non-obvious fact in "sources".
+Rules: FACTS ONLY (facts aren't copyrightable) — never reproduce review text, blurbs, or photos. Only report a value you can corroborate from the venue's own site, its socials, or credible press; if you cannot verify a field, return null (or [] / false) and add its name to "unknowns" — NEVER invent hours, a phone number, a price, or a closure. Put a source URL for each non-obvious fact in "sources". ENGLISH BY DEFAULT — if the venue has MOVED, return the new "address"/"city"/"region_state" in English / Latin script (romanise CJK, transliterate Arabic; keep accented Latin like São Paulo as-is).
 
 Respond ONLY with a JSON object with exactly these keys: hours, phone, price_band, website, instagram, other_socials, permanently_closed, moved, address, city, region_state, postcode, lat, lng, sources, unknowns.`;
 

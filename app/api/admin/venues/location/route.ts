@@ -27,7 +27,7 @@ export async function POST(request: Request) {
 
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
-    .select("id, address, city, country, lat, lng")
+    .select("id, name, address, city, country, lat, lng, needs_attention, attention_reason")
     .eq("id", restaurantId)
     .single();
   if (loadErr || !row) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
@@ -48,24 +48,36 @@ export async function POST(request: Request) {
   // otherwise (or when they ask to re-geocode) derive the pin from the address.
   const hasManualPin =
     typeof body.lat === "number" && typeof body.lng === "number" && Number.isFinite(body.lat) && Number.isFinite(body.lng);
+  let locatedOk = false;
   if (hasManualPin && !body.regeocode) {
     patch.lat = body.lat;
     patch.lng = body.lng;
+    locatedOk = true;
   } else {
-    const geo = await geocodeAddress({ address, city, country });
+    // MapTiler geocode (name-fallback) never returns (0,0) — a null is a real miss.
+    const geo = await geocodeAddress({ address, city, country, name: row.name as string });
     if (geo) {
       patch.lat = geo.lat;
       patch.lng = geo.lng;
       if (geo.country_code) patch.country_code = geo.country_code;
+      locatedOk = true;
     } else if (hasManualPin) {
       patch.lat = body.lat;
       patch.lng = body.lng;
+      locatedOk = true;
     } else {
       return NextResponse.json(
         { error: "Couldn't geocode that address — refine it or enter lat/lng manually." },
         { status: 422 }
       );
     }
+  }
+
+  // Fix 3 — a resolved pin clears a lingering "couldn't locate" flag automatically.
+  const locateReason = /couldn.?t locate|set pin manually|place this venue|location facts/i;
+  if (locatedOk && row.needs_attention && locateReason.test(String(row.attention_reason ?? ""))) {
+    patch.needs_attention = false;
+    patch.attention_reason = null;
   }
 
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);

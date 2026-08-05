@@ -35,7 +35,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, description, hook, style, address, city, country, lat, lng, instagram_handle, website, hero_image_url, is_featured, permanently_closed, status, chain_parent_id, flagship_unset"
+      "id, name, description, hook, style, address, city, country, lat, lng, instagram_handle, website, hero_image_url, is_featured, permanently_closed, status, chain_parent_id, flagship_unset, needs_attention, attention_reason"
     )
     .eq("id", restaurantId)
     .single();
@@ -108,31 +108,42 @@ export async function POST(request: Request) {
     patch.country = country;
 
     const hasManualPin = validCoord(body.lat, body.lng);
+    let locatedOk = false;
     if (hasManualPin && !body.regeocode) {
       patch.lat = body.lat;
       patch.lng = body.lng;
+      locatedOk = true;
     } else {
-      // Re-geocode from the address; fall back to the postcode alone, then to a
-      // manual pin if one was supplied. Never silently save (0,0) (Fix B).
-      let geo = await geocodeAddress({ address, city: rawCity, country });
+      // Re-geocode from the address (MapTiler, name-fallback); fall back to the
+      // postcode alone, then to a manual pin. Never silently save (0,0) (Fix B).
+      let geo = await geocodeAddress({ address, city: rawCity, country, name: row.name as string });
       if (!geo || !validCoord(geo.lat, geo.lng)) {
         const postcode = address.split(",").pop()?.trim();
         if (postcode && postcode !== address) {
-          geo = await geocodeAddress({ address: postcode, city: rawCity, country });
+          geo = await geocodeAddress({ address: postcode, city: rawCity, country, name: row.name as string });
         }
       }
       if (geo && validCoord(geo.lat, geo.lng)) {
         patch.lat = geo.lat;
         patch.lng = geo.lng;
         if (geo.country_code) patch.country_code = geo.country_code;
+        locatedOk = true;
       } else if (hasManualPin) {
         patch.lat = body.lat;
         patch.lng = body.lng;
+        locatedOk = true;
       } else if (!validCoord(row.lat, row.lng)) {
         // Couldn't locate and no pin to fall back on — flag rather than 0,0.
         patch.needs_attention = true;
         patch.attention_reason = "Couldn't locate — check address / set pin manually";
       }
+    }
+    // Fix 3 — a corrected address / hand-placed pin that resolved clears a
+    // lingering "couldn't locate" flag automatically (don't touch other flags).
+    const locateReason = /couldn.?t locate|set pin manually|place this venue|location facts/i;
+    if (locatedOk && row.needs_attention && locateReason.test(String(row.attention_reason ?? ""))) {
+      patch.needs_attention = false;
+      patch.attention_reason = null;
     }
   }
 

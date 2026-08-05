@@ -38,6 +38,7 @@ async function processRow(
       address: dossier.address,
       city: dossier.city,
       country: dossier.country,
+      name: dossier.name,
     });
     if (geo) {
       lat = geo.lat;
