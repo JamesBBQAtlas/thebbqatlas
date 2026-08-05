@@ -10,6 +10,14 @@ export const metadata = {
   alternates: { canonical: "/guides" },
 };
 
+// Render on every request so the visibility rule (is_published AND
+// published_at<=now) is always honoured — no ISR window during which an
+// unpublished/future guide could leak, and scheduled pieces appear on time.
+export const dynamic = "force-dynamic";
+
+const typeLabel = (t: string | null | undefined) =>
+  t === "missive" ? "Missive" : "Guide";
+
 export default async function GuidesPage() {
   const guides = await getGuides();
 
@@ -25,6 +33,12 @@ export default async function GuidesPage() {
                 <EditorialImage src={guide.hero_image_url} alt={guide.title} />
               </div>
               <div className="p-6">
+                <div className="mb-2 flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-brand-gold/80">
+                  <span>{typeLabel(guide.type)}</span>
+                  {guide.read_minutes ? (
+                    <span className="text-white/40">· {guide.read_minutes} min read</span>
+                  ) : null}
+                </div>
                 <h2 className="text-xl font-bold">{guide.title}</h2>
                 <p className="text-white/60 mt-2">{guide.excerpt}</p>
               </div>

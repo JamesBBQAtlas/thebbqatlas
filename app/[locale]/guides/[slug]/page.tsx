@@ -17,7 +17,13 @@ interface Props {
   params: { locale: string; slug: string };
 }
 
-export const revalidate = 3600;
+// Render on every request so the visibility rule (is_published AND
+// published_at<=now) is enforced live: an unpublished/future/missing slug 404s
+// with no stale ISR copy, and a scheduled guide goes live on its date.
+export const dynamic = "force-dynamic";
+
+const typeLabel = (t: string | null | undefined) =>
+  t === "missive" ? "Missive" : "Guide";
 
 export async function generateStaticParams() {
   const guides = await getGuides();
@@ -82,7 +88,13 @@ export default async function GuidePage({ params }: Props) {
           />
         </div>
       </div>
-      <p className="text-white/60 mt-2">{guide.excerpt}</p>
+      <div className="mt-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.08em] text-brand-gold/80">
+        <span>{typeLabel(guide.type)}</span>
+        {guide.read_minutes ? (
+          <span className="text-white/40">· {guide.read_minutes} min read</span>
+        ) : null}
+      </div>
+      <p className="text-white/60 mt-3">{guide.excerpt}</p>
       <AdSlot slot="in-content" className="my-6 h-0" />
       <div className="prose prose-invert max-w-none mt-8 prose-headings:text-brand-gold prose-a:text-brand-orange">
         <ReactMarkdown

@@ -296,9 +296,13 @@ export interface Guide {
   id: string;
   slug: string;
   title: string;
+  /** Editorial format: 'guide' (how-to) or 'missive' (short opinion piece). */
+  type: string;
   excerpt: string;
   content_md: string;
   hero_image_url: string;
+  /** Estimated reading time in minutes; null if unset. */
+  read_minutes: number | null;
   is_published: boolean;
   published_at: string;
   created_at: string;
