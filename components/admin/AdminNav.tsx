@@ -8,7 +8,9 @@ type BadgeKey = "media" | "pending" | "drafts";
 const TABS: { href: string; label: string; badge?: BadgeKey; primary?: boolean }[] = [
   { href: "/admin/venues", label: "Pending Venues", badge: "drafts" },
   { href: "/admin/parked", label: "Parked" },
+  { href: "/admin/outreach", label: "Outreach" },
   { href: "/admin/media", label: "Media", badge: "media" },
+  { href: "/admin/watch-read-listen", label: "Watch/Read/Listen" },
   { href: "/admin/optimize", label: "Status" },
   { href: "/admin/health", label: "SEO Health" },
   { href: "/admin/audit", label: "Change Log" },

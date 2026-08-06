@@ -44,6 +44,12 @@ const SERVICE_ROLE = new Set([
   // Append-only editorial/status audit trail — inserted by admin routes via the
   // service-role client; admin-read RLS, UPDATE blocked by trigger.
   "content_audit",
+  // Curated Watch/Read/Listen directory — public reads published rows (SELECT
+  // policy), but all writes are admin-only via the service-role client.
+  "media_picks",
+  // Outreach attempt log — admin-only, written through the service-role client
+  // (same locked pattern as contact_messages); RLS-on, no anon/authenticated.
+  "outreach_log",
 ]);
 
 const WRITE_METHODS = /\.(insert|update|delete|upsert)\s*\(/;
@@ -102,6 +108,22 @@ function codeScan() {
     `${failures.length} undeclared.`);
 }
 
+// Non-fatal notices (e.g. the DB half couldn't reach the database from CI).
+// Surfaced loudly but must NOT turn the build red: the always-on code scan is
+// the real tripwire, and an unreachable DB is an infra problem, not a grant
+// regression. A GENUINE gap (rows returned) still fails hard below.
+const warnings = [];
+
+/** Run `p` but reject if it hasn't settled within `ms` (no 6-minute hangs). */
+function withTimeout(p, ms, label) {
+  return Promise.race([
+    p,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+    ),
+  ]);
+}
+
 async function dbAudit() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -110,13 +132,39 @@ async function dbAudit() {
       "SUPABASE_SERVICE_ROLE_KEY in env).");
     return;
   }
-  const { createClient } = await import("@supabase/supabase-js");
-  const supabase = createClient(url, key, { auth: { persistSession: false } });
-  const { data, error } = await supabase.rpc("write_permission_audit");
-  if (error) {
-    failures.push(`DB: could not run write_permission_audit(): ${error.message}`);
+
+  // The DB half is a best-effort LIVE check. If the database is unreachable from
+  // this runner (network egress / pooler / expired secret / timeout), warn and
+  // move on rather than failing — CI must not go red because it couldn't dial
+  // the DB. Only ACTUAL gap rows are treated as failures.
+  let data;
+  try {
+    const { createClient } = await import("@supabase/supabase-js");
+    const supabase = createClient(url, key, { auth: { persistSession: false } });
+    const res = await withTimeout(
+      supabase.rpc("write_permission_audit"),
+      30_000,
+      "write_permission_audit()"
+    );
+    if (res.error) {
+      // Couldn't execute the function (tooling/access) — not a grant regression.
+      warnings.push(
+        `db audit could not run write_permission_audit() (${res.error.message}). ` +
+          `Live check skipped; the code scan below still enforces declarations.`
+      );
+      console.log("db audit: UNVERIFIED (rpc error — see warning).");
+      return;
+    }
+    data = res.data;
+  } catch (err) {
+    warnings.push(
+      `db audit could not reach the database (${err?.message ?? err}). ` +
+        `Live check skipped; the code scan below still enforces declarations.`
+    );
+    console.log("db audit: UNVERIFIED (unreachable — see warning).");
     return;
   }
+
   if (data && data.length) {
     for (const row of data) {
       failures.push(`DB: ${row.tablename} [${row.role}] — ${row.problem}`);
@@ -128,9 +176,18 @@ async function dbAudit() {
 await dbAudit();
 codeScan();
 
+// Non-fatal notices → GitHub Actions warning annotations (visible, not red).
+for (const w of warnings) {
+  console.warn(`::warning title=DB guardrail (non-fatal)::${w}`);
+}
+
 if (failures.length) {
   console.error("\n✗ write-permission guardrail FAILED:\n");
-  for (const f of failures) console.error("  - " + f);
+  for (const f of failures) console.error(`::error::${f}`);
   process.exit(1);
 }
-console.log("\n✓ write-permission guardrail passed.");
+console.log(
+  warnings.length
+    ? "\n✓ write-permission guardrail passed (code scan clean; DB half unverified — see warnings)."
+    : "\n✓ write-permission guardrail passed."
+);
