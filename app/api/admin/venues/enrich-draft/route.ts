@@ -9,7 +9,7 @@ import {
   inheritBrandFacts,
   mergeKnownFacts,
   describeConflicts,
-  matchBbqStyle,
+  classifyStyle,
   priceBandToLevel,
   mapSocials,
   type VenueDossier,
@@ -23,7 +23,7 @@ import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { desiredVenueSlug } from "@/lib/admin/slug";
-import { composeAddress, preferFullerAddress, settlementCity } from "@/lib/admin/address";
+import { composeAddress, preferFullerAddress, bestSettlement } from "@/lib/admin/address";
 import { auditFromPatch } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
@@ -410,7 +410,15 @@ export async function POST(request: Request) {
     ...(dossier.best_photo_post_url ? [dossier.best_photo_post_url] : []),
     ...dossier.recent_instagram_posts,
   ].filter((v, i, a) => a.indexOf(v) === i);
-  let style = matchBbqStyle(dossier.bbq_style);
+  // Classify from ALL signals (name + copy + facts), not just the bbq_style
+  // field — so a "Pappy's Texas BBQ" is 'texas', never left at the 'other' default.
+  let style = classifyStyle({
+    bbqStyle: dossier.bbq_style,
+    name: dossier.name ?? row.name,
+    whatItIs: dossier.what_it_is,
+    description: copy.description,
+    specialities: dossier.specialities,
+  });
   // A chain BRANCH inherits the flagship's cuisine — never downgrade it to "other".
   // Keep the flagship's style unless research found a DIFFERENT, definite style for
   // this specific branch (rare for a chain); and never write "other" over a
@@ -436,6 +444,7 @@ export async function POST(request: Request) {
   const validCoord = (a: number | null, b: number | null) =>
     typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
   let city = dossier.city ?? row.city;
+  let geoCity: string | null = null;
   let country = dossier.country ?? row.country;
   let lat: number | null = null;
   let lng: number | null = null;
@@ -449,6 +458,7 @@ export async function POST(request: Request) {
       lat = geo.lat;
       lng = geo.lng;
       country_code = geo.country_code;
+      geoCity = geo.city ?? null;
       city = geo.city ?? city;
       country = geo.country ?? country;
     }
@@ -478,7 +488,10 @@ export async function POST(request: Request) {
     copyProposal.manual_copy = false;
     if (!protectCopy) Object.assign(proposed, copyProposal);
   }
-  if (style) proposed.style = style;
+  // Always set a real style; only ever write 'other' if the row had no definite
+  // style already (never downgrade a good style to 'other').
+  if (style !== "other") proposed.style = style;
+  else if (!row.style || row.style === "other") proposed.style = "other";
   if (address) proposed.address = address;
   if (dossier.phone) proposed.phone = dossier.phone;
   if (dossier.website) proposed.website = dossier.website;
@@ -496,9 +509,9 @@ export async function POST(request: Request) {
     proposed.lng = lng;
     if (country_code) proposed.country_code = country_code;
   }
-  // Store the SETTLEMENT, not the admin district ("City of Westminster" → London),
-  // while the full precise address (incl. postcode) above is left untouched.
-  const storedCity = city ? settlementCity(city) || city : city;
+  // Store the TOWN — settlement-normalised, and NEVER a POI/landmark (a POI in
+  // the city field is a failure: fall back to the town parsed from the address).
+  const storedCity = bestSettlement({ city, address, geoCity });
   if (storedCity) proposed.city = storedCity;
   // Canonical country name (one chip per country; stops the USA/United States,
   // Mexico/México split re-appearing as we enrich).

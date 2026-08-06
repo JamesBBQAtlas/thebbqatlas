@@ -77,6 +77,76 @@ export function settlementCity(city: string | null | undefined): string {
   return stripped || raw;
 }
 
+/**
+ * Does this "city" value look like a POI / landmark / retail site rather than a
+ * town? A reverse-geocode or a bad facts sheet can drop a shopping centre,
+ * station or mall name into the city field ("Westmorland Shopping Centre" for a
+ * venue that's actually in Kendal). Those must be rejected — the city has to be
+ * the postal town. Conservative: only clear POI indicators, never plausible town
+ * names (a real "…Park" or "…Market" town isn't caught).
+ */
+export function looksLikePoiCity(city: string | null | undefined): boolean {
+  const s = clean(city).toLowerCase();
+  if (!s) return false;
+  return /shopping\s*cent(?:re|er)|retail\s*park|outlet|\bmall\b|\bplaza\b|\barcade\b|\bstation\b|\bairport\b|\bterminal\b|\bprecinct\b|\bstadium\b|\bshopping\b/.test(
+    s
+  );
+}
+
+/** Country / UK-nation tokens we drop from the tail of an address when hunting
+ *  for the town. */
+const ADDRESS_COUNTRY = /^(uk|u\.k\.|united kingdom|great britain|england|scotland|wales|northern ireland|usa|u\.s\.a\.|u\.s\.|united states|united states of america|ireland|eire|éire)$/i;
+/** A street line: starts with a number, or carries a street-type / unit word. */
+const STREET_WORD = /^\d|\b(st|street|rd|road|ave|avenue|blvd|boulevard|dr|drive|ln|lane|way|close|court|ct|unit|suite|ste|floor|fl|yard|wharf|quay|mews|row|terrace|smokehouse|arcade|building|bldg|house|no)\b/i;
+const POSTCODE = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|\d{4,5}(?:-\d{4})?)\b/gi;
+
+/**
+ * Best-effort extraction of the TOWN / locality from a full address string — the
+ * locality token that sits before the region + postcode. e.g.
+ * "The Old Smokehouse, Yard 2 Stricklandgate, Kendal, England LA9 4ND" → "Kendal".
+ * Strips postcodes, drops trailing country/nation tokens, and skips street
+ * lines, returning the last remaining non-street part (settlement-normalised).
+ * Returns "" when it can't find a confident town.
+ */
+export function localityFromAddress(address: string | null | undefined): string {
+  const raw = clean(address);
+  if (!raw) return "";
+  let parts = raw
+    .split(",")
+    .map((p) => p.replace(POSTCODE, "").trim())
+    .filter(Boolean);
+  if (parts.length < 2) return "";
+  // Drop trailing pure country / nation tokens.
+  while (parts.length > 1 && ADDRESS_COUNTRY.test(parts[parts.length - 1])) parts.pop();
+  // The town is the LAST remaining part that isn't a street line or a POI.
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    if (STREET_WORD.test(p) || looksLikePoiCity(p)) continue;
+    return settlementCity(p);
+  }
+  return "";
+}
+
+/**
+ * Resolve the CITY to a real town: trust a provided/geocoded city when it isn't
+ * a POI, else fall back to the town parsed from the address, else the geocoder's
+ * settlement — never a POI/landmark. Returns "" only when nothing usable exists
+ * (caller should then flag rather than store a POI).
+ */
+export function bestSettlement(opts: {
+  city?: string | null;
+  address?: string | null;
+  geoCity?: string | null;
+}): string {
+  const provided = settlementCity(opts.city);
+  if (provided && !looksLikePoiCity(provided)) return provided;
+  const fromAddress = localityFromAddress(opts.address);
+  if (fromAddress && !looksLikePoiCity(fromAddress)) return fromAddress;
+  const geo = settlementCity(opts.geoCity);
+  if (geo && !looksLikePoiCity(geo)) return geo;
+  return "";
+}
+
 /** Completeness score = count of comma-separated tokens (more parts = fuller). */
 export function addressScore(addr: string | null | undefined): number {
   if (!addr) return 0;

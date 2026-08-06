@@ -841,6 +841,8 @@ Franklin Barbecue — Austin, TX:
 Joe's Kansas City Bar-B-Que — Kansas City, KS:
 "Joe's does something most restaurants wouldn't dare: it runs out of a working petrol station and refuses to apologise for it. Since 1996, people have queued past the pumps for burnt ends, ribs, and the Z-Man. No pretense. A pit, a queue, and the quiet confidence of a place that knows exactly what it is. Fill the tank. Then fill the plate."
 
+Never repeat a phrase, clause or word back-to-back (e.g. "No shortcuts, no shortcuts." or "the the") — say it once. Vary your sentences; no immediate repetition.
+
 Output ONLY JSON: {"hook": "...", "description": "..."} — or {"needs_attention": true, "reason": "..."} if the dossier is too thin. In the description use \\n\\n between paragraphs. Keep it tight — a hook plus 2-3 short paragraphs, no more.`;
 
 /**
@@ -896,8 +898,9 @@ Return ONLY the JSON described in your instructions.`;
       });
   const { data, usage, model } = await call;
 
-  const description = asStr(data.description);
-  const hook = asStr(data.hook);
+  // Safety net for the immediate-repetition bug ("No shortcuts, no shortcuts.").
+  const description = dedupeImmediatePhrases(asStr(data.description));
+  const hook = dedupeImmediatePhrases(asStr(data.hook));
   const flaggedThin = data.needs_attention === true || (!description && !hook);
   const dossierThin =
     !dossier.what_it_is && !dossier.website && !dossier.instagram;
@@ -983,6 +986,49 @@ export function matchBbqStyle(freeform: string | null): BbqStyle | null {
   if (/mangal|turkish|ocakbasi|kebab|middle eastern|lebanese|persian/.test(s)) return "mangal";
   if (/modern|contemporary|new[- ]school|fusion|craft/.test(s)) return "modern";
   return null;
+}
+
+/**
+ * Classify a venue's BBQ style from ALL the signals — not just the dossier's
+ * `bbq_style` field, which is often empty on a facts-sheet import. An explicit
+ * regional term in the NAME or the written COPY ("Pappy's Texas BBQ",
+ * "oak-smoked Texas brisket") is authoritative, so `other` is only ever a last
+ * resort when genuinely nothing matches. Returns a definite slug (never null).
+ * Checked in priority order: the style field, then the name, then what-it-is,
+ * then the description/copy, then specialities.
+ */
+export function classifyStyle(opts: {
+  bbqStyle?: string | null;
+  name?: string | null;
+  whatItIs?: string | null;
+  description?: string | null;
+  specialities?: string[] | null;
+}): BbqStyle {
+  return (
+    matchBbqStyle(opts.bbqStyle ?? null) ??
+    matchBbqStyle(opts.name ?? null) ??
+    matchBbqStyle(opts.whatItIs ?? null) ??
+    matchBbqStyle(opts.description ?? null) ??
+    matchBbqStyle((opts.specialities ?? []).join(" ") || null) ??
+    "other"
+  );
+}
+
+/**
+ * Collapse an immediately-repeated phrase or word in generated copy — the
+ * "No shortcuts, no shortcuts." case. A light safety net on top of the writer
+ * prompt; only removes a clause/word that repeats back-to-back (comma / period /
+ * semicolon separated, or an exact adjacent word), never distant repetition.
+ */
+export function dedupeImmediatePhrases(text: string | null): string | null {
+  if (!text) return text;
+  let out = text;
+  // "X, X" / "X; X" — the same clause repeated back-to-back (case-insensitive).
+  // Collapse to a single clause, leaving whatever real punctuation followed.
+  out = out.replace(/([A-Za-z][^,.;!?]{2,60}?)\s*[,;]\s*\1\b/gi, "$1");
+  // exact adjacent duplicate word ("the the").
+  out = out.replace(/\b(\w+)\s+\1\b/gi, "$1");
+  return out;
 }
 
 /** £/££/£££/££££ → 1–4 (or null). */

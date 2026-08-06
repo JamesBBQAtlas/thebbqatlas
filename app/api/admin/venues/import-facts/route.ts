@@ -6,10 +6,11 @@ import { CLAUDE_ENABLED } from "@/lib/ai/claude";
 import {
   writeVenueCopy,
   buildCopyPatch,
-  matchBbqStyle,
+  classifyStyle,
   priceBandToLevel,
   mapSocials,
 } from "@/lib/ai/enrich";
+import { bestSettlement } from "@/lib/admin/address";
 import { claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { auditCreated } from "@/lib/admin/content-audit";
@@ -33,6 +34,7 @@ async function processRow(
   let lat = dossier.lat;
   let lng = dossier.lng;
   let country_code: string | null = null;
+  let geoCity: string | null = null;
   if (lat === null || lng === null) {
     const geo = await geocodeAddress({
       address: dossier.address,
@@ -44,10 +46,19 @@ async function processRow(
       lat = geo.lat;
       lng = geo.lng;
       country_code = geo.country_code;
+      geoCity = geo.city ?? null;
     }
   }
 
-  const style = matchBbqStyle(dossier.bbq_style);
+  // Classify style from name + copy + facts (not just the sheet's bbq_style,
+  // which is often blank) so a venue is never left at the 'other' default.
+  const style = classifyStyle({
+    bbqStyle: dossier.bbq_style,
+    name: dossier.name,
+    whatItIs: dossier.what_it_is,
+    description: copy.description,
+    specialities: dossier.specialities,
+  });
   const price = priceBandToLevel(dossier.price_band);
   const socials = mapSocials(dossier.other_socials);
   const igPosts = [
@@ -57,6 +68,9 @@ async function processRow(
   const address = [dossier.address, dossier.postcode]
     .filter((s) => s && String(s).trim())
     .join(", ");
+  // City must be the TOWN, never a POI/landmark — fall back to the town parsed
+  // from the address when the sheet's city is a POI (the Pappy's/Westmorland case).
+  const city = bestSettlement({ city: dossier.city, address, geoCity });
 
   // Match an existing venue (idempotent on IG handle, else exact name).
   let existing: { id: string; status: string } | null = null;
@@ -101,7 +115,8 @@ async function processRow(
     };
     if (dossier.name) patch.name = dossier.name;
     if (dossier.location_label) patch.location_label = dossier.location_label;
-    if (style) patch.style = style;
+    // Set a real style; never overwrite an existing style with 'other'.
+    if (style !== "other") patch.style = style;
     if (address) patch.address = address;
     if (dossier.phone) patch.phone = dossier.phone;
     if (dossier.website) patch.website = dossier.website;
@@ -118,7 +133,7 @@ async function processRow(
       patch.lng = lng;
       if (country_code) patch.country_code = country_code;
     }
-    if (dossier.city) patch.city = dossier.city;
+    if (city) patch.city = city;
     if (dossier.country) patch.country = dossier.country;
     await db.from("restaurants").update(patch).eq("id", existing.id);
     return { created: false, attention: copy.needs_attention };
@@ -130,11 +145,11 @@ async function processRow(
     name: dossier.name || handle || "Unnamed venue",
     description: copy.description ?? "",
     hook: copy.hook ?? null,
-    style: style ?? "other",
+    style: style,
     lat: lat ?? 0,
     lng: lng ?? 0,
     address: address || "",
-    city: dossier.city || "",
+    city: city || "",
     country: dossier.country || "",
     country_code,
     website: dossier.website,
@@ -158,7 +173,7 @@ async function processRow(
     location_label: dossier.location_label,
   }).select("id").single();
   if (createdRow) {
-    await auditCreated(db, createdRow.id, { name: dossier.name ?? handle, city: dossier.city, status: "pending" }, {
+    await auditCreated(db, createdRow.id, { name: dossier.name ?? handle, city: city || dossier.city, status: "pending" }, {
       source: "import",
       changedBy: null,
       note: "facts-sheet import",
