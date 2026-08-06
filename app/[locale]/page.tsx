@@ -8,6 +8,7 @@ import { resolveCountryCode } from "@/lib/constants/countries";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { HomeMapVisual } from "@/components/home/HomeMapVisual";
 import { HeroVideo } from "@/components/home/HeroVideo";
+import { ScrollCue } from "@/components/home/ScrollCue";
 import type { Metadata } from "next";
 import { SITE } from "@/lib/seo/site";
 import { getVoiceLines, linesForSlot } from "@/lib/queries/voice";
@@ -62,8 +63,10 @@ export default async function HomePage({
 
   return (
     <>
-      {/* Hero */}
-      <section className="film-grain relative flex min-h-screen flex-col items-center justify-center overflow-hidden px-6 py-28 text-center">
+      {/* Hero — on mobile it's sized to one screen (100svh minus the site header
+          and the fixed bottom tab bar) so the Explore Map CTA is always above the
+          fold; desktop is unchanged. */}
+      <section className="film-grain relative flex min-h-[calc(100svh-7rem)] flex-col items-center justify-center overflow-hidden px-6 py-10 text-center sm:min-h-screen sm:py-28">
         <HeroVideo
           poster="/video/hero-home-poster.jpg"
           webm="/video/hero-home.webm"
@@ -78,23 +81,23 @@ export default async function HomePage({
             width={168}
             height={168}
             priority
-            className="mx-auto mb-6 h-32 w-32 object-contain [filter:drop-shadow(0_5px_14px_rgba(0,0,0,0.55))_drop-shadow(0_0_6px_rgba(0,0,0,0.4))] sm:h-40 sm:w-40"
+            className="mx-auto mb-4 h-20 w-20 object-contain [filter:drop-shadow(0_5px_14px_rgba(0,0,0,0.55))_drop-shadow(0_0_6px_rgba(0,0,0,0.4))] sm:mb-6 sm:h-40 sm:w-40"
           />
-          <span className="mb-8 inline-flex items-center gap-2 rounded-full border border-brand-gold/30 bg-brand-gold/[0.06] px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-brand-gold">
+          <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-brand-gold/30 bg-brand-gold/[0.06] px-4 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-brand-gold sm:mb-8 sm:text-xs">
             <span className="h-1.5 w-1.5 animate-pulse-slow rounded-full bg-brand-gold shadow-glow-gold" />
             Now tracking {count} restaurants worldwide
           </span>
-          <h1 className="font-heading text-5xl font-extrabold leading-[1.05] tracking-tight text-text-primary text-balance sm:text-6xl md:text-7xl">
+          <h1 className="font-heading text-[2rem] font-extrabold leading-[1.08] tracking-tight text-text-primary text-balance sm:text-6xl sm:leading-[1.05] md:text-7xl">
             The Definitive Guide to{" "}
             <span className="text-brand-gold">World Barbecue</span>
           </h1>
-          <p className="mx-auto mt-6 max-w-xl text-lg font-light leading-relaxed text-text-secondary sm:text-xl">
+          <p className="mx-auto mt-3 max-w-xl text-sm font-light leading-relaxed text-text-secondary sm:mt-6 sm:text-xl">
             Every pit worth visiting. Every style worth knowing. A curated atlas
             of the world&apos;s finest barbecue, built by people who&apos;ve
             eaten their way across it.
           </p>
           <HomepageSubline lines={subLines} />
-          <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3 sm:mt-10 sm:gap-4">
             <Link
               href="/map"
               className="inline-flex items-center gap-2 rounded-md bg-brand-gold px-8 py-3.5 text-[0.9375rem] font-semibold uppercase tracking-[0.04em] text-text-inverse shadow-glow-gold transition-all duration-200 hover:-translate-y-0.5 hover:bg-brand-gold-light"
@@ -109,7 +112,9 @@ export default async function HomePage({
               Read the Guides
             </Link>
           </div>
-          <div className="mx-auto mt-16 flex max-w-md justify-center gap-12 border-t border-border-subtle pt-8">
+          {/* Stats — below the fold on mobile (not part of the must-see stack),
+              full row on desktop. */}
+          <div className="mx-auto mt-16 hidden max-w-md justify-center gap-12 border-t border-border-subtle pt-8 sm:flex">
             {stats.map((s) => (
               <div key={s.label} className="text-center">
                 <div className="font-heading text-3xl font-bold text-text-primary">
@@ -122,6 +127,9 @@ export default async function HomePage({
             ))}
           </div>
         </div>
+        {/* Animated scroll cue (mobile) — a travelling gold line + chevron,
+            hides once the visitor scrolls. */}
+        <ScrollCue />
       </section>
 
       {/* Featured restaurants */}

@@ -25,6 +25,7 @@ import {
   SquarePen,
   Ban,
   RefreshCw,
+  Archive,
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
@@ -68,7 +69,21 @@ export interface HubVenue {
   lng: number;
 }
 
-type ActionKind = "enrich" | "rewrite" | "ops" | "findig" | "publish" | "reject";
+/** A chain flagship's published summary — for a child's "Flagship Set" badge +
+ *  on-demand popup, so its (usually already-approved) parent's state and content
+ *  are visible from the Pending screen. */
+export interface FlagshipSummary {
+  id: string;
+  name: string;
+  slug: string;
+  city: string | null;
+  styleLabel: string;
+  enriched: boolean; // enriched_at IS NOT NULL
+  hook: string | null;
+  description: string | null;
+}
+
+type ActionKind = "enrich" | "rewrite" | "ops" | "findig" | "publish" | "reject" | "park";
 type RunState = "idle" | "queued" | "running" | "done" | "attention" | "error";
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -144,13 +159,13 @@ async function fetchWithTimeout(url: string, opts: RequestInit, ms: number): Pro
 }
 
 async function callAction(id: string, kind: ActionKind, extra?: Record<string, unknown>): Promise<Response> {
-  if (kind === "publish" || kind === "reject") {
+  if (kind === "publish" || kind === "reject" || kind === "park") {
     return fetch("/api/admin/venues", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         restaurantId: id,
-        status: kind === "publish" ? "approved" : "rejected",
+        status: kind === "publish" ? "approved" : kind === "park" ? "parked" : "rejected",
         ...extra,
       }),
     });
@@ -196,12 +211,17 @@ export function VenueHub({
   styleOptions,
   initialStatus = "all",
   initialFilters,
+  flagships,
 }: {
   venues: HubVenue[];
   styleOptions: { slug: string; label: string }[];
   initialStatus?: string;
   /** Deep-link filters from the dashboard tiles (e.g. ?fresh=red). */
   initialFilters?: { fresh?: string; attn?: boolean; closed?: boolean; flagship?: boolean };
+  /** Published summaries of the flagships of any chain CHILDREN in this list —
+   *  so a child can resolve its (often already-approved, out-of-list) parent's
+   *  enriched state + show it on demand without leaving Pending. */
+  flagships?: FlagshipSummary[];
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -299,12 +319,23 @@ export function VenueHub({
   );
 
   const venueById = useMemo(() => new Map(venues.map((v) => [v.id, v])), [venues]);
-  // A sibling inherits its brand facts from the parent, so enriching it before
-  // the flagship is rich produces a thin outpost and wastes ~$0.02. "Rich" =
-  // the parent has been enriched and isn't flagged (a thin pass-1 flagship
-  // carries needs_attention). Non-siblings are always ready.
+  // Flagship summaries supplied by the server (a child's flagship is usually
+  // already APPROVED and thus NOT in this pending list — the old lookup against
+  // the in-list venues returned undefined and wrongly reported "flagship not
+  // enriched"). This map is the authoritative source for a child's parent state.
+  const flagshipById = useMemo(
+    () => new Map((flagships ?? []).map((f) => [f.id, f])),
+    [flagships]
+  );
+  const [flagshipPopup, setFlagshipPopup] = useState<FlagshipSummary | null>(null);
+  // Is a chain child's flagship enriched? Resolve the PARENT via chain_parent_id
+  // and test the PARENT's enriched state — never the child's own enriched_at
+  // (still NULL pre-enrichment, which is the normal state). Prefer the server-
+  // provided flagship summary; fall back to an in-list parent if present.
   const parentReady = (v: HubVenue): boolean => {
     if (!v.chainSeed || !v.chainParentId) return true;
+    const f = flagshipById.get(v.chainParentId);
+    if (f) return f.enriched;
     const p = venueById.get(v.chainParentId);
     return Boolean(p && p.enriched_at && !p.needs_attention);
   };
@@ -561,14 +592,28 @@ export function VenueHub({
       return;
     }
     if (kind === "publish") {
-      // Clear any stale enrich message ("Draft ready…") so a published row
-      // never shows a draft line (§09.2.4).
-      setRowResult((p) => ({ ...p, [v.id]: { msg: "Published ✓" } }));
+      // Approving a flagship that has children still in Pending: reassure that it
+      // moved to Listings and the branches remain to be worked here.
+      const branches = venues.filter((c) => c.chainParentId === v.id).length;
+      setRowResult((p) => ({
+        ...p,
+        [v.id]: {
+          msg:
+            branches > 0
+              ? `Flagship approved → moved to Listings. ${branches} branch${branches === 1 ? "" : "es"} remain in Pending.`
+              : "Published ✓",
+        },
+      }));
       router.refresh();
       return;
     }
     if (kind === "reject") {
       setRowResult((p) => ({ ...p, [v.id]: { msg: v.status === "approved" ? "Unpublished" : "Declined" } }));
+      router.refresh();
+      return;
+    }
+    if (kind === "park") {
+      setRowResult((p) => ({ ...p, [v.id]: { msg: "Parked — moved to the Parked list" } }));
       router.refresh();
       return;
     }
@@ -1175,6 +1220,24 @@ export function VenueHub({
                             <Store className="h-3 w-3" />Chain
                           </span>
                         )}
+                        {/* Chain CHILD → flagship state. Green "Flagship Set" =
+                            the parent is crowned AND enriched (good to work this
+                            child). Amber "Flagship pending" otherwise. Click →
+                            popup with the flagship's published summary. */}
+                        {v.chainSeed && v.chainParentId && (() => {
+                          const flag = flagshipById.get(v.chainParentId);
+                          const ready = flag ? flag.enriched : pReady;
+                          return (
+                            <button
+                              type="button"
+                              onClick={() => flag && setFlagshipPopup(flag)}
+                              title={flag ? (ready ? "Flagship is crowned & enriched — you're clear to enrich this branch. Click to view its summary." : "Flagship isn't enriched yet — enrich the flagship first.") : "Flagship"}
+                              className={`ml-2 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.05em] transition-colors ${ready ? "border-emerald-500/60 bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25" : "border-amber-500/50 bg-amber-500/10 text-amber-400"}`}
+                            >
+                              <Crown className="h-3 w-3" />{ready ? "Flagship Set" : "Flagship pending"}
+                            </button>
+                          );
+                        })()}
                         {v.permanentlyClosed && (
                           <span
                             title="Permanently closed — hidden from the public map, directory, Featured & count"
@@ -1193,6 +1256,20 @@ export function VenueHub({
                         )}
                       </div>
                       <div className="text-xs text-text-muted">{[v.city, v.country].filter(Boolean).join(", ")} · {v.styleLabel}</div>
+                      {v.chainSeed && v.chainParentId && flagshipById.get(v.chainParentId) && (
+                        <div className="mt-0.5 text-[0.6875rem] text-text-muted">
+                          Branch of <span className="text-text-secondary">{flagshipById.get(v.chainParentId)!.name}</span>{" "}
+                          ·{" "}
+                          <a
+                            href={`/restaurants/${flagshipById.get(v.chainParentId)!.slug}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-brand-gold hover:underline"
+                          >
+                            view flagship ↗
+                          </a>
+                        </div>
+                      )}
                       {v.needs_attention && v.attention_reason && (
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
                       )}
@@ -1329,6 +1406,9 @@ export function VenueHub({
                             <button type="button" onClick={() => single(v, "publish")} disabled={busy || needsEnrich} title={needsEnrich ? "Enrich first (no map location)" : "Publish"} className="inline-flex shrink-0 items-center rounded-md bg-brand-gold p-1.5 text-text-inverse disabled:opacity-40">
                               <Check className="h-3.5 w-3.5" />
                             </button>
+                            <button type="button" onClick={() => single(v, "park")} disabled={busy} title="Park — move to the holding pen (not a venue / not now). Kept, not deleted; return to Pending anytime." className="inline-flex shrink-0 items-center rounded-md border border-border-default p-1.5 text-text-muted transition-colors hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">
+                              <Archive className="h-3.5 w-3.5" />
+                            </button>
                             <button type="button" onClick={() => single(v, "reject")} disabled={busy} title="Decline — remove from the queue" className="inline-flex shrink-0 items-center rounded-md border border-border-default p-1.5 text-text-muted transition-colors hover:border-destructive hover:text-destructive disabled:opacity-40">
                               <X className="h-3.5 w-3.5" />
                             </button>
@@ -1431,6 +1511,39 @@ export function VenueHub({
             />
           ) : null;
         })()}
+
+      {/* Flagship summary popup (read-only) — see the chain you're working on
+          without leaving Pending. Close returns straight to Pending. */}
+      {flagshipPopup && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4" onClick={() => setFlagshipPopup(null)}>
+          <div className="w-full max-w-lg rounded-2xl border border-border-strong bg-surface-0 p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3">
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-gold/50 bg-brand-gold/10 px-2.5 py-0.5 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-brand-gold">
+                <Crown className="h-3 w-3" /> Flagship {flagshipPopup.enriched ? "· enriched" : "· not enriched"}
+              </span>
+              <button type="button" onClick={() => setFlagshipPopup(null)} aria-label="Close" className="shrink-0 text-text-muted transition-colors hover:text-text-primary">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <h3 className="mt-3 font-heading text-2xl font-bold text-text-primary">{flagshipPopup.name}</h3>
+            <p className="mt-1 text-sm text-text-muted">{[flagshipPopup.city].filter(Boolean).join(", ") || "no city"} · {flagshipPopup.styleLabel}</p>
+            {flagshipPopup.hook && <p className="mt-3 font-heading text-sm italic text-text-primary">{flagshipPopup.hook}</p>}
+            {flagshipPopup.description && (
+              <div className="mt-2 max-h-64 space-y-2 overflow-y-auto text-sm leading-relaxed text-text-secondary">
+                {flagshipPopup.description.split(/\n{2,}/).map((p, i) => <p key={i}>{p}</p>)}
+              </div>
+            )}
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <a href={`/restaurants/${flagshipPopup.slug}`} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-brand-gold hover:underline">
+                Open flagship listing ↗
+              </a>
+              <button type="button" onClick={() => setFlagshipPopup(null)} className="rounded-md border border-border-default px-4 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold">
+                Back to Pending
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

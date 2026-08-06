@@ -5,8 +5,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
 import { VenueImportPanel } from "@/components/admin/VenueImportPanel";
 import { FactsImportPanel } from "@/components/admin/FactsImportPanel";
-import { VenueHub } from "@/components/admin/VenueHub";
+import { VenueHub, type FlagshipSummary } from "@/components/admin/VenueHub";
 import { toHubVenue, STYLE_OPTIONS } from "@/lib/admin/hub";
+import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
 import type { Restaurant } from "@/lib/types/database";
 
 export const metadata = { title: "Pending Venues" };
@@ -47,6 +48,28 @@ export default async function PendingVenuesPage() {
   const rows = (pending ?? []) as Restaurant[];
   const hubVenues = rows.map(toHubVenue);
 
+  // Resolve each chain child's FLAGSHIP — usually already approved and thus not
+  // in this pending list. Fetch a published summary so the child's gate + badge +
+  // popup work from Pending without leaving the screen.
+  const parentIds = [...new Set(rows.map((r) => r.chain_parent_id).filter(Boolean))] as string[];
+  let flagships: FlagshipSummary[] = [];
+  if (parentIds.length) {
+    const { data: fdata } = await db
+      .from("restaurants")
+      .select("id, name, slug, city, style, enriched_at, hook, description")
+      .in("id", parentIds);
+    flagships = ((fdata ?? []) as Record<string, unknown>[]).map((f) => ({
+      id: f.id as string,
+      name: (f.name as string) ?? "Flagship",
+      slug: (f.slug as string) ?? "",
+      city: (f.city as string) ?? null,
+      styleLabel: STYLE_LABELS[(f.style as BbqStyle)] ?? "Other",
+      enriched: f.enriched_at != null,
+      hook: (f.hook as string) ?? null,
+      description: (f.description as string) ?? null,
+    }));
+  }
+
   return (
     <div className="mx-auto max-w-4xl px-6 py-16 sm:px-10">
       <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
@@ -77,7 +100,7 @@ export default async function PendingVenuesPage() {
           console — they appear here as drafts for enrichment and review.
         </p>
       ) : (
-        <VenueHub venues={hubVenues} styleOptions={STYLE_OPTIONS} initialStatus="pending" />
+        <VenueHub venues={hubVenues} styleOptions={STYLE_OPTIONS} initialStatus="pending" flagships={flagships} />
       )}
     </div>
   );

@@ -189,7 +189,9 @@ export async function PATCH(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "");
-  const status = body.status === "approved" ? "approved" : body.status === "rejected" ? "rejected" : null;
+  // approved | rejected | parked (holding pen) | pending (return to queue).
+  const ALLOWED = ["approved", "rejected", "parked", "pending"];
+  const status = ALLOWED.includes(body.status) ? (body.status as string) : null;
   const override = Boolean(body.override);
   if (!restaurantId || !status) {
     return NextResponse.json({ error: "Bad request." }, { status: 400 });
@@ -247,7 +249,14 @@ export async function PATCH(request: Request) {
   await auditField(ctx.db, restaurantId, "published", prev?.status ?? null, status, {
     source: "manual_edit",
     changedBy: ctx.userId,
-    note: status === "approved" ? "published" : "unpublished/declined",
+    note:
+      status === "approved"
+        ? "published"
+        : status === "parked"
+          ? "parked"
+          : status === "pending"
+            ? "returned to pending"
+            : "unpublished/declined",
   });
 
   // Publishing/unpublishing changes what the public site shows — refresh now.
