@@ -179,7 +179,7 @@ export default async function ModerationPage() {
   }));
 
   return (
-    <div className="mx-auto max-w-4xl px-6 py-16 sm:px-10">
+    <div className="mx-auto max-w-7xl px-6 py-16 sm:px-10">
       <h1 className="mb-1 font-heading text-3xl font-bold text-text-primary">
         Moderation Queue
       </h1>

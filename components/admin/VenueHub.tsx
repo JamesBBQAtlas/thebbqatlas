@@ -1153,7 +1153,10 @@ export function VenueHub({
 
       {/* Table */}
       <div className="overflow-x-auto rounded-xl border border-border-subtle">
-        <table className="w-full text-left text-sm">
+        {/* min-width keeps the columns at their natural size so the wrapper
+            SCROLLS on a narrow viewport instead of compressing the action cell
+            and clipping icons off either edge. */}
+        <table className="w-full min-w-[1000px] text-left text-sm">
           <thead className="bg-surface-1 text-xs uppercase tracking-[0.05em] text-text-muted">
             <tr>
               <th className="px-3 py-3"></th>

@@ -114,16 +114,6 @@ function codeScan() {
 // regression. A GENUINE gap (rows returned) still fails hard below.
 const warnings = [];
 
-/** Run `p` but reject if it hasn't settled within `ms` (no 6-minute hangs). */
-function withTimeout(p, ms, label) {
-  return Promise.race([
-    p,
-    new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-    ),
-  ]);
-}
-
 async function dbAudit() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -136,16 +126,18 @@ async function dbAudit() {
   // The DB half is a best-effort LIVE check. If the database is unreachable from
   // this runner (network egress / pooler / expired secret / timeout), warn and
   // move on rather than failing — CI must not go red because it couldn't dial
-  // the DB. Only ACTUAL gap rows are treated as failures.
+  // the DB. Only ACTUAL gap rows are treated as failures. A real AbortController
+  // (not just Promise.race) actually cancels the underlying request at 30s, so a
+  // stuck connection can't keep the process alive.
   let data;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30_000);
   try {
     const { createClient } = await import("@supabase/supabase-js");
     const supabase = createClient(url, key, { auth: { persistSession: false } });
-    const res = await withTimeout(
-      supabase.rpc("write_permission_audit"),
-      30_000,
-      "write_permission_audit()"
-    );
+    const res = await supabase
+      .rpc("write_permission_audit")
+      .abortSignal(controller.signal);
     if (res.error) {
       // Couldn't execute the function (tooling/access) — not a grant regression.
       warnings.push(
@@ -163,6 +155,8 @@ async function dbAudit() {
     );
     console.log("db audit: UNVERIFIED (unreachable — see warning).");
     return;
+  } finally {
+    clearTimeout(timer);
   }
 
   if (data && data.length) {
@@ -191,3 +185,6 @@ console.log(
     ? "\n✓ write-permission guardrail passed (code scan clean; DB half unverified — see warnings)."
     : "\n✓ write-permission guardrail passed."
 );
+// Exit explicitly so a lingering keep-alive handle (e.g. an aborted DB socket)
+// can never hold the runner open past the work being done.
+process.exit(0);
