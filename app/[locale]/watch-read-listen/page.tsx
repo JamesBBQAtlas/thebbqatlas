@@ -1,13 +1,24 @@
 import { getMediaPicks } from "@/lib/queries/media-picks";
 import { resolvePodcastArtwork } from "@/lib/media/podcast-art";
+import { resolveBookCover } from "@/lib/media/book-cover";
+import { resolveYouTube } from "@/lib/media/youtube";
 import { MediaDirectory } from "@/components/media/MediaDirectory";
 import { AdSlot } from "@/components/monetization/AdSlot";
 
+const WRL_DESC =
+  "The barbecue YouTube channels, books and podcasts The BBQ Atlas rates — the people worth your time, with an honest word on each.";
+
 export const metadata = {
   title: "Watch, Read & Listen",
-  description:
-    "The barbecue YouTube channels, books and podcasts The BBQ Atlas rates — the people worth your time, with an honest word on each.",
+  description: WRL_DESC,
   alternates: { canonical: "/watch-read-listen" },
+  openGraph: {
+    title: "Watch, Read & Listen — The BBQ Atlas",
+    description: WRL_DESC,
+    url: "/watch-read-listen",
+    type: "website",
+  },
+  twitter: { card: "summary_large_image", title: "Watch, Read & Listen — The BBQ Atlas", description: WRL_DESC },
 };
 
 // Render on every request so newly published/unpublished picks appear at once.
@@ -17,15 +28,38 @@ export const dynamic = "force-dynamic";
 export default async function WatchReadListenPage() {
   const picks = await getMediaPicks();
 
-  // Resolve podcast cover art from iTunes (by Apple id in the platform links),
-  // unless an image_url was set manually in the admin. Cached upstream.
-  const podcast = await Promise.all(
-    picks.podcast.map(async (p) => {
-      if (p.image_url) return p;
-      const art = await resolvePodcastArtwork(p.links?.apple ?? p.url);
-      return { ...p, image_url: art };
-    })
-  );
+  // Resolve real artwork/data at render (all cached upstream), unless an
+  // image_url was set manually in the admin. Books → Google Books covers
+  // (title-validated); podcasts → iTunes artwork; YouTube → channel avatar +
+  // subscriber count + latest upload (needs YOUTUBE_API_KEY, else placeholder).
+  const [book, podcast, youtube] = await Promise.all([
+    Promise.all(
+      picks.book.map(async (p) => {
+        if (p.image_url) return p;
+        const cover = await resolveBookCover(p.url, p.name, p.creator);
+        return { ...p, image_url: cover };
+      })
+    ),
+    Promise.all(
+      picks.podcast.map(async (p) => {
+        if (p.image_url) return p;
+        const art = await resolvePodcastArtwork(p.links?.apple ?? p.url);
+        return { ...p, image_url: art };
+      })
+    ),
+    Promise.all(
+      picks.youtube.map(async (p) => {
+        const yt = await resolveYouTube(p.url);
+        if (!yt) return p;
+        return {
+          ...p,
+          image_url: p.image_url ?? yt.thumb,
+          subscriberCount: yt.subscriberCount,
+          latest: yt.latest,
+        };
+      })
+    ),
+  ]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
@@ -37,7 +71,7 @@ export default async function WatchReadListenPage() {
         </p>
       </header>
 
-      <MediaDirectory picks={{ ...picks, podcast }} />
+      <MediaDirectory picks={{ youtube, book, podcast }} />
 
       <p className="mt-10 text-xs text-white/30">
         As an Amazon Associate, The BBQ Atlas earns from qualifying purchases. Book links are

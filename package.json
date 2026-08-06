@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "enrich": "node scripts/enrich-venues.mjs",
-    "audit:grants": "node scripts/audit-write-grants.mjs"
+    "audit:grants": "node scripts/audit-write-grants.mjs",
+    "prepare": "husky"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",
@@ -45,6 +46,7 @@
     "autoprefixer": "^10.4.20",
     "eslint": "^8.57.1",
     "eslint-config-next": "14.2.35",
+    "husky": "^9.1.7",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2"

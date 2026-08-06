@@ -1,0 +1,6 @@
+# Write-permission guardrail — runs before every push (replaces the GitHub
+# Action, which was flaky on GitHub's runner outages). The always-on CODE SCAN
+# blocks a push that adds an undeclared write target (the real bug class); the
+# DB-audit half runs only if Supabase creds are in the local env and is
+# best-effort. This stops a bad push before it ever leaves the machine.
+npm run audit:grants

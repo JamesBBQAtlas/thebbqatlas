@@ -4,11 +4,13 @@ name: DB write-permission guardrail
 # (or a declared service-role route), or if write_permission_audit() flags a live
 # gap. Prevents the recurring "permission denied before RLS" bug class.
 
+# NOTE: this no longer runs automatically on push. The guardrail now runs as a
+# local git pre-push hook (Husky → `npm run audit:grants`), which is stronger (it
+# blocks a bad push before it leaves the machine) and has zero dependency on
+# GitHub's hosted-runner availability — which caused persistent false-red X's
+# during a GitHub Actions runner outage. Kept here for manual/optional runs only.
 on:
-  push:
-    branches: [main, rebuild]
-  pull_request:
-  workflow_dispatch: # allow manual runs from the Actions tab
+  workflow_dispatch: # manual runs from the Actions tab only
 
 jobs:
   audit:

@@ -214,7 +214,12 @@ export function newsJsonLd(post: NewsPost) {
     "@id": `${url}#article`,
     headline: post.title,
     description: post.excerpt || undefined,
-    image: safeVenueImage(post.hero_image_url) || SITE.logo,
+    // Editorial hero is licensed stock (Unsplash) used honestly — allow it here,
+    // unlike venue photos (safeVenueImage). Falls back to the site logo.
+    image:
+      post.hero_image_url && /^https?:\/\//.test(post.hero_image_url)
+        ? post.hero_image_url
+        : SITE.logo,
     datePublished: post.published_at || post.created_at || undefined,
     dateModified: post.published_at || post.created_at || undefined,
     // E-E-A-T: a named byline is a Person; fall back to the publisher org.

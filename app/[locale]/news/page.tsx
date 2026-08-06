@@ -12,11 +12,19 @@ interface Props {
 }
 
 export async function generateMetadata(): Promise<Metadata> {
+  const description =
+    "Dispatches from the world of live fire, and letters from the pit — news, openings, festival reports and the Atlas's own missives on the craft of barbecue.";
   return {
     title: "News & Missives",
-    description:
-      "Dispatches from the world of live fire, and letters from the pit — news, openings, festival reports and the Atlas's own missives on the craft of barbecue.",
+    description,
     alternates: { canonical: "/news" },
+    openGraph: {
+      title: "News & Missives — The BBQ Atlas",
+      description,
+      url: "/news",
+      type: "website",
+    },
+    twitter: { card: "summary_large_image", title: "News & Missives — The BBQ Atlas", description },
   };
 }
 
@@ -69,6 +77,7 @@ export default async function NewsPage({ params }: Props) {
                   src={lead.hero_image_url}
                   alt={lead.title}
                   sizes="(max-width: 768px) 100vw, 50vw"
+                  editorial
                   priority
                 />
               </div>
@@ -106,6 +115,7 @@ export default async function NewsPage({ params }: Props) {
                       src={post.hero_image_url}
                       alt={post.title}
                       sizes="(max-width: 640px) 100vw, 33vw"
+                      editorial
                     />
                   </div>
                   <div className="flex flex-1 flex-col p-6">

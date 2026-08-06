@@ -14,6 +14,9 @@ export interface MediaPick {
   links: Record<string, string>;
   sort_order: number;
   is_published: boolean;
+  // Runtime enrichments (resolved server-side on the page, cached upstream).
+  subscriberCount?: string | null;
+  latest?: { title: string; videoId: string; thumb: string | null } | null;
 }
 
 export interface MediaPicksByKind {

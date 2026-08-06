@@ -7,18 +7,32 @@ import { safeVenueImage } from "@/lib/restaurants/image";
  * (which fails in production), it shows an on-brand ember placeholder instead of
  * a broken/empty box. Fills its (relative, sized) parent.
  */
+/**
+ * Editorial hero URL. For NEWS/guides we WANT licensed editorial stock (e.g.
+ * Unsplash) — that's legitimate here, unlike a venue's own photo where stock
+ * would be dishonest (safeVenueImage blocks it). So `editorial` accepts any real
+ * https URL; the host must still be allowlisted in next.config images.
+ */
+function editorialSrc(src?: string | null): string | null {
+  const u = (src ?? "").trim();
+  return /^https?:\/\//i.test(u) ? u : null;
+}
+
 export function EditorialImage({
   src,
   alt,
   sizes,
   priority,
+  editorial = false,
 }: {
   src?: string | null;
   alt: string;
   sizes?: string;
   priority?: boolean;
+  /** News/guide editorial context — allow licensed stock (Unsplash), unlike venue photos. */
+  editorial?: boolean;
 }) {
-  const safe = safeVenueImage(src);
+  const safe = editorial ? editorialSrc(src) : safeVenueImage(src);
   if (safe) {
     return (
       <Image

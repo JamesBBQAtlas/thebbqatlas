@@ -6,7 +6,6 @@ import ReactMarkdown from "react-markdown";
 import { Link } from "@/i18n/navigation";
 import { ChevronRight } from "lucide-react";
 import { getNews, getNewsBySlug } from "@/lib/queries/news";
-import { safeVenueImage } from "@/lib/restaurants/image";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { newsJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { TrackView } from "@/components/account/TrackView";
@@ -16,6 +15,10 @@ import { routing } from "@/i18n/routing";
 interface Props {
   params: { locale: string; slug: string };
 }
+
+/** Editorial hero (news uses licensed stock like Unsplash — allow a real URL). */
+const editorialHero = (u?: string | null): string | null =>
+  u && /^https?:\/\//i.test(u) ? u : null;
 
 export const revalidate = 3600;
 
@@ -38,9 +41,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description: post.excerpt,
       type: "article",
       publishedTime: post.published_at || undefined,
-      images: safeVenueImage(post.hero_image_url)
-        ? [safeVenueImage(post.hero_image_url) as string]
-        : [],
+      images: editorialHero(post.hero_image_url) ? [editorialHero(post.hero_image_url) as string] : [],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: post.title,
+      description: post.excerpt,
+      images: editorialHero(post.hero_image_url) ? [editorialHero(post.hero_image_url) as string] : [],
     },
   };
 }
@@ -123,6 +130,7 @@ export default async function NewsPostPage({ params }: Props) {
         <EditorialImage
           src={post.hero_image_url}
           alt={post.title}
+          editorial
           sizes="(max-width: 768px) 100vw, 768px"
           priority
         />

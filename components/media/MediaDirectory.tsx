@@ -18,14 +18,14 @@ const CTA: Record<MediaKind, string> = {
   podcast: "Listen",
 };
 
-// Podcast platform links, in the order we show them.
-const PLATFORMS: { key: string; label: string }[] = [
-  { key: "apple", label: "Apple" },
-  { key: "spotify", label: "Spotify" },
-  { key: "youtube", label: "YouTube" },
-  { key: "deezer", label: "Deezer" },
-  { key: "official", label: "Official" },
-  { key: "rss", label: "RSS" },
+// Podcast platform links, in the order we show them — each with its brand colour.
+const PLATFORMS: { key: string; label: string; color: string }[] = [
+  { key: "apple", label: "Apple", color: "#A3AAAE" }, // graphite
+  { key: "spotify", label: "Spotify", color: "#1DB954" },
+  { key: "youtube", label: "YouTube", color: "#FF0000" },
+  { key: "deezer", label: "Deezer", color: "#A238FF" },
+  { key: "official", label: "Official", color: "#9aa0a6" }, // neutral grey
+  { key: "rss", label: "RSS", color: "#F26522" },
 ];
 
 /** First sentence of the blurb, for the one-line teaser. */
@@ -34,16 +34,36 @@ function teaserOf(blurb: string): string {
   return (m ? m[0] : blurb).trim();
 }
 
-function OutboundPill({ href, label }: { href: string; label: string }) {
+const fmtSubs = (n: string | null | undefined): string | null => {
+  if (!n) return null;
+  const num = Number(n);
+  if (!Number.isFinite(num)) return null;
+  return `${num.toLocaleString("en-US")} subscribers`;
+};
+
+function OutboundPill({
+  href,
+  label,
+  color,
+  icon: Icon,
+}: {
+  href: string;
+  label: string;
+  color?: string;
+  icon?: typeof Globe;
+}) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 rounded-md border border-border-default px-2 py-1 text-[0.6875rem] font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
+      style={color ? { borderColor: `${color}66`, color } : undefined}
+      className={
+        "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[0.6875rem] font-semibold transition-colors hover:bg-white/[0.06] " +
+        (color ? "" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold")
+      }
     >
-      {label === "Official" ? <Globe className="h-3 w-3" /> : null}
-      {label === "RSS" ? <Rss className="h-3 w-3" /> : null}
+      {Icon ? <Icon className="h-3 w-3" /> : null}
       {label}
     </a>
   );
@@ -62,6 +82,9 @@ function Card({ pick }: { pick: MediaPick }) {
         {pick.creator ? (
           <p className="mt-0.5 text-xs text-brand-gold/80">{pick.creator}</p>
         ) : null}
+        {pick.kind === "youtube" && fmtSubs(pick.subscriberCount) ? (
+          <p className="mt-0.5 text-[0.6875rem] text-white/45">{fmtSubs(pick.subscriberCount)}</p>
+        ) : null}
 
         <p className="mt-2 flex-1 text-sm leading-relaxed text-white/60">
           {open ? pick.blurb : teaser}
@@ -75,6 +98,18 @@ function Card({ pick }: { pick: MediaPick }) {
             </button>
           ) : null}
         </p>
+
+        {pick.kind === "youtube" && pick.latest?.videoId ? (
+          <a
+            href={`https://www.youtube.com/watch?v=${pick.latest.videoId}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="mt-2 block truncate text-xs text-white/50 transition-colors hover:text-brand-gold"
+            title={pick.latest.title}
+          >
+            ▶ Latest: {pick.latest.title}
+          </a>
+        ) : null}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {pick.kind === "book" ? (
@@ -99,6 +134,12 @@ function Card({ pick }: { pick: MediaPick }) {
   );
 }
 
+const PLATFORM_ICON: Record<string, typeof Globe> = {
+  youtube: Youtube,
+  official: Globe,
+  rss: Rss,
+};
+
 function PodcastLinks({ pick }: { pick: MediaPick }) {
   const links = pick.links ?? {};
   const present = PLATFORMS.filter((p) => links[p.key]);
@@ -109,7 +150,13 @@ function PodcastLinks({ pick }: { pick: MediaPick }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {present.map((p) => (
-        <OutboundPill key={p.key} href={links[p.key]} label={p.label} />
+        <OutboundPill
+          key={p.key}
+          href={links[p.key]}
+          label={p.label}
+          color={p.color}
+          icon={PLATFORM_ICON[p.key]}
+        />
       ))}
     </div>
   );
