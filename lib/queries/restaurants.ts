@@ -52,6 +52,35 @@ export async function getFeaturedRestaurants(limit = 3): Promise<Restaurant[]> {
   return all.filter((r) => r.is_featured).slice(0, limit);
 }
 
+// Permanently-closed venues, for the OPT-IN map "ghost pin" layer only. Kept out
+// of getRestaurants() (and therefore every default listing + count); surfaced
+// here solely so the map can show them behind the "Show closed venues" toggle.
+async function getClosedRestaurantsUncached(): Promise<Restaurant[]> {
+  try {
+    const supabase = createAnonClient();
+    const { data } = await supabase
+      .from("restaurants")
+      .select("*")
+      .eq("status", "approved")
+      .eq("permanently_closed", true);
+    return ((data ?? []) as Restaurant[]).filter(
+      (r) => Number.isFinite(r.lat) && Number.isFinite(r.lng)
+    );
+  } catch {
+    return [];
+  }
+}
+
+const getClosedRestaurantsCached = unstable_cache(
+  getClosedRestaurantsUncached,
+  ["closed-restaurants"],
+  { tags: [VENUES_TAG], revalidate: 3600 }
+);
+
+export async function getClosedRestaurants(): Promise<Restaurant[]> {
+  return getClosedRestaurantsCached();
+}
+
 // The DB half of the slug lookup, tagged `venues` so a publish/edit refreshes
 // the venue page within seconds (not on the 1-hour ISR window).
 const getRestaurantBySlugCached = unstable_cache(

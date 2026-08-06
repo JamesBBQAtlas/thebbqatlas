@@ -18,6 +18,7 @@ const MapExplorer = dynamic(
 
 export function MapCanvas(props: {
   restaurants: Restaurant[];
+  closedRestaurants?: Restaurant[];
   mapKey?: string;
   personal?: boolean;
 }) {

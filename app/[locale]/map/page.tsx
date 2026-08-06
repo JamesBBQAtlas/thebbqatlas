@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
-import { getRestaurants } from "@/lib/queries/restaurants";
+import { getRestaurants, getClosedRestaurants } from "@/lib/queries/restaurants";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import { MapCanvas } from "@/components/map/MapCanvas";
 
@@ -20,7 +20,10 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export default async function MapPage({ params }: Props) {
   setRequestLocale(params.locale);
-  const restaurants = await getRestaurants();
+  const [restaurants, closedRestaurants] = await Promise.all([
+    getRestaurants(),
+    getClosedRestaurants(),
+  ]);
 
   // Group for the crawlable / no-JS fallback
   const byCountry = new Map<string, typeof restaurants>();
@@ -35,6 +38,7 @@ export default async function MapPage({ params }: Props) {
     <div className="h-mapview">
       <MapCanvas
         restaurants={restaurants}
+        closedRestaurants={closedRestaurants}
         mapKey={process.env.NEXT_PUBLIC_MAPTILER_KEY}
       />
 

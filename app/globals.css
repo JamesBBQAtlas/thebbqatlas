@@ -351,6 +351,20 @@
   text-transform: uppercase;
   color: #7d6f61;
 }
+/* Permanently-closed (ghost pin) popup label. */
+.apop-closed {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a89a86;
+}
+.apop--closed .apop-name {
+  color: #d8cfc4;
+}
 
 /* Marker dropped where a place search lands */
 .atlas-geo-marker {

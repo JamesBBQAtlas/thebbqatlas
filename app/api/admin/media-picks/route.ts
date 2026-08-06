@@ -43,6 +43,22 @@ function clean(body: Record<string, unknown>, requireCore: boolean) {
     out.sort_order = Number.isFinite(n) ? n : 0;
   }
   if (body.is_published !== undefined) out.is_published = Boolean(body.is_published);
+  if (body.links !== undefined) {
+    let v: unknown = body.links;
+    if (typeof v === "string") {
+      const s = v.trim();
+      if (!s) v = {};
+      else {
+        try {
+          v = JSON.parse(s);
+        } catch {
+          return { error: "links must be valid JSON." };
+        }
+      }
+    }
+    if (v && typeof v === "object" && !Array.isArray(v)) out.links = v;
+    else return { error: "links must be a JSON object." };
+  }
   return { patch: out };
 }
 

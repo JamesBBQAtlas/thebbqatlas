@@ -277,10 +277,12 @@ const FALLBACK_STYLE: maplibregl.StyleSpecification = {
 
 export function MapExplorer({
   restaurants,
+  closedRestaurants = [],
   mapKey,
   personal = false,
 }: {
   restaurants: Restaurant[];
+  closedRestaurants?: Restaurant[];
   mapKey?: string;
   personal?: boolean;
 }) {
@@ -331,6 +333,8 @@ export function MapExplorer({
   const [country, setCountry] = useState<string>(initialState.country ?? "all");
   const [category, setCategory] = useState<string>(initialState.category ?? "all");
   const [query, setQuery] = useState(initialState.query ?? "");
+  // Opt-in ghost layer of permanently-closed venues (off by default).
+  const [showClosed, setShowClosed] = useState(false);
   const [selected, setSelected] = useState<Restaurant | null>(null);
   const [pitZero, setPitZero] = useState(false);
   const [homage, setHomage] = useState(false);
@@ -351,13 +355,21 @@ export function MapExplorer({
     return m;
   }, [restaurants]);
 
+  // Canonical display label for a venue's country ("GB" and "United Kingdom"
+  // both resolve here to "United Kingdom").
+  const countryLabel = (r: Restaurant) =>
+    countryName(resolveCountryCode(r.country_code, r.country) ?? r.country, r.country);
+
+  // De-dupe by the DISPLAY LABEL, not the raw code — otherwise a country that
+  // appears both as a code (GB) and a bare name ("United Kingdom") lists twice.
   const countries = useMemo(() => {
-    const map = new Map<string, string>();
+    const labels = new Set<string>();
     for (const r of restaurants) {
-      const code = resolveCountryCode(r.country_code, r.country) ?? r.country;
-      if (code) map.set(code, countryName(code, r.country));
+      const label = countryLabel(r);
+      if (label) labels.add(label);
     }
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    return [...labels].sort((a, b) => a.localeCompare(b)).map((l) => [l, l] as [string, string]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurants]);
 
   const filtered = useMemo(() => {
@@ -365,8 +377,7 @@ export function MapExplorer({
     return restaurants.filter((r) => {
       if (style !== "all" && r.style !== style) return false;
       if (category !== "all" && (r.category ?? "restaurant") !== category) return false;
-      if (country !== "all" && (resolveCountryCode(r.country_code, r.country) ?? r.country) !== country)
-        return false;
+      if (country !== "all" && countryLabel(r) !== country) return false;
       if (q && !`${r.name} ${r.city} ${r.country}`.toLowerCase().includes(q))
         return false;
       return Number.isFinite(r.lat) && Number.isFinite(r.lng);
@@ -404,6 +415,26 @@ export function MapExplorer({
       })),
     }),
     [filtered]
+  );
+
+  // Ghost layer — permanently-closed venues. Never clustered, never counted;
+  // rendered only when the visitor opts in via "Show closed venues".
+  const closedGeojson = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: closedRestaurants
+        .filter((r) => Number.isFinite(r.lat) && Number.isFinite(r.lng))
+        .map((r) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [r.lng, r.lat] },
+          properties: {
+            slug: r.slug,
+            name: r.name,
+            location: [r.city, r.country].filter(Boolean).join(", "),
+          },
+        })),
+    }),
+    [closedRestaurants]
   );
 
   // Init map once
@@ -496,6 +527,68 @@ export function MapExplorer({
           "circle-stroke-width": 2,
           "circle-stroke-color": personal ? "#E85D04" : INK,
         },
+      });
+
+      // Ghost layer — permanently-closed venues, hidden until opted in. Faded,
+      // greyscale, dashed halo so it reads clearly as "closed" against live pins.
+      map.addSource("closed-spots", {
+        type: "geojson",
+        data: closedGeojson as GeoJSON.FeatureCollection,
+      });
+      map.addLayer({
+        id: "closed-points",
+        type: "circle",
+        source: "closed-spots",
+        layout: { visibility: "none" },
+        paint: {
+          "circle-color": "#7c7368",
+          "circle-opacity": 0.5,
+          "circle-radius": 6,
+          "circle-stroke-width": 1.5,
+          "circle-stroke-color": "#b8ad9c",
+          "circle-stroke-opacity": 0.7,
+        },
+      });
+
+      // Closed-pin hover: name + location + a plain "Permanently closed" label —
+      // no "worth the drive" framing.
+      map.on("mouseenter", "closed-points", (e) => {
+        map.getCanvas().style.cursor = "pointer";
+        const f = e.features?.[0];
+        if (!f) return;
+        const p = f.properties as Record<string, string>;
+        popupRef.current?.remove();
+        const pop = document.createElement("div");
+        pop.className = "apop apop--closed";
+        const rows: [string, string][] = [
+          ["apop-name", p.name ?? ""],
+          ["apop-loc", p.location ?? ""],
+          ["apop-closed", "Permanently closed"],
+        ];
+        for (const [cls, text] of rows) {
+          const row = document.createElement("div");
+          row.className = cls;
+          row.textContent = text;
+          pop.appendChild(row);
+        }
+        popupRef.current = new maplibregl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          offset: 12,
+          className: "atlas-popup",
+        })
+          .setLngLat((f.geometry as GeoJSON.Point).coordinates as [number, number])
+          .setDOMContent(pop)
+          .addTo(map);
+      });
+      map.on("mouseleave", "closed-points", () => {
+        map.getCanvas().style.cursor = "";
+        popupRef.current?.remove();
+      });
+      // Click a ghost pin → open its (still-rendered) venue page.
+      map.on("click", "closed-points", (e) => {
+        const slug = e.features?.[0]?.properties?.slug as string | undefined;
+        if (slug) router.push(`/restaurants/${slug}`);
       });
 
       map.on("click", "clusters", (e) => {
@@ -604,6 +697,17 @@ export function MapExplorer({
     const src = map.getSource("spots") as maplibregl.GeoJSONSource | undefined;
     src?.setData(geojson as GeoJSON.FeatureCollection);
   }, [geojson, ready]);
+
+  // Keep the ghost source fresh and toggle its visibility with "Show closed".
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const src = map.getSource("closed-spots") as maplibregl.GeoJSONSource | undefined;
+    src?.setData(closedGeojson as GeoJSON.FeatureCollection);
+    if (map.getLayer("closed-points")) {
+      map.setLayoutProperty("closed-points", "visibility", showClosed ? "visible" : "none");
+    }
+  }, [closedGeojson, showClosed, ready]);
 
   // Persist filters + sidebar state alongside the remembered map position.
   useEffect(() => {
@@ -1063,6 +1167,18 @@ export function MapExplorer({
               ))}
             </select>
           </div>
+          {closedRestaurants.length > 0 && (
+            <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-text-secondary">
+              <input
+                type="checkbox"
+                checked={showClosed}
+                onChange={(e) => setShowClosed(e.target.checked)}
+                className="h-3.5 w-3.5 accent-brand-gold"
+              />
+              Show closed venues
+              <span className="text-text-muted">({closedRestaurants.length})</span>
+            </label>
+          )}
           <p className="mt-3 text-xs uppercase tracking-[0.08em] text-text-muted">
             {filtered.length} {filtered.length === 1 ? "spot" : "spots"}
           </p>

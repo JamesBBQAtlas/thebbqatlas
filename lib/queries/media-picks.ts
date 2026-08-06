@@ -11,6 +11,7 @@ export interface MediaPick {
   blurb: string;
   image_url: string | null;
   gear_link: string | null;
+  links: Record<string, string>;
   sort_order: number;
   is_published: boolean;
 }
@@ -34,7 +35,7 @@ export async function getMediaPicks(): Promise<MediaPicksByKind> {
     const { data, error } = await supabase
       .from("media_picks")
       .select(
-        "id, kind, name, creator, url, blurb, image_url, gear_link, sort_order, is_published"
+        "id, kind, name, creator, url, blurb, image_url, gear_link, links, sort_order, is_published"
       )
       .eq("is_published", true)
       .order("sort_order", { ascending: true })
@@ -42,7 +43,8 @@ export async function getMediaPicks(): Promise<MediaPicksByKind> {
     if (error || !data) return EMPTY;
     const out: MediaPicksByKind = { youtube: [], book: [], podcast: [] };
     for (const row of data as MediaPick[]) {
-      if (row.kind in out) out[row.kind].push(row);
+      const pick = { ...row, links: (row.links ?? {}) as Record<string, string> };
+      if (pick.kind in out) out[pick.kind].push(pick);
     }
     return out;
   } catch {

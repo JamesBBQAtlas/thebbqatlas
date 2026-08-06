@@ -13,6 +13,7 @@ export interface AdminMediaPick {
   blurb: string;
   image_url: string | null;
   gear_link: string | null;
+  links: Record<string, string> | null;
   sort_order: number;
   is_published: boolean;
 }
@@ -40,6 +41,8 @@ async function api(method: "POST" | "PATCH" | "DELETE", payload: Record<string, 
 function Row({ pick }: { pick: AdminMediaPick }) {
   const router = useRouter();
   const [draft, setDraft] = useState(pick);
+  const initialLinks = JSON.stringify(pick.links ?? {}, null, 0);
+  const [linksText, setLinksText] = useState(initialLinks);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const dirty =
@@ -48,7 +51,9 @@ function Row({ pick }: { pick: AdminMediaPick }) {
     draft.url !== pick.url ||
     draft.blurb !== pick.blurb ||
     draft.sort_order !== pick.sort_order ||
-    draft.gear_link !== pick.gear_link;
+    draft.image_url !== pick.image_url ||
+    draft.gear_link !== pick.gear_link ||
+    linksText !== initialLinks;
 
   async function run(method: "PATCH" | "DELETE", payload: Record<string, unknown>) {
     setBusy(true);
@@ -97,9 +102,22 @@ function Row({ pick }: { pick: AdminMediaPick }) {
       />
       <input
         className={inputCls + " mt-2"}
+        value={draft.image_url ?? ""}
+        onChange={(e) => setDraft({ ...draft, image_url: e.target.value })}
+        placeholder="Image URL (optional — books auto-fill from Open Library)"
+      />
+      <input
+        className={inputCls + " mt-2"}
         value={draft.gear_link ?? ""}
         onChange={(e) => setDraft({ ...draft, gear_link: e.target.value })}
         placeholder="Gear link (optional → /gear)"
+      />
+      <textarea
+        className={inputCls + " mt-2 resize-none font-mono text-xs"}
+        rows={2}
+        value={linksText}
+        onChange={(e) => setLinksText(e.target.value)}
+        placeholder={`Platform links JSON (podcasts) — e.g. {"apple":"…","spotify":"…"}`}
       />
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
@@ -112,7 +130,9 @@ function Row({ pick }: { pick: AdminMediaPick }) {
               creator: draft.creator,
               url: draft.url,
               blurb: draft.blurb,
+              image_url: draft.image_url,
               gear_link: draft.gear_link,
+              links: linksText,
               sort_order: draft.sort_order,
             })
           }

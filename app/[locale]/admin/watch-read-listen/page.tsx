@@ -34,7 +34,9 @@ export default async function MediaPicksAdminPage() {
 
   const { data } = await db
     .from("media_picks")
-    .select("id, kind, name, creator, url, blurb, image_url, gear_link, sort_order, is_published")
+    .select(
+      "id, kind, name, creator, url, blurb, image_url, gear_link, links, sort_order, is_published"
+    )
     .order("kind", { ascending: true })
     .order("sort_order", { ascending: true });
 
