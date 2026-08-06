@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { resolveBookCover } from "@/lib/media/book-cover";
 
 export const dynamic = "force-dynamic";
+// Sequential backfill of up to ~32 books — give it headroom past the default.
+export const maxDuration = 60;
 
 /**
  * Backfill book cover art ONCE and persist it to media_picks.image_url, so the
@@ -57,8 +59,10 @@ export async function POST(request: Request) {
     } else {
       unresolved.push({ name: b.name, url: b.url });
     }
-    // Gentle pace to avoid tripping the keyless Google Books rate limit.
-    await new Promise((r) => setTimeout(r, 350));
+    // Gentle pace to stay under the iTunes search soft-limit (~20/min). Each
+    // click only processes books still missing a cover, so if the tail 429s you
+    // can simply click again to resolve the rest — it's idempotent.
+    await new Promise((r) => setTimeout(r, 900));
   }
 
   revalidatePath("/watch-read-listen");
