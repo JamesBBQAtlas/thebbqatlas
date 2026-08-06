@@ -20,16 +20,24 @@ export function handleFrom(url: string | null | undefined): string | null {
  * ~30-day freshness expectation). subscriberCount is returned verbatim from the
  * API — no derived metrics. Server-side only.
  */
-export async function resolveYouTube(url: string): Promise<YouTubeData | null> {
+export async function resolveYouTube(
+  url: string,
+  channelId?: string | null
+): Promise<YouTubeData | null> {
   const key = process.env.YOUTUBE_API_KEY;
   const handle = handleFrom(url);
-  if (!key || !handle) return null;
+  // Prefer a pinned channel id (some channels' @handle doesn't resolve via
+  // forHandle — e.g. Ant's BBQ Cookout); fall back to the handle.
+  const selector = channelId
+    ? `id=${encodeURIComponent(channelId)}`
+    : handle
+      ? `forHandle=${encodeURIComponent(handle)}`
+      : null;
+  if (!key || !selector) return null;
 
   try {
     const chRes = await fetch(
-      `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&forHandle=${encodeURIComponent(
-        handle
-      )}&key=${key}`,
+      `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&${selector}&key=${key}`,
       { next: { revalidate: 86400 } }
     );
     if (!chRes.ok) return null;

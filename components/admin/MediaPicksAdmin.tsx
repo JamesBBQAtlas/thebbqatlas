@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2, Plus } from "lucide-react";
+import { Loader2, Trash2, Plus, ImageDown } from "lucide-react";
 
 export interface AdminMediaPick {
   id: string;
@@ -104,7 +104,7 @@ function Row({ pick }: { pick: AdminMediaPick }) {
         className={inputCls + " mt-2"}
         value={draft.image_url ?? ""}
         onChange={(e) => setDraft({ ...draft, image_url: e.target.value })}
-        placeholder="Image URL (optional — books auto-fill from Open Library)"
+        placeholder="Image URL (optional — books auto-fill via Resolve book covers)"
       />
       <input
         className={inputCls + " mt-2"}
@@ -258,6 +258,94 @@ function AddForm({ kind }: { kind: AdminMediaPick["kind"] }) {
   );
 }
 
+interface CoverReport {
+  total: number;
+  resolved: { name: string }[];
+  unresolved: { name: string; url: string }[];
+}
+
+function ResolveCoversButton() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [report, setReport] = useState<CoverReport | null>(null);
+  const [error, setError] = useState("");
+
+  async function run(force: boolean) {
+    setBusy(true);
+    setError("");
+    setReport(null);
+    try {
+      const res = await fetch("/api/admin/media-picks/resolve-covers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError((data.error as string) || "Failed.");
+      } else {
+        setReport(data as CoverReport);
+        router.refresh();
+      }
+    } catch {
+      setError("Network error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => run(false)}
+          title="Resolve covers for books with no image yet, and save them"
+          className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
+        >
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <ImageDown className="h-3.5 w-3.5" />
+          )}
+          Resolve book covers
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => run(true)}
+          title="Re-resolve EVERY book cover (refresh existing)"
+          className="rounded-md border border-border-default px-2.5 py-2 text-xs font-semibold text-text-muted hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
+        >
+          Refresh all
+        </button>
+      </div>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      {report && (
+        <div className="max-w-sm rounded-md border border-border-subtle bg-surface-1 p-3 text-xs">
+          <p className="font-semibold text-text-primary">
+            {report.resolved.length} resolved · {report.unresolved.length} unresolved
+            <span className="font-normal text-text-muted"> (of {report.total})</span>
+          </p>
+          {report.unresolved.length > 0 && (
+            <div className="mt-2">
+              <p className="text-text-muted">
+                Hand-set an Image URL for these (placeholder shown until you do):
+              </p>
+              <ul className="mt-1 list-disc space-y-0.5 pl-4 text-text-secondary">
+                {report.unresolved.map((u) => (
+                  <li key={u.name}>{u.name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MediaPicksAdmin({ rows }: { rows: AdminMediaPick[] }) {
   return (
     <div className="space-y-10">
@@ -270,7 +358,10 @@ export function MediaPicksAdmin({ rows }: { rows: AdminMediaPick[] }) {
                 {KIND_LABEL[kind]}{" "}
                 <span className="text-sm font-normal text-text-muted">({items.length})</span>
               </h2>
-              <AddForm kind={kind} />
+              <div className="flex flex-col items-end gap-2">
+                {kind === "book" && <ResolveCoversButton />}
+                <AddForm kind={kind} />
+              </div>
             </div>
             <div className="space-y-3">
               {items.map((pick) => (
