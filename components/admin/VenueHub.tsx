@@ -1155,12 +1155,14 @@ export function VenueHub({
       <div className="overflow-x-auto rounded-xl border border-border-subtle">
         {/* min-width keeps the columns at their natural size so the wrapper
             SCROLLS on a narrow viewport instead of compressing the action cell
-            and clipping icons off either edge. */}
+            and clipping icons off either edge. The checkbox + Venue columns are
+            pinned (position: sticky, left) so the venue NAME stays visible while
+            you scroll right to reach the action icons — neither edge clips. */}
         <table className="w-full min-w-[1000px] text-left text-sm">
           <thead className="bg-surface-1 text-xs uppercase tracking-[0.05em] text-text-muted">
             <tr>
-              <th className="px-3 py-3"></th>
-              <th className="px-3 py-3 font-semibold">Venue</th>
+              <th className="sticky left-0 z-20 w-11 bg-surface-1 px-3 py-3"></th>
+              <th className="sticky left-11 z-20 bg-surface-1 px-3 py-3 font-semibold">Venue</th>
               <th className="px-3 py-3 font-semibold">Status</th>
               <th className="px-3 py-3 font-semibold">📷</th>
               <th className="px-3 py-3 font-semibold">IG</th>
@@ -1188,8 +1190,8 @@ export function VenueHub({
                       highlightId === v.id ? "ring-2 ring-inset ring-brand-gold/70 !bg-brand-gold/10" : ""
                     }`}
                   >
-                    <td className="px-3 py-3"><input type="checkbox" checked={selected.has(v.id)} onChange={() => toggle(v.id)} className="mt-1 h-4 w-4 accent-[#D4AF37]" aria-label={`Select ${v.name}`} /></td>
-                    <td className={`px-3 py-3 ${indent ? "border-l-2 border-brand-sienna/40 pl-4" : ""}`}>
+                    <td className={`sticky left-0 z-10 w-11 px-3 py-3 ${indent ? "bg-surface-1" : "bg-surface-0"}`}><input type="checkbox" checked={selected.has(v.id)} onChange={() => toggle(v.id)} className="mt-1 h-4 w-4 accent-[#D4AF37]" aria-label={`Select ${v.name}`} /></td>
+                    <td className={`sticky left-11 z-10 px-3 py-3 ${indent ? "border-l-2 border-brand-sienna/40 pl-4 bg-surface-1" : "bg-surface-0"}`}>
                       <div className="font-semibold text-text-primary">
                         {indent && <span className="mr-1 text-brand-sienna-light" aria-hidden="true">↳</span>}
                         {v.name}
