@@ -1,3 +1,4 @@
+import { unstable_noStore as noStore } from "next/cache";
 import { createAnonClient } from "@/lib/supabase/anon";
 
 export type MediaKind = "youtube" | "book" | "podcast";
@@ -33,6 +34,11 @@ const EMPTY: MediaPicksByKind = { youtube: [], book: [], podcast: [] };
  * query honest even under the service role. An empty result is a valid answer.
  */
 export async function getMediaPicks(): Promise<MediaPicksByKind> {
+  // The page is dynamic, but the Supabase client's fetch can still be stored in
+  // Next's Data Cache — so DB edits (and resolved book covers) get frozen at an
+  // earlier snapshot and never surface. noStore() forces this read to run fresh
+  // on every request.
+  noStore();
   try {
     const supabase = createAnonClient();
     const { data, error } = await supabase
