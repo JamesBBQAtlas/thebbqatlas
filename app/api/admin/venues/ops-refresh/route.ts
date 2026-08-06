@@ -8,7 +8,7 @@ import { geocodeAddress } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
-import { composeAddress, preferFullerAddress, settlementCity } from "@/lib/admin/address";
+import { composeAddress, preferFullerAddress, bestSettlement } from "@/lib/admin/address";
 import { auditField } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
@@ -210,7 +210,9 @@ export async function POST(request: Request) {
     if (newAddress && newAddress !== row.address) {
       staged.address = newAddress;
       moveFlag = true;
-      const newCity = facts.city ? settlementCity(facts.city) || facts.city : null;
+      // Resolve to the TOWN — reject a county/state/POI and parse from the new
+      // address if the reported city is one (matches the enrichment paths).
+      const newCity = bestSettlement({ city: facts.city, address: newAddress });
       if (newCity && newCity !== row.city) staged.city = newCity;
       // Coordinates: use verified dossier coords, else geocode the new address.
       const validCoord = (a: number | null, b: number | null) =>

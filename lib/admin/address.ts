@@ -98,7 +98,94 @@ export function looksLikePoiCity(city: string | null | undefined): boolean {
 const ADDRESS_COUNTRY = /^(uk|u\.k\.|united kingdom|great britain|england|scotland|wales|northern ireland|usa|u\.s\.a\.|u\.s\.|united states|united states of america|ireland|eire|éire)$/i;
 /** A street line: starts with a number, or carries a street-type / unit word. */
 const STREET_WORD = /^\d|\b(st|street|rd|road|ave|avenue|blvd|boulevard|dr|drive|ln|lane|way|close|court|ct|unit|suite|ste|floor|fl|yard|wharf|quay|mews|row|terrace|smokehouse|arcade|building|bldg|house|no)\b/i;
-const POSTCODE = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|\d{4,5}(?:-\d{4})?)\b/gi;
+// UK (SW1A 1AA), Canada (M5H 2N2), and US/AU numeric (78701, 2000, 90210-1234).
+const POSTCODE =
+  /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|[A-Z]\d[A-Z]\s*\d[A-Z]\d|\d{4,5}(?:-\d{4})?)\b/gi;
+
+/**
+ * REGION tokens — the county / state / province that sits between the town and
+ * the postcode ("Kendal, **Cumbria** LA9 4ND"; "Austin, **TX** 78701"). These are
+ * NOT the settlement and must be skipped when hunting for the town.
+ *
+ * Two sets, used differently:
+ *  - CODES: 2-letter US-state / CA-province / AU-state abbreviations. Unambiguous
+ *    as a standalone segment (a town is never "TX"), so skipped ANYWHERE.
+ *  - NAMES: spelled-out states/provinces + UK counties. A few collide with real
+ *    town names ("New York", "Washington", "Victoria", "Durham"), so those are
+ *    deliberately OMITTED — and a NAME is only skipped when it's the token
+ *    physically carrying the postcode (position-disambiguated), never elsewhere.
+ */
+const REGION_CODES = new Set<string>([
+  // US states + DC
+  "al","ak","az","ar","ca","co","ct","de","fl","ga","hi","id","il","in","ia","ks",
+  "ky","la","me","md","ma","mi","mn","ms","mo","mt","ne","nv","nh","nj","nm","ny",
+  "nc","nd","oh","ok","or","pa","ri","sc","sd","tn","tx","ut","vt","va","wa","wv",
+  "wi","wy","dc",
+  // Canadian provinces + territories
+  "ab","bc","mb","nb","nl","ns","nt","nu","on","pe","qc","sk","yt",
+  // Australian states + territories
+  "nsw","vic","qld","sa","tas","act",
+]);
+
+const REGION_NAMES = new Set<string>([
+  // US states (spelled out) — "new york" & "washington" OMITTED (real cities).
+  "alabama","alaska","arizona","arkansas","california","colorado","connecticut",
+  "delaware","florida","georgia","hawaii","idaho","illinois","indiana","iowa",
+  "kansas","kentucky","louisiana","maine","maryland","massachusetts","michigan",
+  "minnesota","mississippi","missouri","montana","nebraska","nevada",
+  "new hampshire","new jersey","new mexico","north carolina","north dakota",
+  "ohio","oklahoma","oregon","pennsylvania","rhode island","south carolina",
+  "south dakota","tennessee","texas","utah","vermont","virginia","west virginia",
+  "wisconsin","wyoming",
+  // Canadian provinces — "victoria" OMITTED (city).
+  "alberta","british columbia","manitoba","new brunswick",
+  "newfoundland and labrador","nova scotia","ontario","prince edward island",
+  "quebec","saskatchewan","northwest territories","nunavut","yukon",
+  // Australian states/territories — "victoria" OMITTED (city).
+  "new south wales","queensland","south australia","western australia","tasmania",
+  "australian capital territory","northern territory",
+  // England — ceremonial counties (town-name collisions like "durham" OMITTED;
+  // "county durham" kept as the distinct county form).
+  "bedfordshire","berkshire","buckinghamshire","cambridgeshire","cheshire",
+  "cornwall","cumbria","derbyshire","devon","dorset","county durham",
+  "east riding of yorkshire","east sussex","essex","gloucestershire",
+  "greater london","greater manchester","hampshire","herefordshire",
+  "hertfordshire","isle of wight","kent","lancashire","leicestershire",
+  "lincolnshire","merseyside","norfolk","north yorkshire","northamptonshire",
+  "northumberland","nottinghamshire","oxfordshire","rutland","shropshire",
+  "somerset","south yorkshire","staffordshire","suffolk","surrey",
+  "tyne and wear","warwickshire","west midlands","west sussex","west yorkshire",
+  "wiltshire","worcestershire",
+  // Wales (preserved counties) + common principal areas.
+  "clwyd","dyfed","gwent","gwynedd","powys","mid glamorgan","south glamorgan",
+  "west glamorgan","ceredigion","pembrokeshire","carmarthenshire","monmouthshire",
+  // Scotland — common council areas / historic counties.
+  "aberdeenshire","angus","argyll and bute","ayrshire","dumfries and galloway",
+  "fife","highland","lanarkshire","midlothian","perthshire","renfrewshire",
+  "stirlingshire","scottish borders","the scottish borders",
+]);
+
+const normToken = (v: string): string =>
+  clean(v).toLowerCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+
+/** A 2-letter state/province code (skippable anywhere in the address tail). */
+export function looksLikeRegionCode(token: string | null | undefined): boolean {
+  return REGION_CODES.has(normToken(token ?? ""));
+}
+
+/**
+ * A county / state / province NAME (e.g. "Cumbria", "Texas"). Deliberately does
+ * NOT match real town names that double as regions ("New York", "Durham") — so
+ * it's safe to reject a stored `city` that equals one of these.
+ */
+export function looksLikeRegionName(token: string | null | undefined): boolean {
+  return REGION_NAMES.has(normToken(token ?? ""));
+}
+
+/** Region = a 2-letter code OR a spelled-out county/state/province name. */
+export function looksLikeRegion(token: string | null | undefined): boolean {
+  return looksLikeRegionCode(token) || looksLikeRegionName(token);
+}
 
 /**
  * Best-effort extraction of the TOWN / locality from a full address string — the
@@ -111,16 +198,36 @@ const POSTCODE = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|\d{4,5}(?:-\d{4})?)\b/gi;
 export function localityFromAddress(address: string | null | undefined): string {
   const raw = clean(address);
   if (!raw) return "";
-  let parts = raw
+  const rawParts = raw
     .split(",")
-    .map((p) => p.replace(POSTCODE, "").trim())
+    .map((p) => p.trim())
     .filter(Boolean);
-  if (parts.length < 2) return "";
-  // Drop trailing pure country / nation tokens.
-  while (parts.length > 1 && ADDRESS_COUNTRY.test(parts[parts.length - 1])) parts.pop();
-  // The town is the LAST remaining part that isn't a street line or a POI.
+  if (rawParts.length < 2) return "";
+
+  // Which comma-part physically carries the postcode? (the LAST such — a UK
+  // county or US state name sits attached to it: "Cumbria LA9 4ND", "TX 78701").
+  let pcIdx = -1;
+  for (let i = rawParts.length - 1; i >= 0; i--) {
+    POSTCODE.lastIndex = 0;
+    if (POSTCODE.test(rawParts[i])) {
+      pcIdx = i;
+      break;
+    }
+  }
+
+  // Strip postcodes from every part, keeping index alignment with pcIdx.
+  const parts = rawParts.map((p) => p.replace(POSTCODE, "").trim());
+
+  // The town is the LAST part that isn't a country, a region, a street line, or
+  // a POI. A 2-letter CODE is skipped anywhere; a spelled-out region NAME is
+  // skipped only when it's the postcode-bearing token (so "New York" the city,
+  // which never carries the ZIP itself, is never mistaken for the state).
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i];
+    if (!p) continue;
+    if (ADDRESS_COUNTRY.test(p)) continue;
+    if (looksLikeRegionCode(p)) continue;
+    if (i === pcIdx && looksLikeRegionName(p)) continue;
     if (STREET_WORD.test(p) || looksLikePoiCity(p)) continue;
     return settlementCity(p);
   }
@@ -138,12 +245,21 @@ export function bestSettlement(opts: {
   address?: string | null;
   geoCity?: string | null;
 }): string {
+  // A candidate is only usable if it's a real town — never a POI/landmark and
+  // never a county/state/province ("Cumbria", "TX"). We try, in order: the
+  // provided city, the town parsed out of the full address, then the geocoder's
+  // settlement, and take the first that is a genuine town.
+  const usable = (c: string): boolean =>
+    Boolean(c) && !looksLikePoiCity(c) && !looksLikeRegion(c);
+
   const provided = settlementCity(opts.city);
-  if (provided && !looksLikePoiCity(provided)) return provided;
+  if (usable(provided)) return provided;
   const fromAddress = localityFromAddress(opts.address);
-  if (fromAddress && !looksLikePoiCity(fromAddress)) return fromAddress;
+  if (usable(fromAddress)) return fromAddress;
   const geo = settlementCity(opts.geoCity);
-  if (geo && !looksLikePoiCity(geo)) return geo;
+  if (usable(geo)) return geo;
+  // Nothing resolved to a clean town — return "" so the caller flags it for a
+  // human rather than storing a county/state/POI as the city.
   return "";
 }
 

@@ -1,6 +1,6 @@
 import { emailShell, emailText } from "./layout";
 import { sendEmail } from "./send";
-import { EMAIL_FROM, EMAIL_SITE_URL } from "./config";
+import { EMAIL_FROM, EMAIL_SITE_URL, EMAIL_REPLY_TO } from "./config";
 
 const T = EMAIL_FROM.transactional;
 const M = EMAIL_FROM.marketing;
@@ -322,5 +322,225 @@ We map barbecue. We're just a little easier to find these days.`;
       "List-Unsubscribe": `<${apiUrl}>`,
       "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
     },
+  });
+}
+
+// ============================================================================
+// FOOTER-NEWSLETTER LIFECYCLE (email_subscribers list) — separate from the
+// account/profile lifecycle above. Copy is verbatim from the PM's build prompt
+// (Appendix A/B/C). Three sends, all marketing stream, each with a real
+// one-click unsubscribe via the subscriber's own token:
+//   welcome (immediate, on subscribe) → drip_3 (>=3 days) → drip_7 (>=7 days).
+// ============================================================================
+
+const SIENNA_BTN = "#C4622D";
+const SANS_BTN =
+  "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif";
+
+/** Inline, email-safe CTA button (table-based) so body copy can sit below it. */
+function ctaButton(label: string, url: string): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0;">
+      <tr><td style="border-radius:6px;background:${SIENNA_BTN};">
+        <a href="${url}" style="display:inline-block;padding:13px 26px;font-family:${SANS_BTN};font-size:15px;font-weight:bold;color:#ffffff;text-decoration:none;border-radius:6px;">${label}</a>
+      </td></tr>
+    </table>`;
+}
+
+/** Subscriber unsubscribe links (page + one-click API) from the row's token. */
+function subUnsub(token: string) {
+  return {
+    pageUrl: `${EMAIL_SITE_URL}/unsubscribe?token=${token}`,
+    apiUrl: `${EMAIL_SITE_URL}/api/unsubscribe?token=${token}`,
+  };
+}
+
+/**
+ * Newsletter WELCOME — sent immediately when someone subscribes via the footer
+ * (single opt-in, no confirmation). Appendix A copy, verbatim.
+ */
+export function sendSubscriberWelcome(opts: { to: string; unsubscribeToken: string }) {
+  const { pageUrl, apiUrl } = subUnsub(opts.unsubscribeToken);
+  const map = `${EMAIL_SITE_URL}/map`;
+
+  const bodyHtml = `<p style="margin:0 0 14px;">Welcome to The BBQ Atlas.</p>
+    <p style="margin:0 0 14px;">You've just joined a small but growing number of people who take barbecue seriously enough to want a map of it — the real places, the pits worth the drive, wherever in the world they happen to be.</p>
+    <p style="margin:0 0 14px;">Here's what we're about: we don't rank barbecue. We celebrate it. No stars, no leaderboards, no "best of" bait. Just honest places, honestly described, on one map you can actually use.</p>
+    ${ctaButton("Explore the map →", map)}
+    <p style="margin:0 0 14px;">We'll send you a couple of short notes over the next week — where to start, and how to add a place we've missed. After that, we only write when there's something genuinely worth your time.</p>
+    <p style="margin:0 0 18px;">Glad you're here. Go find something worth the drive.</p>
+    <p style="margin:0;color:#6f6152;">— The BBQ Atlas</p>`;
+
+  const bodyText = `Welcome to The BBQ Atlas.
+
+You've just joined a small but growing number of people who take barbecue seriously enough to want a map of it — the real places, the pits worth the drive, wherever in the world they happen to be.
+
+Here's what we're about: we don't rank barbecue. We celebrate it. No stars, no leaderboards, no "best of" bait. Just honest places, honestly described, on one map you can actually use.
+
+Explore the map: ${map}
+
+We'll send you a couple of short notes over the next week — where to start, and how to add a place we've missed. After that, we only write when there's something genuinely worth your time.
+
+Glad you're here. Go find something worth the drive.
+
+— The BBQ Atlas`;
+
+  const footerHtml = `<p style="margin:10px 0 0;">Didn't mean to sign up? <a href="${pageUrl}" style="color:#C4622D;">Unsubscribe</a> — no hard feelings.</p>`;
+  const footerText = `Didn't mean to sign up? Unsubscribe — no hard feelings: ${pageUrl}`;
+
+  return sendEmail({
+    to: opts.to,
+    from: M,
+    stream: "marketing",
+    type: "welcome",
+    subject: "You're on the map.",
+    html: emailShell({
+      title: "You're on the map.",
+      preheader: "No stars, no leaderboards — just barbecue, mapped.",
+      bodyHtml,
+      footerHtml,
+    }),
+    text: emailText({ title: "You're on the map.", bodyText, footerText }),
+    headers: {
+      "List-Unsubscribe": `<${apiUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
+  });
+}
+
+/** Newsletter DAY-3 drip — "Find a place. Save it. Go." Appendix B, verbatim. */
+export function sendSubscriberDrip3(opts: { to: string; unsubscribeToken: string }) {
+  const { pageUrl, apiUrl } = subUnsub(opts.unsubscribeToken);
+  const map = `${EMAIL_SITE_URL}/map`;
+  const guides = `${EMAIL_SITE_URL}/guides`;
+
+  const bodyHtml = `<p style="margin:0 0 14px;">A quick note now you've had a few days with the Atlas.</p>
+    <p style="margin:0 0 14px;">The whole thing runs on one simple loop: find a place, save it, go. Every pin is a real barbecue joint someone thought was worth putting on the map — a Texas smokehouse in Kendal, a Korean grill in Melbourne, brisket in Austin. Open the map, wander, and when something catches your eye, save it to your own atlas so it's waiting when you're next in town.</p>
+    ${ctaButton("Open the map →", map)}
+    <p style="margin:0 0 14px;">Not sure where to start? The guides are a good way in — plain-spoken pieces on fire, smoke, wood, and the craft behind the plate. No gatekeeping, just the good stuff.</p>
+    ${ctaButton("Read the guides →", guides)}
+    <p style="margin:0 0 18px;">More soon.</p>
+    <p style="margin:0;color:#6f6152;">— The BBQ Atlas</p>`;
+
+  const bodyText = `A quick note now you've had a few days with the Atlas.
+
+The whole thing runs on one simple loop: find a place, save it, go. Every pin is a real barbecue joint someone thought was worth putting on the map — a Texas smokehouse in Kendal, a Korean grill in Melbourne, brisket in Austin. Open the map, wander, and when something catches your eye, save it to your own atlas so it's waiting when you're next in town.
+
+Open the map: ${map}
+
+Not sure where to start? The guides are a good way in — plain-spoken pieces on fire, smoke, wood, and the craft behind the plate. No gatekeeping, just the good stuff.
+
+Read the guides: ${guides}
+
+More soon.
+
+— The BBQ Atlas`;
+
+  const footerHtml = `<p style="margin:10px 0 0;">You're receiving this because you subscribed to The BBQ Atlas. <a href="${pageUrl}" style="color:#C4622D;">Unsubscribe</a> anytime.</p>`;
+  const footerText = `You're receiving this because you subscribed to The BBQ Atlas. Unsubscribe: ${pageUrl}`;
+
+  return sendEmail({
+    to: opts.to,
+    from: M,
+    stream: "marketing",
+    type: "drip_3",
+    subject: "Find a place. Save it. Go.",
+    html: emailShell({
+      title: "Find a place. Save it. Go.",
+      preheader: "The Atlas runs on one simple loop.",
+      bodyHtml,
+      footerHtml,
+    }),
+    text: emailText({ title: "Find a place. Save it. Go.", bodyText, footerText }),
+    headers: {
+      "List-Unsubscribe": `<${apiUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
+  });
+}
+
+/** Newsletter DAY-7 drip — "Know a great one we've missed?" Appendix C, verbatim. */
+export function sendSubscriberDrip7(opts: { to: string; unsubscribeToken: string }) {
+  const { pageUrl, apiUrl } = subUnsub(opts.unsubscribeToken);
+  const submit = `${EMAIL_SITE_URL}/submit`;
+
+  const bodyHtml = `<p style="margin:0 0 14px;">Here's the thing about a map of the world's barbecue: it's never finished. There's always a backstreet joint, a roadside smoker, a place only the locals know — and we want them all.</p>
+    <p style="margin:0 0 14px;">So, a small ask. If you know a great barbecue place we haven't got yet, tell us. We'll go find it, make sure it's real, and add it. That's how the Atlas grows — not from a marketing team, but from people who actually eat this food.</p>
+    ${ctaButton("Submit a place →", submit)}
+    <p style="margin:0 0 14px;">No survey, no feedback form, no "how did we do." Good barbecue doesn't ask how it did — it already knows. We just want the next great place on the map.</p>
+    <p style="margin:0 0 18px;">Thanks for being here early.</p>
+    <p style="margin:0;color:#6f6152;">— The BBQ Atlas</p>`;
+
+  const bodyText = `Here's the thing about a map of the world's barbecue: it's never finished. There's always a backstreet joint, a roadside smoker, a place only the locals know — and we want them all.
+
+So, a small ask. If you know a great barbecue place we haven't got yet, tell us. We'll go find it, make sure it's real, and add it. That's how the Atlas grows — not from a marketing team, but from people who actually eat this food.
+
+Submit a place: ${submit}
+
+No survey, no feedback form, no "how did we do." Good barbecue doesn't ask how it did — it already knows. We just want the next great place on the map.
+
+Thanks for being here early.
+
+— The BBQ Atlas`;
+
+  const footerHtml = `<p style="margin:10px 0 0;">You're receiving this because you subscribed to The BBQ Atlas. <a href="${pageUrl}" style="color:#C4622D;">Unsubscribe</a> anytime.</p>`;
+  const footerText = `You're receiving this because you subscribed to The BBQ Atlas. Unsubscribe: ${pageUrl}`;
+
+  return sendEmail({
+    to: opts.to,
+    from: M,
+    stream: "marketing",
+    type: "drip_7",
+    subject: "Know a great one we've missed?",
+    html: emailShell({
+      title: "Know a great one we've missed?",
+      preheader: "A small ask — the Atlas is never finished.",
+      bodyHtml,
+      footerHtml,
+    }),
+    text: emailText({ title: "Know a great one we've missed?", bodyText, footerText }),
+    headers: {
+      "List-Unsubscribe": `<${apiUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
+  });
+}
+
+// ============================================================================
+// CONTACT-FORM NOTIFICATION — there is no admin inbox page, so a new contact
+// message would otherwise sit unseen in the table. This pings the team so they
+// actually read it. Best-effort: the message is already stored regardless.
+// ============================================================================
+
+const esc = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/** Notify the team of a new contact-form message. reply_to = the sender. */
+export function sendContactNotification(opts: {
+  name: string;
+  email: string;
+  subject?: string | null;
+  message: string;
+}) {
+  const subj = opts.subject?.trim();
+  const bodyHtml = `<p style="margin:0 0 14px;">New message via the contact form.</p>
+    <p style="margin:0 0 6px;"><strong>From:</strong> ${esc(opts.name)} &lt;${esc(opts.email)}&gt;</p>
+    ${subj ? `<p style="margin:0 0 6px;"><strong>Subject:</strong> ${esc(subj)}</p>` : ""}
+    <p style="margin:14px 0 6px;color:#6f6152;">Message:</p>
+    <p style="margin:0;white-space:pre-wrap;">${esc(opts.message)}</p>`;
+  const bodyText = `New message via the contact form.
+
+From: ${opts.name} <${opts.email}>${subj ? `\nSubject: ${subj}` : ""}
+
+${opts.message}`;
+
+  return sendEmail({
+    to: EMAIL_REPLY_TO,
+    from: T,
+    stream: "transactional",
+    type: "contact_notify",
+    replyTo: opts.email,
+    subject: subj ? `Contact form: ${subj}` : `Contact form message from ${opts.name}`,
+    html: emailShell({ title: "New contact message", bodyHtml }),
+    text: emailText({ title: "New contact message", bodyText }),
   });
 }

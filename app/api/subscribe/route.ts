@@ -4,6 +4,7 @@ import {
   MARKETING_CONSENT_RECORD,
   MARKETING_CONSENT_VERSION,
 } from "@/lib/email/consent";
+import { sendSubscriberWelcome } from "@/lib/email/senders";
 
 export const dynamic = "force-dynamic";
 
@@ -72,5 +73,33 @@ export async function POST(request: Request) {
   if (error) {
     return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
   }
+
+  // Single opt-in: send the welcome immediately (Appendix A). Deduped by the
+  // audit log so a repeat submit of the same address never re-welcomes. The
+  // send is best-effort — a mail hiccup must never fail a good subscription.
+  try {
+    const { data: sub } = await admin
+      .from("email_subscribers")
+      .select("unsubscribe_token")
+      .eq("email", email)
+      .maybeSingle();
+    if (sub?.unsubscribe_token) {
+      const { count } = await admin
+        .from("email_log")
+        .select("id", { count: "exact", head: true })
+        .eq("to_email", email)
+        .eq("type", "welcome")
+        .in("status", ["sent", "skipped"]);
+      if (!count) {
+        await sendSubscriberWelcome({
+          to: email,
+          unsubscribeToken: String(sub.unsubscribe_token),
+        });
+      }
+    }
+  } catch {
+    /* welcome is best-effort — the subscription itself already succeeded */
+  }
+
   return NextResponse.json({ ok: true });
 }

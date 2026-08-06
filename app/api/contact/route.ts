@@ -1,13 +1,23 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { sendContactNotification } from "@/lib/email/senders";
+
+export const dynamic = "force-dynamic";
 
 /**
- * Public contact form. Stores the message (server-side, via the service-role
- * client so no public insert policy is needed). Basic validation + honeypot.
+ * Public contact form. Stores the message server-side via the service-role
+ * client — contact_messages is deliberately RLS-locked with no public policy
+ * (same pattern as email_subscribers), so the service role is the ONLY writer.
+ * That means the key must be present: if it isn't we say so (503) rather than
+ * quietly attempting an anon insert RLS would reject. Basic validation + honeypot.
  */
 export async function POST(request: Request) {
+  // Service role is required to write the RLS-locked table. Fail loud, not silent.
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return NextResponse.json({ error: "unavailable" }, { status: 503 });
+  }
+
   // Rate limit: 5 messages per IP per hour (backstops Vercel Firewall).
   if (!(await rateLimit(`contact:${clientIp(request)}`, 5, 3600))) {
     return NextResponse.json(
@@ -36,9 +46,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Message is too long." }, { status: 400 });
   }
 
-  const db = process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? createAdminClient()
-    : await createClient();
+  const db = createAdminClient();
 
   const { error } = await db.from("contact_messages").insert({
     name,
@@ -49,5 +57,14 @@ export async function POST(request: Request) {
   if (error) {
     return NextResponse.json({ error: "Could not send — please try again." }, { status: 500 });
   }
+
+  // Ping the team so the message is actually seen (no admin inbox page yet).
+  // Best-effort: the message is already stored, so a mail hiccup never fails it.
+  try {
+    await sendContactNotification({ name, email, subject, message });
+  } catch {
+    /* notification is best-effort */
+  }
+
   return NextResponse.json({ ok: true });
 }
