@@ -10,17 +10,39 @@ export function isbnFromAmazon(url: string | null | undefined): string | null {
 const norm = (s: string) =>
   s.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
 
-/** Rough title match: most of our title's real words appear in the candidate. */
+const STOP = new Set(["the", "a", "an", "of", "and", "to", "for", "with"]);
+// Generic barbecue/cookbook words that must not, on their own, confirm a match.
+const GENERIC = new Set([
+  "barbecue", "bbq", "grill", "grilling", "smoke", "smoking", "fire", "food",
+  "cookbook", "book", "meat", "recipes", "recipe", "guide", "cooking",
+]);
+
+const sigWords = (s: string): string[] =>
+  norm(s)
+    .split(" ")
+    .filter((w) => w.length > 2 && !STOP.has(w));
+
+/**
+ * Title match that tolerates subtitle asymmetry (our DB title often carries a
+ * long subtitle — "Meathead: The Science of…" — while the store lists just
+ * "Meathead") WITHOUT ever confirming a wrong cover. We compare significant
+ * words bidirectionally and require 60% of the SHORTER title's words to be
+ * shared, so distinct siblings like "Project Fire" vs "Project Smoke" (only the
+ * generic word overlaps → 1/2 = 0.5) still fail. A single shared word only
+ * confirms a match when it's distinctive, never a generic barbecue term.
+ */
 function titleMatches(candidate: string | undefined, want: string): boolean {
   if (!candidate) return false;
-  const c = norm(candidate);
-  const stop = new Set(["the", "a", "an", "of", "and", "to", "for", "with"]);
-  const words = norm(want)
-    .split(" ")
-    .filter((w) => w.length > 2 && !stop.has(w));
-  if (words.length === 0) return true;
-  const hits = words.filter((w) => c.includes(w)).length;
-  return hits / words.length >= 0.6;
+  const w = sigWords(want);
+  const c = sigWords(candidate);
+  if (w.length === 0) return true;
+  if (c.length === 0) return false;
+  const cset = new Set(c);
+  const shared = w.filter((x) => cset.has(x));
+  const smaller = Math.min(w.length, c.length);
+  if (shared.length / smaller < 0.6) return false;
+  if (smaller === 1) return !GENERIC.has(shared[0]);
+  return true;
 }
 
 /** First author only, cleaned of "&"/"," and any trailing "(DJ BBQ)" style note. */
@@ -36,25 +58,29 @@ function firstAuthor(author: string | null): string {
  */
 async function fromItunes(title: string, author: string | null): Promise<string | null> {
   const term = `${title} ${firstAuthor(author)}`.trim();
-  try {
-    const res = await fetch(
-      `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=ebook&entity=ebook&limit=8&country=US`,
-      { next: { revalidate: 604800 } }
-    );
-    if (!res.ok) return null;
-    const data = (await res.json()) as {
-      results?: { trackName?: string; artworkUrl100?: string }[];
-    };
-    for (const r of data.results ?? []) {
-      // Only accept a result whose title really matches ours — never a wrong cover.
-      if (r.artworkUrl100 && titleMatches(r.trackName, title)) {
-        return r.artworkUrl100
-          .replace(/^http:\/\//, "https://")
-          .replace(/\/\d+x\d+bb\.(jpg|png)$/, "/600x600bb.$1");
+  // Try the US storefront first, then GB — several of our picks are UK titles
+  // (DJ BBQ, Genevieve Taylor…) that only list on Apple Books UK.
+  for (const country of ["US", "GB"]) {
+    try {
+      const res = await fetch(
+        `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&media=ebook&entity=ebook&limit=8&country=${country}`,
+        { next: { revalidate: 604800 } }
+      );
+      if (!res.ok) continue;
+      const data = (await res.json()) as {
+        results?: { trackName?: string; artworkUrl100?: string }[];
+      };
+      for (const r of data.results ?? []) {
+        // Only accept a result whose title really matches ours — never a wrong cover.
+        if (r.artworkUrl100 && titleMatches(r.trackName, title)) {
+          return r.artworkUrl100
+            .replace(/^http:\/\//, "https://")
+            .replace(/\/\d+x\d+bb\.(jpg|png)$/, "/600x600bb.$1");
+        }
       }
+    } catch {
+      // try next storefront / fall through to Google Books
     }
-  } catch {
-    // fall through to Google Books
   }
   return null;
 }
