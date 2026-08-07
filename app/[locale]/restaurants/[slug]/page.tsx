@@ -516,6 +516,17 @@ export default async function RestaurantPage({ params }: Props) {
           {/* Owner-only: the venue performance report (Phase 5.2). */}
           <VenueReport restaurantId={restaurant.id} />
 
+          {/* Owner outreach — confirm the listing is correct (#61). */}
+          <p className="mt-4 text-xs text-text-muted">
+            Own {restaurant.name}?{" "}
+            <Link
+              href={`/confirm/${restaurant.slug}`}
+              className="font-semibold text-brand-gold hover:underline"
+            >
+              Confirm your details →
+            </Link>
+          </p>
+
           {/* Part of a brand — other locations */}
           {brand && (
             <div className="rounded-xl border border-border-subtle bg-surface-0 p-6">
