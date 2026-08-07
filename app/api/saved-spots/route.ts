@@ -1,13 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  // Cookie OR Bearer auth so native clients can save too (Phase 8d).
+  const auth = await getRequestUser(request);
+  if (!auth) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -22,8 +19,8 @@ export async function POST(request: Request) {
   }
 
   if (action === "save") {
-    const { error } = await supabase.from("saved_spots").upsert(
-      { user_id: user.id, restaurant_id: restaurantId },
+    const { error } = await auth.db.from("saved_spots").upsert(
+      { user_id: auth.userId, restaurant_id: restaurantId },
       { onConflict: "user_id,restaurant_id", ignoreDuplicates: true }
     );
 
@@ -33,10 +30,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ saved: true });
   }
 
-  const { error } = await supabase
+  const { error } = await auth.db
     .from("saved_spots")
     .delete()
-    .eq("user_id", user.id)
+    .eq("user_id", auth.userId)
     .eq("restaurant_id", restaurantId);
 
   if (error) {

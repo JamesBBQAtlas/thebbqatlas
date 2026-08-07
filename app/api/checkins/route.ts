@@ -1,21 +1,19 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 
 /**
  * "I've been here" check-ins. A check-in is one row per (user, restaurant):
  * posting again updates the existing note/visibility rather than duplicating.
- * Writes go through the user's own client so RLS enforces auth.uid() = user_id.
+ * Writes go through the user's own (cookie OR Bearer) client so RLS enforces
+ * auth.uid() = user_id — reachable from web and native alike (Phase 8d).
  *
  * Media on a check-in is handled separately and passes through the existing
  * moderation queue before it appears — this endpoint only records the visit,
  * an optional note, and the public/private toggle.
  */
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "");
@@ -27,9 +25,9 @@ export async function POST(request: Request) {
   const note = rawNote ? rawNote.slice(0, 1000) : null;
   const visibility = body.visibility === "private" ? "private" : "public";
 
-  const { error } = await supabase.from("check_ins").upsert(
+  const { error } = await auth.db.from("check_ins").upsert(
     {
-      user_id: user.id,
+      user_id: auth.userId,
       restaurant_id: restaurantId,
       note,
       visibility,
@@ -46,11 +44,8 @@ export async function POST(request: Request) {
 
 /** Remove the signed-in user's check-in for a venue. */
 export async function DELETE(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const restaurantId =
     new URL(request.url).searchParams.get("restaurantId") ?? "";
@@ -58,10 +53,10 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Missing venue" }, { status: 400 });
   }
 
-  const { error } = await supabase
+  const { error } = await auth.db
     .from("check_ins")
     .delete()
-    .eq("user_id", user.id)
+    .eq("user_id", auth.userId)
     .eq("restaurant_id", restaurantId);
 
   if (error) {

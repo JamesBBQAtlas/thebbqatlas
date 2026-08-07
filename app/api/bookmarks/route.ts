@@ -1,15 +1,12 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 
 const TYPES = new Set(["guide", "news"]);
 
 /** GET ?entityType&entityId → { bookmarked }. False for signed-out visitors. */
 export async function GET(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ bookmarked: false });
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ bookmarked: false });
 
   const { searchParams } = new URL(request.url);
   const entityType = searchParams.get("entityType") ?? "";
@@ -18,10 +15,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ bookmarked: false });
   }
 
-  const { data } = await supabase
+  const { data } = await auth.db
     .from("bookmarks")
     .select("id")
-    .eq("user_id", user.id)
+    .eq("user_id", auth.userId)
     .eq("entity_type", entityType)
     .eq("entity_id", entityId)
     .maybeSingle();
@@ -30,11 +27,8 @@ export async function GET(request: Request) {
 
 /** POST — save a bookmark (idempotent per user+entity). */
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json().catch(() => ({}));
   const entityType = String(body.entityType ?? "");
@@ -43,9 +37,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 
-  const { error } = await supabase.from("bookmarks").upsert(
+  const { error } = await auth.db.from("bookmarks").upsert(
     {
-      user_id: user.id,
+      user_id: auth.userId,
       entity_type: entityType,
       entity_id: entityId,
       title: body.title ? String(body.title).slice(0, 200) : null,
@@ -59,11 +53,8 @@ export async function POST(request: Request) {
 
 /** DELETE ?entityType&entityId — remove a bookmark. */
 export async function DELETE(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const { searchParams } = new URL(request.url);
   const entityType = searchParams.get("entityType") ?? "";
@@ -72,10 +63,10 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
 
-  await supabase
+  await auth.db
     .from("bookmarks")
     .delete()
-    .eq("user_id", user.id)
+    .eq("user_id", auth.userId)
     .eq("entity_type", entityType)
     .eq("entity_id", entityId);
   return NextResponse.json({ ok: true, bookmarked: false });

@@ -41,13 +41,43 @@ the source of truth either way.
 Consistent error envelope, CORS on public reads, and broader rate limiting.
 (Tracked as its own task.)
 
-## 8d — Remaining, and what needs James / infra
+## 8d — De-cookie writes + RLS audit ✅ (built) · native infra (James)
 
-- **De-cookie the write path** — `bookmarks`/`checkins`/`saved-spots`/
-  `submissions`/`report` are cookie-session only. For native, accept
-  `Authorization: Bearer <supabase access token>` or move to direct SDK writes
-  under RLS. (Code change; safe to do next.)
-- **RLS coverage audit** on every mobile-touched table. (Code/DB review.)
+**De-cookie the write path (done).** `lib/auth/request-user.ts#getRequestUser`
+resolves the user from a cookie session OR an `Authorization: Bearer <supabase
+access token>` header, returning a `db` client scoped to that user (cookie
+client, or a token-authenticated anon client) so writes still pass RLS as the
+user. Applied to the core My Atlas writes — `checkins`, `saved-spots`,
+`bookmarks` — and the new `reviews` endpoint. `submissions`/`report` are public
+(service-role) submit paths and don't need it.
+
+**RLS coverage audit (done — Supabase security advisor, 2026-08-07).**
+- Mobile-touched READ surface (`public_venues` view, `guides`, `news`,
+  `media_picks`) and WRITE surface (`check_ins`, `saved_spots`, `bookmarks`,
+  `reviews`) all carry appropriate RLS policies.
+- 12 tables show "RLS enabled, no policy" (INFO): `ai_usage_log`,
+  `contact_messages`, `email_log`, `email_subscribers`, `enrichment_runs`,
+  `events`, `outreach_log`, `rate_limits`, `role_change_log`,
+  `search_impressions`, `submission_abuse_log`, `venue_views`. These are internal
+  telemetry/logs written only by the service role — "no policy" means deny-all to
+  anon/authenticated, which is the intended, secure posture. **No change made**
+  (adding policies would open them).
+- WARN, low-priority hardening (deferred, non-blocking): fixed `search_path` on a
+  few pre-existing functions (`nearby_venues`, `ai_usage_report`,
+  `content_audit_no_update`); `citext` extension in `public`; `is_admin()`
+  callable via RPC (self-scoped — returns the caller's own admin status, so safe;
+  lockdown shipped earlier). New functions this session (`marketing_members`,
+  `venue_report`) already set `search_path` and are service-role-only.
+
+### Native infra — needs James (not code)
+
+- **Native OAuth** — register app-scheme / deep-link redirect URLs in Supabase,
+  PKCE, MFA step-up handled natively. **[James/Supabase console]**
+- **AASA/assetlinks env values** — `APPLE_APP_ID` (+ optional `APPLE_APP_PATHS`);
+  `ANDROID_PACKAGE_NAME` + `ANDROID_SHA256_CERT_FINGERPRINTS`. Route handlers are
+  live and return 404 until these are set. **[James]**
+- **Push (FCM/APNs)**, **image CDN/transform**, **offline strategy** — infra
+  choices. **[James]**
 - **Native OAuth** — register app-scheme / deep-link redirect URLs in Supabase,
   PKCE, MFA step-up handled natively. **[James/Supabase console]**
 - **Deep-link association files** — `apple-app-site-association` +
