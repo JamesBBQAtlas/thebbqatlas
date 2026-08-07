@@ -33,6 +33,10 @@ export function MediaArt({
           src={src}
           alt={alt}
           loading="lazy"
+          // YouTube channel avatars (yt3.ggpht.com) refuse to load cross-origin
+          // when a referrer is sent — no-referrer makes them render instead of
+          // hanging as broken images (Fable H-2). Harmless for iTunes/Google covers.
+          referrerPolicy="no-referrer"
           onError={() => setFailed(true)}
           className="h-full w-full object-cover"
         />
