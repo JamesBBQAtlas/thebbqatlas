@@ -6,6 +6,7 @@ import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
   getRestaurants,
+  getNearbyVenues,
   getSignatureDishes,
   getSlugRedirect,
 } from "@/lib/queries/restaurants";
@@ -19,7 +20,6 @@ import {
   type AlcoholPolicy,
 } from "@/lib/constants/offerings";
 import { resolveCountryCode, countryName } from "@/lib/constants/countries";
-import { haversineKm } from "@/lib/utils/geo";
 import { FlagIcon } from "@/components/ui/FlagIcon";
 import { SocialIcon, SOCIAL_LABELS, type SocialKind } from "@/components/ui/SocialIcon";
 import { TrackedLink } from "@/components/monetization/TrackedLink";
@@ -138,10 +138,10 @@ export default async function RestaurantPage({ params }: Props) {
   });
 
   const brandId = restaurant.brand_id ?? null;
-  const [dishes, allRestaurants, metrics, myCheckIn, media, siblings, brand, gear, visitors] =
+  const [dishes, nearbyRows, metrics, myCheckIn, media, siblings, brand, gear, visitors] =
     await Promise.all([
       getSignatureDishes(restaurant.id),
-      getRestaurants(),
+      getNearbyVenues(restaurant.lat, restaurant.lng, restaurant.id, 6),
       getVenueMetrics(restaurant.id),
       user ? getUserCheckIn(supabase, user.id, restaurant.id) : Promise.resolve(null),
       getApprovedMedia(restaurant.id),
@@ -226,17 +226,8 @@ export default async function RestaurantPage({ params }: Props) {
     }
     return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
   };
-  const nearby = allRestaurants
-    .filter(
-      (r) =>
-        r.id !== restaurant.id &&
-        Number.isFinite(r.lat) &&
-        Number.isFinite(r.lng)
-    )
-    .map((r) => ({ r, km: haversineKm(restaurant.lat, restaurant.lng, r.lat, r.lng) }))
-    .sort((a, b) => a.km - b.km)
-    .filter((x) => x.km <= 320) // ~200 mi
-    .slice(0, 6);
+  // Nearest approved venues, already filtered/sorted/limited in Postgres (H-1).
+  const nearby = nearbyRows.map((r) => ({ r, km: r.distance_km }));
 
   // Sign uploaded photos, then flatten to plain rows for the client roster.
   const visitorAvatars = await getPublicAvatarSignedUrls(

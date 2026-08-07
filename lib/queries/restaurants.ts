@@ -42,6 +42,48 @@ const getSupabaseRestaurantsCached = unstable_cache(getSupabaseRestaurants, ["ap
   revalidate: 3600,
 });
 
+export interface NearbyVenue {
+  id: string;
+  slug: string;
+  name: string;
+  city: string | null;
+  country: string | null;
+  country_code: string | null;
+  style: Restaurant["style"];
+  lat: number;
+  lng: number;
+  distance_km: number;
+}
+
+/**
+ * Nearest approved venues to a point, computed in Postgres (Fable H-1) — replaces
+ * loading the whole restaurants table into Node and haversine-sorting it in JS on
+ * every venue render. Returns only the fields the "nearby" cards + locator map
+ * need. Empty on bad coords or error.
+ */
+export async function getNearbyVenues(
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+  excludeId: string,
+  limit = 6
+): Promise<NearbyVenue[]> {
+  if (!Number.isFinite(lat as number) || !Number.isFinite(lng as number)) return [];
+  if (lat === 0 && lng === 0) return [];
+  try {
+    const supabase = createAnonClient();
+    const { data, error } = await supabase.rpc("nearby_venues", {
+      p_lat: lat,
+      p_lng: lng,
+      p_exclude: excludeId,
+      p_limit: limit,
+    });
+    if (error || !data) return [];
+    return data as NearbyVenue[];
+  } catch {
+    return [];
+  }
+}
+
 export async function getRestaurants(): Promise<Restaurant[]> {
   const data = await getSupabaseRestaurantsCached();
   return data ?? FALLBACK_RESTAURANTS;
