@@ -23,12 +23,12 @@ import { resolveCountryCode, countryName } from "@/lib/constants/countries";
 import { FlagIcon } from "@/components/ui/FlagIcon";
 import { SocialIcon, SOCIAL_LABELS, type SocialKind } from "@/components/ui/SocialIcon";
 import { TrackedLink } from "@/components/monetization/TrackedLink";
-import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
-import { CheckInButton } from "@/components/restaurants/CheckInButton";
+import { VenueUserActions } from "@/components/restaurants/VenueUserActions";
 import { InstagramEmbed } from "@/components/restaurants/InstagramEmbed";
 import { RestaurantLocatorMap } from "@/components/restaurants/RestaurantLocatorMap";
 import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
+import { VenueViewBeacon } from "@/components/restaurants/VenueViewBeacon";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd, eventJsonLd } from "@/lib/seo/jsonld";
 import { SITE, absoluteUrl } from "@/lib/seo/site";
@@ -38,10 +38,8 @@ import {
   eventStatus,
   formatEventDates,
 } from "@/lib/constants/categories";
-import { createClient } from "@/lib/supabase/server";
-import { headers } from "next/headers";
-import { recordVenueView } from "@/lib/analytics/record";
-import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
+import { createAnonClient } from "@/lib/supabase/anon";
+import { getVenueMetrics } from "@/lib/queries/checkins";
 import { getRecentVisitors } from "@/lib/queries/profiles";
 import { getPublicAvatarSignedUrls, avatarBadge } from "@/lib/account/public-avatar";
 import { VenueVisitors } from "@/components/restaurants/VenueVisitors";
@@ -121,33 +119,21 @@ export default async function RestaurantPage({ params }: Props) {
     permanentRedirect(`/restaurants/${restaurant.slug}`);
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // Capture the profile view (Fable C-1): anonymous + signed-in, deduped once
-  // per session per day, bots and venue-owner self-views excluded. Written
-  // server-side so ad-blockers can't drop the anonymous majority.
-  // (When Phase 3 makes this route static, relocate this to middleware.)
-  await recordVenueView({
-    restaurantId: restaurant.id,
-    headers: headers(),
-    userId: user?.id ?? null,
-    ownerId: (restaurant as { owner_id?: string | null }).owner_id ?? null,
-  });
-
+  // The venue page reads NO cookies, so it renders statically (ISR, Fable H-1).
+  // The user-specific bits — check-in, saved, photo-upload gate — hydrate
+  // client-side (VenueUserActions / CommunityUpload), and the profile view is
+  // captured via a client beacon (VenueViewBeacon → /api/venue-view).
+  const anon = createAnonClient();
   const brandId = restaurant.brand_id ?? null;
-  const [dishes, nearbyRows, metrics, myCheckIn, media, siblings, brand, gear, visitors] =
+  const [dishes, nearbyRows, metrics, media, siblings, brand, gear, visitors] =
     await Promise.all([
       getSignatureDishes(restaurant.id),
       getNearbyVenues(restaurant.lat, restaurant.lng, restaurant.id, 6),
       getVenueMetrics(restaurant.id),
-      user ? getUserCheckIn(supabase, user.id, restaurant.id) : Promise.resolve(null),
       getApprovedMedia(restaurant.id),
       brandId ? getSiblingLocations(brandId, restaurant.id) : Promise.resolve([]),
       brandId
-        ? supabase
+        ? anon
             .from("brands")
             .select("name, slug")
             .eq("id", brandId)
@@ -157,19 +143,6 @@ export default async function RestaurantPage({ params }: Props) {
       getGearForStyle(restaurant.style),
       getRecentVisitors(restaurant.id, 50),
     ]);
-
-  const isSaved = user
-    ? Boolean(
-        (
-          await supabase
-            .from("saved_spots")
-            .select("restaurant_id")
-            .eq("user_id", user.id)
-            .eq("restaurant_id", restaurant.id)
-            .maybeSingle()
-        ).data
-      )
-    : false;
   const hours = groupedHours(restaurant.hours);
 
   const code = resolveCountryCode(restaurant.country_code, restaurant.country);
@@ -265,6 +238,7 @@ export default async function RestaurantPage({ params }: Props) {
         title={restaurant.name}
         slug={restaurant.slug}
       />
+      <VenueViewBeacon restaurantId={restaurant.id} />
 
       {/* Hero — always a good-looking, legal image (real photo or style default),
           under a warm-dark gradient for legibility. Never an Instagram embed. */}
@@ -432,11 +406,7 @@ export default async function RestaurantPage({ params }: Props) {
               </section>
             )}
 
-          <CommunityGallery
-            restaurantId={restaurant.id}
-            media={media}
-            canUpload={Boolean(user)}
-          />
+          <CommunityGallery restaurantId={restaurant.id} media={media} />
 
           {/* "X members have been here" — the count expands the public roster */}
           <VenueVisitors total={metrics.visited} visitors={visitorRows} />
@@ -489,50 +459,13 @@ export default async function RestaurantPage({ params }: Props) {
 
         {/* Right sidebar */}
         <aside className="flex flex-col gap-6 lg:sticky lg:top-24 lg:self-start">
-          <div className="space-y-4 rounded-xl border border-border-subtle bg-surface-0 p-6">
-            {restaurant.permanently_closed ? (
-              // Permanently closed (Fix 7): no "I've been here" / booking CTA —
-              // just a clear notice. The venue stays live (no 404) for reference.
-              <div className="flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
-                <Store className="mt-0.5 h-4 w-4 shrink-0" />
-                <span>This venue has <strong>permanently closed</strong>.</span>
-              </div>
-            ) : (
-              <CheckInButton
-                restaurantId={restaurant.id}
-                restaurantName={restaurant.name}
-                isAuthed={Boolean(user)}
-                initial={myCheckIn}
-              />
-            )}
-            {!restaurant.permanently_closed && (metrics.visited > 0 || metrics.saved > 0) && (
-              <div className="flex items-center gap-4 border-t border-border-subtle pt-4 text-sm">
-                {metrics.visited > 0 && (
-                  <span className="flex items-center gap-1.5 text-text-secondary">
-                    <span className="font-heading text-lg font-bold text-brand-gold">
-                      {metrics.visited.toLocaleString()}
-                    </span>
-                    {metrics.visited === 1 ? "has been here" : "have been here"}
-                  </span>
-                )}
-                {metrics.saved > 0 && (
-                  <span className="flex items-center gap-1.5 text-text-secondary">
-                    <span className="font-heading text-lg font-bold text-brand-gold">
-                      {metrics.saved.toLocaleString()}
-                    </span>
-                    saved
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="border-t border-border-subtle pt-4">
-              <SaveShareActions
-                restaurantId={restaurant.id}
-                name={restaurant.name}
-                initialSaved={isSaved}
-              />
-            </div>
-          </div>
+          <VenueUserActions
+            restaurantId={restaurant.id}
+            restaurantName={restaurant.name}
+            permanentlyClosed={Boolean(restaurant.permanently_closed)}
+            visited={metrics.visited}
+            saved={metrics.saved}
+          />
 
           {/* Part of a brand — other locations */}
           {brand && (

@@ -1,21 +1,20 @@
-import { MediaUpload } from "@/components/media/MediaUpload";
+import { CommunityUpload } from "@/components/restaurants/CommunityUpload";
 import type { MediaItem } from "@/lib/queries/media";
 
 /**
  * Approved community photos/videos for a venue, plus an upload entry point for
- * signed-in visitors. Uploads are moderated before they show here.
+ * signed-in visitors. Uploads are moderated before they show here. The upload
+ * gate resolves auth client-side (CommunityUpload) so the venue page stays
+ * static (Fable H-1); the section always renders — an empty state invites the
+ * first photo.
  */
 export function CommunityGallery({
   restaurantId,
   media,
-  canUpload,
 }: {
   restaurantId: string;
   media: MediaItem[];
-  canUpload: boolean;
 }) {
-  if (media.length === 0 && !canUpload) return null;
-
   return (
     <section id="add-photos" className="mb-12 scroll-mt-28">
       <h2 className="mb-5 border-b border-border-subtle pb-3 font-heading text-xl font-bold text-text-primary">
@@ -51,9 +50,7 @@ export function CommunityGallery({
         </div>
       )}
 
-      {canUpload && (
-        <MediaUpload restaurantId={restaurantId} source="venue" label="Add your photos" />
-      )}
+      <CommunityUpload restaurantId={restaurantId} />
     </section>
   );
 }
