@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 export const dynamic = "force-dynamic";
 
-const KINDS = new Set(["youtube", "book", "podcast"]);
+const KINDS = new Set(["youtube", "book", "podcast", "video"]);
 
 function clean(body: Record<string, unknown>, requireCore: boolean) {
   const out: Record<string, unknown> = {};

@@ -1,7 +1,7 @@
 import { unstable_noStore as noStore } from "next/cache";
 import { createAnonClient } from "@/lib/supabase/anon";
 
-export type MediaKind = "youtube" | "book" | "podcast";
+export type MediaKind = "youtube" | "book" | "podcast" | "video";
 
 export interface MediaPick {
   id: string;
@@ -16,6 +16,7 @@ export interface MediaPick {
   sort_order: number;
   is_published: boolean;
   // Runtime enrichments (resolved server-side on the page, cached upstream).
+  channelId?: string | null;
   subscriberCount?: string | null;
   latest?: { title: string; videoId: string; thumb: string | null } | null;
 }
@@ -24,9 +25,10 @@ export interface MediaPicksByKind {
   youtube: MediaPick[];
   book: MediaPick[];
   podcast: MediaPick[];
+  video: MediaPick[];
 }
 
-const EMPTY: MediaPicksByKind = { youtube: [], book: [], podcast: [] };
+const EMPTY: MediaPicksByKind = { youtube: [], book: [], podcast: [], video: [] };
 
 /**
  * Published Watch/Read/Listen picks, grouped by kind and ordered by sort_order.
@@ -50,7 +52,7 @@ export async function getMediaPicks(): Promise<MediaPicksByKind> {
       .order("sort_order", { ascending: true })
       .order("name", { ascending: true });
     if (error || !data) return EMPTY;
-    const out: MediaPicksByKind = { youtube: [], book: [], podcast: [] };
+    const out: MediaPicksByKind = { youtube: [], book: [], podcast: [], video: [] };
     for (const row of data as MediaPick[]) {
       const pick = { ...row, links: (row.links ?? {}) as Record<string, string> };
       if (pick.kind in out) out[pick.kind].push(pick);

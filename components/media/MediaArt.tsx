@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Youtube, BookOpen, Podcast } from "lucide-react";
 import type { MediaKind } from "@/lib/queries/media-picks";
 
-const GLYPH = { youtube: Youtube, book: BookOpen, podcast: Podcast } as const;
+const GLYPH = { youtube: Youtube, book: BookOpen, podcast: Podcast, video: Youtube } as const;
 
 /**
  * Cover art for a media pick with a branded fallback. Uses a plain <img> (the

@@ -49,10 +49,11 @@ export default async function WatchReadListenPage() {
     Promise.all(
       picks.youtube.map(async (p) => {
         const yt = await resolveYouTube(p.url, p.links?.channelId);
-        if (!yt) return p;
+        if (!yt) return { ...p, channelId: p.links?.channelId ?? null };
         return {
           ...p,
           image_url: p.image_url ?? yt.thumb,
+          channelId: yt.channelId ?? p.links?.channelId ?? null,
           subscriberCount: yt.subscriberCount,
           latest: yt.latest,
         };
@@ -70,7 +71,7 @@ export default async function WatchReadListenPage() {
         </p>
       </header>
 
-      <MediaDirectory picks={{ youtube, book, podcast }} />
+      <MediaDirectory picks={{ youtube, book, podcast, video: picks.video }} />
 
       <p className="mt-10 text-xs text-white/30">
         As an Amazon Associate, The BBQ Atlas earns from qualifying purchases. Book links are

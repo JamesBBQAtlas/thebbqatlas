@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2, Plus, ImageDown } from "lucide-react";
+import { Loader2, Trash2, Plus, ImageDown, Youtube } from "lucide-react";
 
 export interface AdminMediaPick {
   id: string;
-  kind: "youtube" | "book" | "podcast";
+  kind: "youtube" | "book" | "podcast" | "video";
   name: string;
   creator: string | null;
   url: string;
@@ -19,11 +19,12 @@ export interface AdminMediaPick {
 }
 
 const KIND_LABEL: Record<AdminMediaPick["kind"], string> = {
-  youtube: "Watch — YouTube",
+  youtube: "Watch — YouTube channels",
+  video: "Watch — Episodes We Love",
   book: "Read — Books",
   podcast: "Listen — Podcasts",
 };
-const KINDS: AdminMediaPick["kind"][] = ["youtube", "book", "podcast"];
+const KINDS: AdminMediaPick["kind"][] = ["youtube", "video", "book", "podcast"];
 
 const inputCls =
   "w-full rounded-md border border-border-default bg-surface-1 px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-brand-gold/60 focus:outline-none";
@@ -258,6 +259,177 @@ function AddForm({ kind }: { kind: AdminMediaPick["kind"] }) {
   );
 }
 
+interface ResolvedVideo {
+  videoId: string;
+  title: string;
+  channelTitle: string;
+  thumb: string | null;
+  duration: string | null;
+  row: {
+    kind: string;
+    name: string;
+    creator: string;
+    url: string;
+    image_url: string | null;
+    links: Record<string, string>;
+  };
+}
+
+/**
+ * "Episodes We Love" add form (Phase 6.5). Paste a YouTube video URL → the server
+ * validates + resolves title/channel/thumbnail/duration via the YouTube Data API
+ * → auto-fill → add a "why we love it" blurb → save. Fully self-serve, no code.
+ */
+function AddVideoForm() {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [blurb, setBlurb] = useState("");
+  const [resolved, setResolved] = useState<ResolvedVideo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  function reset() {
+    setUrl("");
+    setBlurb("");
+    setResolved(null);
+    setError("");
+    setOpen(false);
+  }
+
+  async function resolve() {
+    setBusy(true);
+    setError("");
+    setResolved(null);
+    try {
+      const res = await fetch("/api/admin/media-picks/resolve-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) setError((data.error as string) || "Couldn't resolve that video.");
+      else setResolved(data as ResolvedVideo);
+    } catch {
+      setError("Network error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function create() {
+    if (!resolved) return;
+    setBusy(true);
+    setError("");
+    const { ok, error } = await api("POST", {
+      ...resolved.row,
+      blurb: blurb || `A ${resolved.channelTitle} video worth your time.`,
+      links: JSON.stringify(resolved.row.links),
+      is_published: true,
+    });
+    setBusy(false);
+    if (!ok) return setError(error || "Failed.");
+    reset();
+    router.refresh();
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"
+      >
+        <Plus className="h-3.5 w-3.5" /> Add a video
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-brand-gold/40 bg-surface-0 p-4">
+      <div className="flex gap-2">
+        <input
+          className={inputCls}
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Paste a YouTube video URL"
+        />
+        <button
+          type="button"
+          disabled={busy || !url.trim()}
+          onClick={resolve}
+          className="shrink-0 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
+        >
+          {busy && !resolved ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Resolve"}
+        </button>
+      </div>
+
+      {resolved && (
+        <div className="mt-3 space-y-2">
+          <div className="flex gap-3">
+            {resolved.thumb ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={resolved.thumb}
+                alt=""
+                className="h-16 w-28 shrink-0 rounded object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="flex h-16 w-28 shrink-0 items-center justify-center rounded bg-surface-1">
+                <Youtube className="h-5 w-5 text-brand-gold/50" />
+              </div>
+            )}
+            <div className="min-w-0 text-xs">
+              <p className="font-semibold text-text-primary">{resolved.title}</p>
+              <p className="text-text-muted">
+                {resolved.channelTitle}
+                {resolved.duration ? ` · ${resolved.duration}` : ""}
+              </p>
+            </div>
+          </div>
+          <textarea
+            className={inputCls + " resize-none"}
+            rows={2}
+            value={blurb}
+            onChange={(e) => setBlurb(e.target.value)}
+            placeholder="Why we love it (optional — site voice)"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={create}
+              className="rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40"
+            >
+              Add episode
+            </button>
+            <button
+              type="button"
+              onClick={reset}
+              className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted"
+            >
+              Cancel
+            </button>
+            {busy && <Loader2 className="h-4 w-4 animate-spin text-brand-gold" />}
+          </div>
+        </div>
+      )}
+
+      {!resolved && (
+        <button
+          type="button"
+          onClick={reset}
+          className="mt-2 text-xs font-semibold text-text-muted hover:text-text-secondary"
+        >
+          Cancel
+        </button>
+      )}
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
 interface CoverReport {
   total: number;
   resolved: { name: string }[];
@@ -360,7 +532,7 @@ export function MediaPicksAdmin({ rows }: { rows: AdminMediaPick[] }) {
               </h2>
               <div className="flex flex-col items-end gap-2">
                 {kind === "book" && <ResolveCoversButton />}
-                <AddForm kind={kind} />
+                {kind === "video" ? <AddVideoForm /> : <AddForm kind={kind} />}
               </div>
             </div>
             <div className="space-y-3">

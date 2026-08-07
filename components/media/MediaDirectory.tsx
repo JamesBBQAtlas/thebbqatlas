@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, type ComponentType } from "react";
-import { ExternalLink, Youtube, BookOpen, Podcast, Globe } from "lucide-react";
+import { ExternalLink, Youtube, BookOpen, Podcast, Globe, Play } from "lucide-react";
 import type { MediaPick, MediaKind } from "@/lib/queries/media-picks";
 import { MediaArt } from "./MediaArt";
+import { SubscribeButton } from "./SubscribeButton";
 import { AffiliateLink } from "@/components/monetization/AffiliateLink";
 
 const TABS: { kind: MediaKind; label: string; Icon: typeof Youtube }[] = [
@@ -16,6 +17,7 @@ const CTA: Record<MediaKind, string> = {
   youtube: "Watch on YouTube",
   book: "View on Amazon",
   podcast: "Listen",
+  video: "Watch on YouTube",
 };
 
 /* ------------------------------------------------------------------ *
@@ -105,6 +107,117 @@ const fmtSubs = (n: string | null | undefined): string | null => {
   return `${num.toLocaleString("en-US")} subscribers`;
 };
 
+/** ISO 8601 duration (PT#H#M#S) → "1:02:03" / "4:07". */
+function fmtDuration(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!m) return null;
+  const h = Number(m[1] ?? 0);
+  const min = Number(m[2] ?? 0);
+  const s = Number(m[3] ?? 0);
+  if (!h && !min && !s) return null;
+  const two = (x: number) => String(x).padStart(2, "0");
+  return h ? `${h}:${two(min)}:${two(s)}` : `${min}:${two(s)}`;
+}
+
+const watchUrl = (videoId: string) => `https://www.youtube.com/watch?v=${videoId}`;
+
+/** Expandable one-line blurb with a "more/less" toggle. */
+function Blurb({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const teaser = teaserOf(text);
+  const hasMore = teaser.length < text.trim().length;
+  return (
+    <p className="mt-2 flex-1 text-sm leading-relaxed text-white/60">
+      {open ? text : teaser}
+      {hasMore ? (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="ml-1 whitespace-nowrap text-xs font-semibold text-brand-gold/80 hover:text-brand-gold"
+        >
+          {open ? "less" : "more"}
+        </button>
+      ) : null}
+    </p>
+  );
+}
+
+/** 16:9 click-to-play video thumbnail with play-glyph overlay + optional duration badge. */
+function VideoThumb({
+  href,
+  thumb,
+  title,
+  duration,
+}: {
+  href: string;
+  thumb: string | null;
+  title: string;
+  duration?: string | null;
+}) {
+  const dur = fmtDuration(duration);
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group/vid block overflow-hidden rounded-lg border border-white/10 transition-colors hover:border-brand-gold/40"
+      title={title}
+    >
+      <div className="relative aspect-video w-full overflow-hidden bg-surface-1">
+        {thumb ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumb}
+            alt=""
+            loading="lazy"
+            width={480}
+            height={270}
+            referrerPolicy="no-referrer"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover/vid:scale-105"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center">
+            <Youtube className="h-8 w-8 text-brand-gold/40" aria-hidden />
+          </div>
+        )}
+        <span className="absolute inset-0 flex items-center justify-center">
+          <span className="flex h-11 w-11 items-center justify-center rounded-full bg-black/55 ring-1 ring-white/25 transition-colors group-hover/vid:bg-brand-gold/90">
+            <Play className="ml-0.5 h-5 w-5 fill-current text-white group-hover/vid:text-text-inverse" />
+          </span>
+        </span>
+        {dur ? (
+          <span className="absolute bottom-1.5 right-1.5 rounded bg-black/80 px-1.5 py-0.5 text-[0.625rem] font-semibold tabular-nums text-white">
+            {dur}
+          </span>
+        ) : null}
+      </div>
+    </a>
+  );
+}
+
+/** Small round channel avatar chip (~36px), used beside the channel name. */
+function AvatarChip({ src, name }: { src: string | null; name: string }) {
+  return (
+    <span className="relative h-9 w-9 shrink-0 overflow-hidden rounded-full bg-surface-1 ring-1 ring-white/10">
+      {src ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={src}
+          alt={name}
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          className="h-full w-full object-cover"
+        />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center">
+          <Youtube className="h-4 w-4 text-brand-gold/50" aria-hidden />
+        </span>
+      )}
+    </span>
+  );
+}
+
 function OutboundPill({
   href,
   label,
@@ -133,63 +246,122 @@ function OutboundPill({
   );
 }
 
-function Card({ pick }: { pick: MediaPick }) {
-  const [open, setOpen] = useState(false);
-  const teaser = teaserOf(pick.blurb);
-  const hasMore = teaser.length < pick.blurb.trim().length;
+const cardCls =
+  "flex h-full flex-col overflow-hidden rounded-xl border border-white/10 bg-black/60 transition-colors hover:border-brand-gold/40";
 
+/**
+ * Watch card (a channel), Phase 6.3: led by the latest video's 16:9 thumbnail;
+ * the channel logo demoted to a small avatar chip beside the name + subs. Falls
+ * back to the avatar-led layout when no latest video resolves.
+ */
+function ChannelCard({ pick }: { pick: MediaPick }) {
+  const hasVideo = Boolean(pick.latest?.videoId);
   return (
-    <article className="flex h-full flex-col overflow-hidden rounded-xl border border-white/10 bg-black/60 transition-colors hover:border-brand-gold/40">
+    <article className={cardCls}>
+      {hasVideo ? (
+        <div className="p-3 pb-0">
+          <VideoThumb
+            href={watchUrl(pick.latest!.videoId)}
+            thumb={pick.latest!.thumb}
+            title={pick.latest!.title}
+          />
+          <p className="mt-1.5 line-clamp-2 text-xs leading-snug text-white/70">
+            <span className="font-semibold text-white/45">Latest</span> · {pick.latest!.title}
+          </p>
+        </div>
+      ) : (
+        <MediaArt src={pick.image_url} alt={pick.name} kind="youtube" />
+      )}
+
+      <div className="flex flex-1 flex-col p-4 pt-3">
+        <div className="flex items-center gap-2.5">
+          {hasVideo ? <AvatarChip src={pick.image_url} name={pick.name} /> : null}
+          <div className="min-w-0">
+            <h3 className="truncate text-base font-bold leading-snug text-text-primary">
+              {pick.name}
+            </h3>
+            {fmtSubs(pick.subscriberCount) ? (
+              <p className="text-[0.6875rem] text-white/45">{fmtSubs(pick.subscriberCount)}</p>
+            ) : pick.creator ? (
+              <p className="text-xs text-brand-gold/80">{pick.creator}</p>
+            ) : null}
+          </div>
+        </div>
+
+        <Blurb text={pick.blurb} />
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <a
+            href={pick.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-brand-gold transition-colors hover:text-brand-gold-light"
+          >
+            {CTA.youtube}
+            <ExternalLink className="h-3 w-3" />
+          </a>
+          <SubscribeButton channelId={pick.channelId} channelUrl={pick.url} />
+          {pick.gear_link ? <OutboundPill href={pick.gear_link} label="Their kit" /> : null}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** "Episodes We Love" card (a single curated video), Phase 6.5. */
+function VideoCard({ pick }: { pick: MediaPick }) {
+  const videoId = pick.links?.videoId ?? "";
+  const channel = pick.creator;
+  return (
+    <article className={cardCls}>
+      <div className="p-3 pb-0">
+        <VideoThumb
+          href={videoId ? watchUrl(videoId) : pick.url}
+          thumb={pick.image_url}
+          title={pick.name}
+          duration={pick.links?.duration}
+        />
+      </div>
+      <div className="flex flex-1 flex-col p-4 pt-3">
+        <h3 className="text-base font-bold leading-snug text-text-primary">{pick.name}</h3>
+        {channel ? (
+          <p className="mt-0.5 text-xs text-brand-gold/80">
+            {channel} <span className="text-white/40">· on YouTube</span>
+          </p>
+        ) : null}
+        {pick.blurb ? <Blurb text={pick.blurb} /> : <div className="flex-1" />}
+        <div className="mt-3">
+          <a
+            href={videoId ? watchUrl(videoId) : pick.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-brand-gold transition-colors hover:text-brand-gold-light"
+          >
+            {CTA.video}
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** Book / podcast card (avatar-led). */
+function Card({ pick }: { pick: MediaPick }) {
+  return (
+    <article className={cardCls}>
       <MediaArt src={pick.image_url} alt={pick.name} kind={pick.kind} />
       <div className="flex flex-1 flex-col p-4">
         <h3 className="text-base font-bold leading-snug text-text-primary">{pick.name}</h3>
-        {pick.creator ? (
-          <p className="mt-0.5 text-xs text-brand-gold/80">{pick.creator}</p>
-        ) : null}
-        {pick.kind === "youtube" && fmtSubs(pick.subscriberCount) ? (
-          <p className="mt-0.5 text-[0.6875rem] text-white/45">{fmtSubs(pick.subscriberCount)}</p>
-        ) : null}
+        {pick.creator ? <p className="mt-0.5 text-xs text-brand-gold/80">{pick.creator}</p> : null}
 
-        <p className="mt-2 flex-1 text-sm leading-relaxed text-white/60">
-          {open ? pick.blurb : teaser}
-          {hasMore ? (
-            <button
-              type="button"
-              onClick={() => setOpen((o) => !o)}
-              className="ml-1 whitespace-nowrap text-xs font-semibold text-brand-gold/80 hover:text-brand-gold"
-            >
-              {open ? "less" : "more"}
-            </button>
-          ) : null}
-        </p>
-
-        {pick.kind === "youtube" && pick.latest?.videoId ? (
-          <a
-            href={`https://www.youtube.com/watch?v=${pick.latest.videoId}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-2 block truncate text-xs text-white/50 transition-colors hover:text-brand-gold"
-            title={pick.latest.title}
-          >
-            ▶ Latest: {pick.latest.title}
-          </a>
-        ) : null}
+        <Blurb text={pick.blurb} />
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {pick.kind === "book" ? (
             <AffiliateLink href={pick.url} label={CTA.book} partner="amazon" product={pick.name} />
-          ) : pick.kind === "podcast" ? (
-            <PodcastLinks pick={pick} />
           ) : (
-            <a
-              href={pick.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-brand-gold transition-colors hover:text-brand-gold-light"
-            >
-              {CTA.youtube}
-              <ExternalLink className="h-3 w-3" />
-            </a>
+            <PodcastLinks pick={pick} />
           )}
           {pick.gear_link ? <OutboundPill href={pick.gear_link} label="Their kit" /> : null}
         </div>
@@ -229,13 +401,14 @@ function PodcastLinks({ pick }: { pick: MediaPick }) {
   );
 }
 
+const GRID = "grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4";
+
 export function MediaDirectory({
   picks,
 }: {
-  picks: { youtube: MediaPick[]; book: MediaPick[]; podcast: MediaPick[] };
+  picks: { youtube: MediaPick[]; book: MediaPick[]; podcast: MediaPick[]; video: MediaPick[] };
 }) {
   const [active, setActive] = useState<MediaKind>("youtube");
-  const items = picks[active];
 
   return (
     <div>
@@ -264,11 +437,37 @@ export function MediaDirectory({
         })}
       </div>
 
-      <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 lg:grid-cols-4">
-        {items.map((pick) => (
-          <Card key={pick.id} pick={pick} />
-        ))}
-      </div>
+      {active === "youtube" ? (
+        <>
+          <div className={GRID}>
+            {picks.youtube.map((pick) => (
+              <ChannelCard key={pick.id} pick={pick} />
+            ))}
+          </div>
+
+          {picks.video.length > 0 ? (
+            <section className="mt-12">
+              <div className="mb-4 border-t border-white/10 pt-8">
+                <h2 className="text-xl font-bold text-text-primary">Episodes We Love</h2>
+                <p className="mt-1 text-sm text-white/50">
+                  Hand-picked single videos worth your time — credited to their channels.
+                </p>
+              </div>
+              <div className={GRID}>
+                {picks.video.map((pick) => (
+                  <VideoCard key={pick.id} pick={pick} />
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </>
+      ) : (
+        <div className={GRID}>
+          {picks[active].map((pick) => (
+            <Card key={pick.id} pick={pick} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
