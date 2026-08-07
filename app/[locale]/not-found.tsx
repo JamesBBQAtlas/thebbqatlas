@@ -10,7 +10,7 @@ export default function NotFound() {
       </h1>
       <p className="mt-4 max-w-md text-lg text-text-secondary">
         We couldn&apos;t find that page. It may have moved, closed, or never
-        existed. Let&apos;s get you back to the good stuff.
+        existed. Let&apos;s get you back to the barbecue.
       </p>
       <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
         <Link

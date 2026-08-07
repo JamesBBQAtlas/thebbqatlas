@@ -15,7 +15,7 @@ export const PREMIUM = {
   name: "Atlas Premium",
   price: "$4.99",
   interval: "month",
-  blurb: "Support the Atlas and unlock the good stuff.",
+  blurb: "Support the Atlas. A few good perks, no confetti.",
   benefits: [
     "Ad-free browsing across the whole Atlas",
     "Your saved spots as a personal map",
