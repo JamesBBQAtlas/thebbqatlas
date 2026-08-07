@@ -3,8 +3,42 @@ import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { stripe } from "@/lib/stripe/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { LISTING } from "@/lib/stripe/config";
+import { sendOrderReceipt } from "@/lib/email/senders";
+import { revalidateVenues } from "@/lib/cache/venues";
 
 export const dynamic = "force-dynamic";
+
+const LISTING_ACTIVE = new Set(["active", "trialing", "past_due"]);
+
+/**
+ * Apply a Featured-listing subscription's state to its restaurant (Phase 5.1).
+ * Active → is_premium + premium_tier='featured' + premium_until; cancelled/
+ * unpaid → is_premium=false (premium_until kept as a record). Featured PLACEMENT
+ * is derived from is_premium in the query, so we never touch the admin-set
+ * is_featured flag here.
+ */
+async function applyListingEntitlement(
+  admin: SupabaseClient,
+  sub: Stripe.Subscription
+): Promise<void> {
+  const restaurantId = sub.metadata?.restaurant_id;
+  if (!restaurantId) return;
+  const item = sub.items?.data?.[0];
+  const periodEnd = item?.current_period_end ?? null;
+  const active = LISTING_ACTIVE.has(sub.status);
+  await admin
+    .from("restaurants")
+    .update({
+      is_premium: active,
+      premium_tier: active ? LISTING.tier : null,
+      premium_until: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+    })
+    .eq("id", restaurantId);
+  // Refresh the venue page / directory / map so the badge + featured placement
+  // update promptly rather than waiting on ISR.
+  revalidateVenues();
+}
 
 /** Reconcile a Stripe subscription into our `subscriptions` table. */
 async function upsertSubscription(
@@ -94,7 +128,26 @@ export async function POST(request: Request) {
         const userId = s.metadata?.user_id;
         if (s.mode === "subscription" && s.subscription) {
           const sub = await stripe.subscriptions.retrieve(s.subscription as string);
-          await upsertSubscription(admin, userId, sub);
+          if (s.metadata?.type === "listing" || sub.metadata?.type === "listing") {
+            // Featured venue listing → entitlement on the restaurant + a receipt.
+            await applyListingEntitlement(admin, sub);
+            const email = s.customer_details?.email;
+            if (email) {
+              const rid = sub.metadata?.restaurant_id;
+              let venueName = "your venue";
+              if (rid) {
+                const { data: v } = await admin.from("restaurants").select("name").eq("id", rid).single();
+                if (v?.name) venueName = v.name;
+              }
+              await sendOrderReceipt({
+                to: email,
+                description: `${LISTING.name} — ${venueName}`,
+                amount: `${LISTING.price}/${LISTING.interval}`,
+              });
+            }
+          } else {
+            await upsertSubscription(admin, userId, sub);
+          }
         } else if (s.mode === "payment") {
           await admin.from("orders").upsert(
             {
@@ -127,7 +180,11 @@ export async function POST(request: Request) {
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
-        await upsertSubscription(admin, sub.metadata?.user_id, sub);
+        if (sub.metadata?.type === "listing") {
+          await applyListingEntitlement(admin, sub);
+        } else {
+          await upsertSubscription(admin, sub.metadata?.user_id, sub);
+        }
         break;
       }
       default:

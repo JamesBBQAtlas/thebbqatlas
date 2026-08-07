@@ -164,6 +164,10 @@ export interface Restaurant {
   enrichment_model?: string | null;
   chain_parent_id?: string | null;
   chain_rostered_at?: string | null;
+  // Phase 5.1 — paid "Featured" listing entitlement (set by the Stripe webhook).
+  is_premium?: boolean | null;
+  premium_tier?: string | null;
+  premium_until?: string | null;
   // Phase 6.7 — optional featured video (YouTube id + cached metadata).
   featured_video_id?: string | null;
   featured_video_title?: string | null;

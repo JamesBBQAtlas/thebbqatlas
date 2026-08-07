@@ -89,9 +89,20 @@ export async function getRestaurants(): Promise<Restaurant[]> {
   return data ?? FALLBACK_RESTAURANTS;
 }
 
+/** Real, non-expired paid Featured listing (Phase 5.1). */
+function isPaidFeatured(r: Restaurant): boolean {
+  if (!r.is_premium) return false;
+  return !r.premium_until || new Date(r.premium_until).getTime() > Date.now();
+}
+
+/** Featured venues for the homepage/directory: admin-featured OR a paid Featured
+ *  listing. Paid listings sort first. */
 export async function getFeaturedRestaurants(limit = 3): Promise<Restaurant[]> {
   const all = await getRestaurants();
-  return all.filter((r) => r.is_featured).slice(0, limit);
+  return all
+    .filter((r) => r.is_featured || isPaidFeatured(r))
+    .sort((a, b) => Number(isPaidFeatured(b)) - Number(isPaidFeatured(a)))
+    .slice(0, limit);
 }
 
 // Permanently-closed venues, for the OPT-IN map "ghost pin" layer only. Kept out

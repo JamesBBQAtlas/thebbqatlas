@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Clock } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Clock, Star } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
@@ -48,6 +48,7 @@ import { VenueVisitors } from "@/components/restaurants/VenueVisitors";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { FeaturedVideo } from "@/components/restaurants/FeaturedVideo";
+import { FeaturedUpgrade } from "@/components/restaurants/FeaturedUpgrade";
 import { getGearForStyle } from "@/lib/queries/gear";
 import { groupedHours } from "@/lib/restaurants/hours";
 import { SmallHoursAside } from "@/components/restaurants/SmallHoursAside";
@@ -193,6 +194,12 @@ export default async function RestaurantPage({ params }: Props) {
     ? { url: realHero.url, isReal: true }
     : { url: styleHeroUrl(restaurant.style), isReal: false };
 
+  // Paid "Featured" listing (Phase 5.1) — drives the verified badge + placement.
+  const isPaidFeatured =
+    Boolean(restaurant.is_premium) &&
+    (!restaurant.premium_until ||
+      new Date(restaurant.premium_until).getTime() > Date.now());
+
   // Nearby (by true distance). Miles for US/UK, kilometres elsewhere.
   const useMiles = code === "US" || code === "GB";
   const fmtDist = (km: number) => {
@@ -296,6 +303,12 @@ export default async function RestaurantPage({ params }: Props) {
             </h1>
 
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+              {isPaidFeatured && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-gold/60 bg-brand-gold/15 px-3.5 py-1 text-xs font-bold uppercase tracking-[0.06em] text-brand-gold">
+                  <Star className="h-3.5 w-3.5 fill-brand-gold" />
+                  Featured · Verified owner
+                </span>
+              )}
               {restaurant.permanently_closed && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-destructive bg-destructive/15 px-3.5 py-1 text-xs font-bold uppercase tracking-[0.06em] text-destructive">
                   Permanently closed
@@ -490,6 +503,9 @@ export default async function RestaurantPage({ params }: Props) {
             visited={metrics.visited}
             saved={metrics.saved}
           />
+
+          {/* Owner-only: upgrade this venue to a Featured listing (Phase 5.1). */}
+          <FeaturedUpgrade restaurantId={restaurant.id} />
 
           {/* Part of a brand — other locations */}
           {brand && (
