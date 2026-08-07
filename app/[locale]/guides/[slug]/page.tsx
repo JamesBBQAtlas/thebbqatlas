@@ -7,6 +7,7 @@ import { getGuideBySlug, getGuides } from "@/lib/queries/guides";
 import { safeVenueImage } from "@/lib/restaurants/image";
 import { AdSlot } from "@/components/monetization/AdSlot";
 import { AffiliateLink } from "@/components/monetization/AffiliateLink";
+import { AffiliateDisclosure } from "@/components/monetization/AffiliateDisclosure";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { articleJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { TrackView } from "@/components/account/TrackView";
@@ -24,6 +25,10 @@ export const dynamic = "force-dynamic";
 
 const typeLabel = (t: string | null | undefined) =>
   t === "missive" ? "Missive" : "Guide";
+
+/** A real affiliate link to one of our partners (Amazon OneLink / Dalstrong). */
+const AFFILIATE_RE = /https?:\/\/(www\.)?(amazon\.|amzn\.|dalstrong\.)/i;
+const isAffiliateHref = (href?: string): boolean => Boolean(href) && AFFILIATE_RE.test(href!);
 
 export async function generateStaticParams() {
   const guides = await getGuides();
@@ -55,6 +60,8 @@ export default async function GuidePage({ params }: Props) {
   setRequestLocale(params.locale);
   const guide = await getGuideBySlug(params.slug);
   if (!guide) notFound();
+
+  const hasAffiliate = AFFILIATE_RE.test(guide.content_md ?? "");
 
   return (
     <article className="mx-auto max-w-3xl px-4 py-10">
@@ -100,16 +107,28 @@ export default async function GuidePage({ params }: Props) {
         <ReactMarkdown
           components={{
             a: ({ href, children }) => {
-              if (href === "#") {
-                return <AffiliateLink href="#" label={String(children)} />;
+              // Strip placeholder anchors (href="#") — they used to render as an
+              // affiliate link that LOGGED a click but went nowhere (M-7). Show
+              // the text plainly instead.
+              if (!href || href === "#") return <span>{children}</span>;
+              // Real affiliate links go through AffiliateLink (decorated + tracked
+              // + disclosed); everything else is a normal external link.
+              if (isAffiliateHref(href)) {
+                return <AffiliateLink href={href} label={String(children)} partner="amazon" />;
               }
-              return <a href={href}>{children}</a>;
+              return (
+                <a href={href} target="_blank" rel="noopener noreferrer">
+                  {children}
+                </a>
+              );
             },
           }}
         >
           {guide.content_md}
         </ReactMarkdown>
       </div>
+
+      {hasAffiliate && <AffiliateDisclosure variant="inline" className="mt-8" />}
     </article>
   );
 }

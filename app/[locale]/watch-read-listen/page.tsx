@@ -3,6 +3,7 @@ import { resolvePodcastArtwork } from "@/lib/media/podcast-art";
 import { resolveYouTube } from "@/lib/media/youtube";
 import { MediaDirectory } from "@/components/media/MediaDirectory";
 import { AdSlot } from "@/components/monetization/AdSlot";
+import { AffiliateDisclosure } from "@/components/monetization/AffiliateDisclosure";
 
 const WRL_DESC =
   "The barbecue YouTube channels, books and podcasts The BBQ Atlas rates — the people worth your time, with an honest word on each.";
@@ -73,9 +74,9 @@ export default async function WatchReadListenPage() {
 
       <MediaDirectory picks={{ youtube, book, podcast, video: picks.video }} />
 
-      <p className="mt-10 text-xs text-white/30">
-        As an Amazon Associate, The BBQ Atlas earns from qualifying purchases. Book links are
-        affiliate links; channel and podcast links are not.
+      <AffiliateDisclosure variant="inline" className="mt-10" />
+      <p className="mt-2 text-xs text-white/30">
+        Book links are affiliate links; channel and podcast links are not.
       </p>
       <AdSlot slot="in-content" className="mt-8 h-0" />
     </div>
