@@ -75,7 +75,7 @@ export default async function GuidePage({ params }: Props) {
         slug={guide.slug}
       />
       <div className="relative aspect-[21/9] rounded-xl overflow-hidden mb-8">
-        <EditorialImage src={guide.hero_image_url} alt={guide.title} priority />
+        <EditorialImage src={guide.hero_image_url} alt={guide.title} editorial priority />
       </div>
       <div className="flex items-start justify-between gap-4">
         <h1 className="text-3xl md:text-4xl font-bold">{guide.title}</h1>

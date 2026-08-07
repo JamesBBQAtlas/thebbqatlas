@@ -30,7 +30,7 @@ export default async function GuidesPage() {
           <Link key={guide.id} href={`/guides/${guide.slug}`}>
             <article className="rounded-xl border border-white/10 bg-black/60 overflow-hidden hover:border-brand-gold/40 transition-colors h-full">
               <div className="relative aspect-[16/9]">
-                <EditorialImage src={guide.hero_image_url} alt={guide.title} />
+                <EditorialImage src={guide.hero_image_url} alt={guide.title} editorial />
               </div>
               <div className="p-6">
                 <div className="mb-2 flex items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-brand-gold/80">

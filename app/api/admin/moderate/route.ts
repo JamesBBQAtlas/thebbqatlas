@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/admin";
 import { restaurantSlug } from "@/lib/utils/slug";
 import { resolveCountryCode } from "@/lib/constants/countries";
 import { safeVenueImage } from "@/lib/restaurants/image";
@@ -48,20 +47,11 @@ async function recomputeReviewStats(admin: SupabaseClient, restaurantId: string)
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-  if (profile?.role !== "admin") {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // requireAdmin enforces the aal2 (MFA-stepped-up) session that every other
+  // admin route requires — an aal1 admin can no longer approve/reject content.
+  const ctx = await requireAdmin();
+  if (!ctx) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const admin: SupabaseClient = ctx.db;
 
   const body = await request.json().catch(() => null);
   if (!body) {
@@ -78,10 +68,6 @@ export async function POST(request: Request) {
   if (!id || (action !== "approve" && action !== "reject" && action !== "merge")) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
-
-  const admin: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
-    ? createAdminClient()
-    : supabase;
 
   try {
     if (type === "submission") {
@@ -209,7 +195,7 @@ export async function POST(request: Request) {
             await admin.from("restaurants").update({ status: "approved" }).eq("id", venue.id);
             await auditField(admin, venue.id, "published", venue.status, "approved", {
               source: "manual_edit",
-              changedBy: user.id,
+              changedBy: ctx.userId,
               note: "published from moderation queue",
             });
           }
@@ -242,7 +228,7 @@ export async function POST(request: Request) {
           if (created) {
             await auditCreated(admin, created.id, { name: submission.name, city: submission.city, status: "approved" }, {
               source: "manual_edit",
-              changedBy: user.id,
+              changedBy: ctx.userId,
               note: "approved from public submission",
             });
           }
@@ -255,7 +241,7 @@ export async function POST(request: Request) {
           .eq("id", submission.target_restaurant_id);
         await auditField(admin, submission.target_restaurant_id, "permanently_closed", false, true, {
           source: "manual_edit",
-          changedBy: user.id,
+          changedBy: ctx.userId,
           note: "closure report approved",
         });
       }

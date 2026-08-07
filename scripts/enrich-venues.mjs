@@ -19,6 +19,26 @@ import { createClient } from "@supabase/supabase-js";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
+// ─────────────────────────────────────────────────────────────────────────────
+// NEUTRALISED — Fable audit C-2 (blocking).
+// This batch path reproduced every condition of the prior $4/venue blowout:
+// it defaulted to an expensive model, ran web_search with no max_uses cap,
+// wrote directly to live `restaurants` with `--apply` (no draft→pending→publish
+// gate, no classifyStyle, no town-not-county parser, no null-island block, no
+// dedupe), and ledgered nothing (no ai_usage_log / enrichment_runs). Worst case
+// ≈ $2,400 + 600 unreviewed rows in production.
+//
+// The 600-venue enrichment runs through the VenueHub admin UI ONLY
+// (Admin → Venues), which is capped, ledgered, and gated. This script can no
+// longer touch production; it exits before doing any work.
+// ─────────────────────────────────────────────────────────────────────────────
+console.error(
+  "enrich-venues.mjs is disabled (Fable C-2). Run enrichment through the " +
+    "VenueHub admin UI — Admin → Venues — which is capped, ledgered and gated. " +
+    "This script no longer writes to production."
+);
+process.exit(1);
+
 // --- tiny .env.local loader (no dotenv dependency) ---
 const envPath = join(process.cwd(), ".env.local");
 if (existsSync(envPath)) {

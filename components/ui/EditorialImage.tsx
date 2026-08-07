@@ -15,7 +15,10 @@ import { safeVenueImage } from "@/lib/restaurants/image";
  */
 function editorialSrc(src?: string | null): string | null {
   const u = (src ?? "").trim();
-  return /^https?:\/\//i.test(u) ? u : null;
+  // Accept a real hosted https URL (allowlisted host) OR a same-origin path such
+  // as /guides/heroes/{slug}.png that lives in /public — those are ours, not
+  // hotlinked stock, so they should render, not fall to the placeholder.
+  return /^https?:\/\//i.test(u) || u.startsWith("/") ? u : null;
 }
 
 export function EditorialImage({
