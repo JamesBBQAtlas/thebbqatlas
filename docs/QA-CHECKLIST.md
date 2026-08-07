@@ -89,12 +89,44 @@ Legend: ☐ untested · ✅ verified · ⚠️ issue found
   copy that reads off-voice.
 - ☐ Heading font is **Zilla Slab** everywhere (decided — cowboy/BBQ).
 
-## 7. Monetisation / Stripe (Phase 5 — when built)
+## 7. Monetisation / Stripe (Phase 5)
 
-- ☐ Premium checkout appears only when Stripe is fully configured (secret key +
-  publishable key + price id + webhook secret). Test a checkout end-to-end in test
-  mode before live.
-- ☐ Subscription state reflects after purchase (saved-spots map, ad-free, etc.).
+- ☐ Consumer premium checkout appears only when Stripe is fully configured.
+- ☐ **Featured listing funnel (5.1):** claim a venue → approve the claim → the
+  owner sees "Upgrade to Featured" on the venue page → checkout with test card
+  `4242 4242 4242 4242` → after payment the "Featured · Verified owner" badge +
+  featured placement appear, and a receipt email arrives.
+- ☐ Cancelling the Featured subscription clears `is_premium` (badge/placement drop
+  at next revalidate); admin-set `is_featured` venues are unaffected.
+- ☐ FTC affiliate disclosure shows on WRL + guides; no phantom `href="#"` links.
+
+## 8. Venue report (Phase 5.2)
+
+- ☐ **Owner report:** on a venue you own, the "Your venue report" card shows
+  profile views / search / clicks / saves / check-ins with month-on-month deltas;
+  non-owners never see it.
+- ☐ Monthly email (1st of month) reaches owners of venues with activity; zero-
+  activity venues are skipped; no duplicate within a month.
+
+## 9. Subscribers & lifecycle
+
+- ☐ **Admin Subscribers** (`/admin/subscribers`): Subscribed vs Unsubscribed
+  counts, reach, newsletter-only; searchable list + CSV export.
+- ☐ Subscribe via the footer → a "become a member" welcome arrives (skipped if the
+  email already has an account).
+- ☐ Non-member subscribers get day-1/3/7 conversion emails; the drip stops on
+  register or unsubscribe; no duplicates on cron re-run.
+- ☐ New signups default to marketing opt-in (passive notice, one-click opt-out);
+  the 6 existing members were backfilled (James-confirmed).
+
+## 10. Admin housekeeping
+
+- ☐ **Change Log** (`/admin/audit`) now reflects manual edits + moderation +
+  roster changes (not just AI enrichment).
+- ☐ **News admin** (`/admin/news`): the Truth post is published; drafts editable +
+  publishable.
+- ☐ Deep-link files return 404 until the native env vars are set (AASA /
+  assetlinks.json) — expected pre-launch.
 
 ## 8. General mobile pass 📱
 
