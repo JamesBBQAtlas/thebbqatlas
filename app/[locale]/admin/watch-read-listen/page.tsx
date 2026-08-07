@@ -42,6 +42,40 @@ export default async function MediaPicksAdminPage() {
 
   const rows = (data ?? []) as AdminMediaPick[];
 
+  // --- KPI (Phase 6.8 D2) --------------------------------------------------
+  // Per-kind published/unpublished counts + the top items by outbound clicks
+  // over the last 30 days (deduped media click_events, keyed to media_pick_id).
+  const perKind: Record<string, { published: number; unpublished: number }> = {};
+  for (const r of rows) {
+    const k = (perKind[r.kind] ??= { published: 0, unpublished: 0 });
+    if (r.is_published) k.published++;
+    else k.unpublished++;
+  }
+
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  // Low-volume, admin-only: pull recent media clicks and tally in JS (capped).
+  const { data: clickRows } = await db
+    .from("click_events")
+    .select("media_pick_id")
+    .eq("event_type", "media")
+    .not("media_pick_id", "is", null)
+    .gte("created_at", since)
+    .limit(10000);
+  const tally = new Map<string, number>();
+  for (const c of (clickRows ?? []) as { media_pick_id: string }[]) {
+    tally.set(c.media_pick_id, (tally.get(c.media_pick_id) ?? 0) + 1);
+  }
+  const rowById = new Map(rows.map((r) => [r.id, r] as const));
+  const top: { id: string; name: string; kind: string; clicks: number }[] = [];
+  for (const [id, clicks] of tally) {
+    const r = rowById.get(id);
+    if (r) top.push({ id, name: r.name, kind: r.kind, clicks });
+  }
+  top.sort((a, b) => b.clicks - a.clicks);
+  top.splice(5);
+
+  const kpi = { perKind, top, windowDays: 30 };
+
   return (
     <div className="mx-auto max-w-5xl px-6 py-16 sm:px-10">
       <div className="mb-8">
@@ -54,7 +88,7 @@ export default async function MediaPicksAdminPage() {
           automatically when the page renders.
         </p>
       </div>
-      <MediaPicksAdmin rows={rows} />
+      <MediaPicksAdmin rows={rows} kpi={kpi} />
     </div>
   );
 }

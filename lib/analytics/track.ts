@@ -11,12 +11,24 @@ export interface ClickEventPayload {
     | "instagram"
     | "map"
     | "share"
-    | "save";
+    | "save"
+    | "media";
   restaurant_id?: string | null;
+  media_pick_id?: string | null;
   partner?: string;
   target_url?: string;
   page_path?: string;
   subtag?: string;
+}
+
+/** Convenience: log a Watch/Read/Listen outbound click keyed to its pick. */
+export function logMediaClick(mediaPickId: string, subtag: string, targetUrl?: string): void {
+  logClick({
+    event_type: "media",
+    media_pick_id: mediaPickId,
+    subtag,
+    target_url: targetUrl,
+  });
 }
 
 export function logClick(ev: ClickEventPayload): void {

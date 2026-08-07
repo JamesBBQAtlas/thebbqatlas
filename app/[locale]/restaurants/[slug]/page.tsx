@@ -416,6 +416,7 @@ export default async function RestaurantPage({ params }: Props) {
               title={restaurant.featured_video_title}
               channel={restaurant.featured_video_channel}
               thumb={restaurant.featured_video_thumb}
+              restaurantId={restaurant.id}
             />
           )}
 

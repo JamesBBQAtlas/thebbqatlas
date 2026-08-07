@@ -38,9 +38,11 @@ type Gapi = { ytsubscribe?: { go?: (el?: HTMLElement) => void } };
 export function SubscribeButton({
   channelId,
   channelUrl,
+  onSubscribe,
 }: {
   channelId: string | null | undefined;
   channelUrl: string;
+  onSubscribe?: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
@@ -80,6 +82,7 @@ export function SubscribeButton({
       href={subscribeUrl(channelUrl)}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={onSubscribe}
       style={{ borderColor: "#FF000066", color: "#FF0000" }}
       className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[0.6875rem] font-semibold transition-colors hover:bg-white/[0.06]"
     >

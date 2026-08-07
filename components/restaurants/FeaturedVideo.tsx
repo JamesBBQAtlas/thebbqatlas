@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Play, ExternalLink } from "lucide-react";
+import { logClick } from "@/lib/analytics/track";
 
 /**
  * Phase 6.7 (B1) — a venue's featured video as a lightweight click-to-play
@@ -15,15 +16,27 @@ export function FeaturedVideo({
   title,
   channel,
   thumb,
+  restaurantId,
 }: {
   videoId: string;
   title?: string | null;
   channel?: string | null;
   thumb?: string | null;
+  restaurantId?: string;
 }) {
   const [playing, setPlaying] = useState(false);
   const poster =
     thumb ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
+
+  function play() {
+    setPlaying(true);
+    logClick({
+      event_type: "media",
+      restaurant_id: restaurantId ?? null,
+      subtag: "featured-video",
+      target_url: `https://www.youtube.com/watch?v=${videoId}`,
+    });
+  }
 
   return (
     <section className="mb-12">
@@ -44,7 +57,7 @@ export function FeaturedVideo({
           ) : (
             <button
               type="button"
-              onClick={() => setPlaying(true)}
+              onClick={play}
               aria-label={title ? `Play “${title}”` : "Play featured video"}
               className="group absolute inset-0 h-full w-full"
             >

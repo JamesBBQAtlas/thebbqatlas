@@ -12,6 +12,7 @@ const ALLOWED = new Set([
   "map",
   "share",
   "save",
+  "media",
 ]);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -44,6 +45,8 @@ export async function POST(req: Request) {
     v == null ? null : String(v).slice(0, max);
   const rawRid = body.restaurant_id ? String(body.restaurant_id) : null;
   const restaurantId = rawRid && UUID_RE.test(rawRid) ? rawRid : null;
+  const rawMid = body.media_pick_id ? String(body.media_pick_id) : null;
+  const mediaPickId = rawMid && UUID_RE.test(rawMid) ? rawMid : null;
 
   // Best-effort signed-in attribution (cookie session), without blocking on it.
   let userId: string | null = null;
@@ -61,7 +64,11 @@ export async function POST(req: Request) {
   try {
     const db = createAdminClient();
 
-    // Dedupe window: same session + venue + event within 30 minutes = one click.
+    const subtag = str(body.subtag, 120);
+
+    // Dedupe window: same session + item + event within 30 minutes = one click.
+    // For WRL media clicks the item is the media_pick (+ subtag distinguishing
+    // e.g. "watch" vs "subscribe"); otherwise it's the venue.
     if (ctx.session_hash) {
       const since = new Date(Date.now() - 30 * 60 * 1000).toISOString();
       let q = db
@@ -71,7 +78,12 @@ export async function POST(req: Request) {
         .eq("event_type", eventType)
         .gte("created_at", since)
         .limit(1);
-      q = restaurantId ? q.eq("restaurant_id", restaurantId) : q.is("restaurant_id", null);
+      if (mediaPickId) {
+        q = q.eq("media_pick_id", mediaPickId);
+        if (subtag) q = q.eq("subtag", subtag);
+      } else {
+        q = restaurantId ? q.eq("restaurant_id", restaurantId) : q.is("restaurant_id", null);
+      }
       const { data: dup } = await q.maybeSingle();
       if (dup) return NextResponse.json({ ok: true, deduped: true });
     }
@@ -79,10 +91,11 @@ export async function POST(req: Request) {
     await db.from("click_events").insert({
       event_type: eventType,
       restaurant_id: restaurantId,
+      media_pick_id: mediaPickId,
       partner: str(body.partner, 48),
       target_url: str(body.target_url, 2048),
       page_path: str(body.page_path, 512),
-      subtag: str(body.subtag, 120),
+      subtag,
       user_id: userId,
       session_hash: ctx.session_hash,
       is_bot: false,

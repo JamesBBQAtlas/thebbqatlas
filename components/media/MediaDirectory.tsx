@@ -6,6 +6,7 @@ import type { MediaPick, MediaKind } from "@/lib/queries/media-picks";
 import { MediaArt } from "./MediaArt";
 import { SubscribeButton } from "./SubscribeButton";
 import { AffiliateLink } from "@/components/monetization/AffiliateLink";
+import { logMediaClick } from "@/lib/analytics/track";
 
 const TABS: { kind: MediaKind; label: string; Icon: typeof Youtube }[] = [
   { kind: "youtube", label: "Watch", Icon: Youtube },
@@ -149,11 +150,13 @@ function VideoThumb({
   thumb,
   title,
   duration,
+  onClick,
 }: {
   href: string;
   thumb: string | null;
   title: string;
   duration?: string | null;
+  onClick?: () => void;
 }) {
   const dur = fmtDuration(duration);
   return (
@@ -161,6 +164,7 @@ function VideoThumb({
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={onClick}
       className="group/vid block overflow-hidden rounded-lg border border-white/10 transition-colors hover:border-brand-gold/40"
       title={title}
     >
@@ -223,17 +227,20 @@ function OutboundPill({
   label,
   color,
   icon: Icon,
+  onClick,
 }: {
   href: string;
   label: string;
   color?: string;
   icon?: ComponentType<{ className?: string }>;
+  onClick?: () => void;
 }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
+      onClick={onClick}
       style={color ? { borderColor: `${color}66`, color } : undefined}
       className={
         "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[0.6875rem] font-semibold transition-colors hover:bg-white/[0.06] " +
@@ -264,6 +271,7 @@ function ChannelCard({ pick }: { pick: MediaPick }) {
             href={watchUrl(pick.latest!.videoId)}
             thumb={pick.latest!.thumb}
             title={pick.latest!.title}
+            onClick={() => logMediaClick(pick.id, "latest-video", watchUrl(pick.latest!.videoId))}
           />
           <p className="mt-1.5 line-clamp-2 text-xs leading-snug text-white/70">
             <span className="font-semibold text-white/45">Latest</span> · {pick.latest!.title}
@@ -295,13 +303,24 @@ function ChannelCard({ pick }: { pick: MediaPick }) {
             href={pick.url}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => logMediaClick(pick.id, "watch", pick.url)}
             className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-brand-gold transition-colors hover:text-brand-gold-light"
           >
             {CTA.youtube}
             <ExternalLink className="h-3 w-3" />
           </a>
-          <SubscribeButton channelId={pick.channelId} channelUrl={pick.url} />
-          {pick.gear_link ? <OutboundPill href={pick.gear_link} label="Their kit" /> : null}
+          <SubscribeButton
+            channelId={pick.channelId}
+            channelUrl={pick.url}
+            onSubscribe={() => logMediaClick(pick.id, "subscribe", pick.url)}
+          />
+          {pick.gear_link ? (
+            <OutboundPill
+              href={pick.gear_link}
+              label="Their kit"
+              onClick={() => logMediaClick(pick.id, "kit", pick.gear_link!)}
+            />
+          ) : null}
         </div>
       </div>
     </article>
@@ -320,6 +339,7 @@ function VideoCard({ pick }: { pick: MediaPick }) {
           thumb={pick.image_url}
           title={pick.name}
           duration={pick.links?.duration}
+          onClick={() => logMediaClick(pick.id, "episode", videoId ? watchUrl(videoId) : pick.url)}
         />
       </div>
       <div className="flex flex-1 flex-col p-4 pt-3">
@@ -335,6 +355,7 @@ function VideoCard({ pick }: { pick: MediaPick }) {
             href={videoId ? watchUrl(videoId) : pick.url}
             target="_blank"
             rel="noopener noreferrer"
+            onClick={() => logMediaClick(pick.id, "episode", videoId ? watchUrl(videoId) : pick.url)}
             className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-brand-gold transition-colors hover:text-brand-gold-light"
           >
             {CTA.video}
@@ -359,7 +380,13 @@ function Card({ pick }: { pick: MediaPick }) {
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {pick.kind === "book" ? (
-            <AffiliateLink href={pick.url} label={CTA.book} partner="amazon" product={pick.name} />
+            <AffiliateLink
+              href={pick.url}
+              label={CTA.book}
+              partner="amazon"
+              product={pick.name}
+              mediaPickId={pick.id}
+            />
           ) : (
             <PodcastLinks pick={pick} />
           )}
@@ -384,7 +411,13 @@ function PodcastLinks({ pick }: { pick: MediaPick }) {
   const present = PLATFORMS.filter((p) => links[p.key]);
   // Fall back to the single stored url if no platform map is set.
   if (present.length === 0) {
-    return <OutboundPill href={pick.url} label="Listen" />;
+    return (
+      <OutboundPill
+        href={pick.url}
+        label="Listen"
+        onClick={() => logMediaClick(pick.id, "podcast", pick.url)}
+      />
+    );
   }
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -395,6 +428,7 @@ function PodcastLinks({ pick }: { pick: MediaPick }) {
           label={p.label}
           color={p.color}
           icon={PLATFORM_ICON[p.key]}
+          onClick={() => logMediaClick(pick.id, `podcast:${p.key}`, links[p.key])}
         />
       ))}
     </div>

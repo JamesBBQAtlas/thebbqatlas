@@ -518,31 +518,149 @@ function ResolveCoversButton() {
   );
 }
 
-export function MediaPicksAdmin({ rows }: { rows: AdminMediaPick[] }) {
+interface Kpi {
+  perKind: Record<string, { published: number; unpublished: number }>;
+  top: { id: string; name: string; kind: string; clicks: number }[];
+  windowDays: number;
+}
+
+const KIND_SHORT: Record<AdminMediaPick["kind"], string> = {
+  youtube: "Watch",
+  video: "Episodes",
+  book: "Read",
+  podcast: "Listen",
+};
+
+/** KPI strip (Phase 6.8 D2): per-kind counts + top items by clicks. */
+function KpiHeader({ kpi }: { kpi: Kpi }) {
   return (
-    <div className="space-y-10">
-      {KINDS.map((kind) => {
-        const items = rows.filter((r) => r.kind === kind);
-        return (
-          <section key={kind}>
-            <div className="mb-3 flex items-center justify-between border-b border-border-subtle pb-2">
-              <h2 className="text-lg font-bold text-text-primary">
-                {KIND_LABEL[kind]}{" "}
-                <span className="text-sm font-normal text-text-muted">({items.length})</span>
-              </h2>
-              <div className="flex flex-col items-end gap-2">
-                {kind === "book" && <ResolveCoversButton />}
-                {kind === "video" ? <AddVideoForm /> : <AddForm kind={kind} />}
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="rounded-lg border border-border-subtle bg-surface-0 p-4 lg:col-span-2">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.06em] text-text-muted">
+          Catalogue
+        </p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          {KINDS.map((k) => {
+            const c = kpi.perKind[k] ?? { published: 0, unpublished: 0 };
+            return (
+              <div key={k}>
+                <p className="text-2xl font-bold tabular-nums text-text-primary">
+                  {c.published}
+                  {c.unpublished > 0 && (
+                    <span className="ml-1 text-sm font-normal text-text-muted">
+                      +{c.unpublished} draft
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-text-muted">{KIND_SHORT[k]}</p>
               </div>
-            </div>
-            <div className="space-y-3">
-              {items.map((pick) => (
-                <Row key={pick.id} pick={pick} />
-              ))}
-            </div>
-          </section>
-        );
-      })}
+            );
+          })}
+        </div>
+      </div>
+      <div className="rounded-lg border border-border-subtle bg-surface-0 p-4">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.06em] text-text-muted">
+          Top by clicks · {kpi.windowDays}d
+        </p>
+        {kpi.top.length === 0 ? (
+          <p className="text-sm text-text-muted">No outbound clicks yet.</p>
+        ) : (
+          <ol className="space-y-1">
+            {kpi.top.map((t) => (
+              <li key={t.id} className="flex items-center justify-between gap-2 text-sm">
+                <span className="truncate text-text-secondary">
+                  <span className="text-text-muted">{KIND_SHORT[t.kind as AdminMediaPick["kind"]]}</span>{" "}
+                  {t.name}
+                </span>
+                <span className="shrink-0 font-semibold tabular-nums text-brand-gold">{t.clicks}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function MediaPicksAdmin({ rows, kpi }: { rows: AdminMediaPick[]; kpi: Kpi }) {
+  const [tab, setTab] = useState<"all" | AdminMediaPick["kind"]>("all");
+  const [q, setQ] = useState("");
+  const query = q.trim().toLowerCase();
+
+  const shownKinds = tab === "all" ? KINDS : [tab];
+  const match = (r: AdminMediaPick) =>
+    !query ||
+    `${r.name} ${r.creator ?? ""} ${r.url}`.toLowerCase().includes(query);
+
+  return (
+    <div className="space-y-8">
+      <KpiHeader kpi={kpi} />
+
+      {/* Sticky sub-nav — filter tabs + search (Phase 6.8 D1) */}
+      <div className="sticky top-0 z-10 -mx-2 flex flex-wrap items-center gap-2 bg-background/95 px-2 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <div className="inline-flex flex-wrap gap-1 rounded-lg border border-border-subtle bg-surface-0 p-1">
+          {(["all", ...KINDS] as const).map((k) => {
+            const on = tab === k;
+            const count =
+              k === "all"
+                ? rows.length
+                : (kpi.perKind[k]?.published ?? 0) + (kpi.perKind[k]?.unpublished ?? 0);
+            return (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setTab(k)}
+                className={
+                  "rounded-md px-3 py-1.5 text-xs font-semibold transition-colors " +
+                  (on
+                    ? "bg-brand-gold text-text-inverse"
+                    : "text-text-secondary hover:text-text-primary")
+                }
+              >
+                {k === "all" ? "All" : KIND_SHORT[k]}
+                <span className={on ? "ml-1 text-text-inverse/70" : "ml-1 text-text-muted"}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Search name, creator, URL…"
+          className="ml-auto w-full max-w-xs rounded-md border border-border-default bg-surface-1 px-2.5 py-1.5 text-sm text-text-primary placeholder:text-text-muted focus:border-brand-gold/60 focus:outline-none"
+        />
+      </div>
+
+      <div className="space-y-10">
+        {shownKinds.map((kind) => {
+          const items = rows.filter((r) => r.kind === kind && match(r));
+          return (
+            <section key={kind} id={`wrl-${kind}`}>
+              <div className="mb-3 flex items-center justify-between border-b border-border-subtle pb-2">
+                <h2 className="text-lg font-bold text-text-primary">
+                  {KIND_LABEL[kind]}{" "}
+                  <span className="text-sm font-normal text-text-muted">({items.length})</span>
+                </h2>
+                <div className="flex flex-col items-end gap-2">
+                  {kind === "book" && <ResolveCoversButton />}
+                  {kind === "video" ? <AddVideoForm /> : <AddForm kind={kind} />}
+                </div>
+              </div>
+              <div className="space-y-3">
+                {items.length === 0 ? (
+                  <p className="py-4 text-sm text-text-muted">
+                    {query ? "No matches." : "Nothing here yet."}
+                  </p>
+                ) : (
+                  items.map((pick) => <Row key={pick.id} pick={pick} />)
+                )}
+              </div>
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }

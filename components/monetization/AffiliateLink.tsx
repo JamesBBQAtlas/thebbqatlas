@@ -23,6 +23,7 @@ export function AffiliateLink({
   partner,
   restaurantId,
   restaurantSlug,
+  mediaPickId,
   product,
   className,
 }: {
@@ -31,6 +32,7 @@ export function AffiliateLink({
   partner?: string;
   restaurantId?: string | null;
   restaurantSlug?: string;
+  mediaPickId?: string | null;
   product?: string;
   className?: string;
 }) {
@@ -50,6 +52,7 @@ export function AffiliateLink({
         logClick({
           event_type: "affiliate",
           restaurant_id: restaurantId ?? null,
+          media_pick_id: mediaPickId ?? null,
           partner: resolvedPartner,
           target_url: finalHref,
           page_path: pathname,
