@@ -20,6 +20,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     getBrands(),
   ]);
   const now = new Date();
+  // Stable lastmod for static marketing/legal routes (Fable M-9) — bump this
+  // when their CONTENT actually changes, so the sitemap doesn't claim every
+  // static page was modified on every request (a crawl-budget smell).
+  const STATIC_LASTMOD = new Date("2026-08-07T00:00:00Z");
 
   // Newest member-venue date for a set (stable hub lastmod that doesn't churn
   // on every request — F-18). Falls back to `now` when a set is empty.
@@ -33,28 +37,32 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   };
 
   const staticEntries: MetadataRoute.Sitemap = [
-    { url: abs("/"), lastModified: now, changeFrequency: "daily", priority: 1 },
-    { url: abs("/map"), lastModified: now, changeFrequency: "daily", priority: 0.9 },
-    { url: abs("/directory"), lastModified: now, changeFrequency: "daily", priority: 0.9 },
-    { url: abs("/guides"), lastModified: now, changeFrequency: "weekly", priority: 0.7 },
-    { url: abs("/watch-read-listen"), lastModified: now, changeFrequency: "weekly", priority: 0.6 },
-    { url: abs("/news"), lastModified: now, changeFrequency: "daily", priority: 0.7 },
-    { url: abs("/styles"), lastModified: now, changeFrequency: "weekly", priority: 0.7 },
-    { url: abs("/events"), lastModified: now, changeFrequency: "daily", priority: 0.6 },
-    { url: abs("/gear"), lastModified: now, changeFrequency: "weekly", priority: 0.5 },
-    { url: abs("/about"), lastModified: now, changeFrequency: "monthly", priority: 0.4 },
-    { url: abs("/contact"), lastModified: now, changeFrequency: "yearly", priority: 0.3 },
-    { url: abs("/list"), lastModified: now, changeFrequency: "monthly", priority: 0.5 },
-    { url: abs("/premium"), lastModified: now, changeFrequency: "monthly", priority: 0.4 },
-    { url: abs("/submit"), lastModified: now, changeFrequency: "monthly", priority: 0.5 },
-    { url: abs("/privacy"), lastModified: now, changeFrequency: "yearly", priority: 0.2 },
-    { url: abs("/terms"), lastModified: now, changeFrequency: "yearly", priority: 0.2 },
-    { url: abs("/disclaimer"), lastModified: now, changeFrequency: "yearly", priority: 0.2 },
+    { url: abs("/"), lastModified: STATIC_LASTMOD, changeFrequency: "daily", priority: 1 },
+    { url: abs("/map"), lastModified: STATIC_LASTMOD, changeFrequency: "daily", priority: 0.9 },
+    { url: abs("/directory"), lastModified: STATIC_LASTMOD, changeFrequency: "daily", priority: 0.9 },
+    { url: abs("/guides"), lastModified: STATIC_LASTMOD, changeFrequency: "weekly", priority: 0.7 },
+    { url: abs("/watch-read-listen"), lastModified: STATIC_LASTMOD, changeFrequency: "weekly", priority: 0.6 },
+    { url: abs("/news"), lastModified: STATIC_LASTMOD, changeFrequency: "daily", priority: 0.7 },
+    { url: abs("/styles"), lastModified: STATIC_LASTMOD, changeFrequency: "weekly", priority: 0.7 },
+    { url: abs("/events"), lastModified: STATIC_LASTMOD, changeFrequency: "daily", priority: 0.6 },
+    { url: abs("/gear"), lastModified: STATIC_LASTMOD, changeFrequency: "weekly", priority: 0.5 },
+    { url: abs("/about"), lastModified: STATIC_LASTMOD, changeFrequency: "monthly", priority: 0.4 },
+    { url: abs("/contact"), lastModified: STATIC_LASTMOD, changeFrequency: "yearly", priority: 0.3 },
+    { url: abs("/list"), lastModified: STATIC_LASTMOD, changeFrequency: "monthly", priority: 0.5 },
+    { url: abs("/premium"), lastModified: STATIC_LASTMOD, changeFrequency: "monthly", priority: 0.4 },
+    { url: abs("/submit"), lastModified: STATIC_LASTMOD, changeFrequency: "monthly", priority: 0.5 },
+    { url: abs("/privacy"), lastModified: STATIC_LASTMOD, changeFrequency: "yearly", priority: 0.2 },
+    { url: abs("/terms"), lastModified: STATIC_LASTMOD, changeFrequency: "yearly", priority: 0.2 },
+    { url: abs("/disclaimer"), lastModified: STATIC_LASTMOD, changeFrequency: "yearly", priority: 0.2 },
   ];
 
   const restaurantEntries: MetadataRoute.Sitemap = restaurants.map((r) => ({
     url: abs(`/restaurants/${r.slug}`),
-    lastModified: r.created_at ? new Date(r.created_at) : now,
+    // Use the enrichment date when present (the real "last meaningful change"),
+    // falling back to created_at (Fable M-9).
+    lastModified: new Date(
+      (r as { enriched_at?: string | null }).enriched_at || r.created_at || now
+    ),
     changeFrequency: "weekly",
     priority: r.is_featured ? 0.9 : 0.8,
   }));

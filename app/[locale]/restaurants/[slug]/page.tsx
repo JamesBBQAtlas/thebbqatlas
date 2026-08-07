@@ -30,7 +30,9 @@ import { ReportCorrection } from "@/components/restaurants/ReportCorrection";
 import { TrackView } from "@/components/account/TrackView";
 import { VenueViewBeacon } from "@/components/restaurants/VenueViewBeacon";
 import { JsonLd } from "@/components/seo/JsonLd";
-import { restaurantJsonLd, breadcrumbJsonLd, eventJsonLd } from "@/lib/seo/jsonld";
+import { restaurantJsonLd, breadcrumbJsonLd, eventJsonLd, faqPageJsonLd } from "@/lib/seo/jsonld";
+import { venueFaqs } from "@/lib/seo/hub-content";
+import { HubFaq } from "@/components/seo/HubFaq";
 import { SITE, absoluteUrl } from "@/lib/seo/site";
 import {
   CATEGORY_LABELS,
@@ -202,6 +204,16 @@ export default async function RestaurantPage({ params }: Props) {
   // Nearest approved venues, already filtered/sorted/limited in Postgres (H-1).
   const nearby = nearbyRows.map((r) => ({ r, km: r.distance_km }));
 
+  // Data-driven venue FAQ (Fable H-4) — style + location, visible + JSON-LD.
+  const venueFaqList = venueFaqs({
+    name: restaurant.name,
+    styleLabel:
+      restaurant.style && restaurant.style !== "other" ? STYLE_LABELS[restaurant.style] : null,
+    city: restaurant.city,
+    country: restaurant.country,
+    address: restaurant.address,
+  });
+
   // Sign uploaded photos, then flatten to plain rows for the client roster.
   const visitorAvatars = await getPublicAvatarSignedUrls(
     visitors.map((v) => v.userId)
@@ -225,6 +237,7 @@ export default async function RestaurantPage({ params }: Props) {
           isTimeBased(restaurant.category) && restaurant.event_starts_at
             ? eventJsonLd(restaurant)
             : restaurantJsonLd(restaurant),
+          ...(venueFaqList.length ? [faqPageJsonLd(venueFaqList)] : []),
           breadcrumbJsonLd([
             { name: "Atlas", path: "/" },
             { name: "Directory", path: "/directory" },
@@ -713,6 +726,12 @@ export default async function RestaurantPage({ params }: Props) {
           )}
         </div>
       </section>
+
+      {venueFaqList.length > 0 && (
+        <section className="mx-auto max-w-[1200px] px-6 sm:px-10">
+          <HubFaq faqs={venueFaqList} heading={`${restaurant.name} — FAQ`} />
+        </section>
+      )}
 
       {/* Nearby on the Atlas — by real distance */}
       {nearby.length > 0 && (

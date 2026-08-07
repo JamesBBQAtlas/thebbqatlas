@@ -140,3 +140,27 @@ export function countryMetaDescription(countryName: string, venues: Restaurant[]
   const n = venues.length;
   return `${n} barbecue ${n === 1 ? "venue" : "venues"} across ${cityCount} ${cityCount === 1 ? "city" : "cities"} in ${countryName} on The BBQ Atlas — by city and style.`.slice(0, 160);
 }
+
+/** Data-driven FAQ for a venue page (Fable H-4) — style + location, all true. */
+export function venueFaqs(opts: {
+  name: string;
+  styleLabel: string | null;
+  city: string | null;
+  country: string | null;
+  address: string | null;
+}): Faq[] {
+  const { name, styleLabel, city, country, address } = opts;
+  const place = [city, country].filter(Boolean).join(", ");
+  const faqs: Faq[] = [];
+  if (styleLabel) {
+    faqs.push({
+      q: `What style of barbecue is ${name}?`,
+      a: `${name} serves ${styleLabel}-style barbecue${place ? ` in ${place}` : ""}.`,
+    });
+  }
+  const loc = [address, place].filter(Boolean).join(", ");
+  if (loc) {
+    faqs.push({ q: `Where is ${name}?`, a: `You'll find ${name} at ${loc}.` });
+  }
+  return faqs;
+}

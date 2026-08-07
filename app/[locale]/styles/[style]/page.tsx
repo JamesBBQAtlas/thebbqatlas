@@ -38,10 +38,15 @@ function isStyle(s: string): s is BbqStyle {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!isStyle(params.style)) return { title: "Style Not Found" };
   const label = STYLE_LABELS[params.style];
+  // noindex thin/empty style hubs (Fable H-4): the catch-all "other", and any
+  // style with no venues yet — concentrate crawl budget on real content.
+  const count = (await getRestaurants()).filter((r) => r.style === params.style).length;
+  const thin = count === 0 || params.style === "other";
   return {
     title: `${label} Barbecue`,
     description: `${STYLE_DESCRIPTIONS[params.style]} Explore ${label} barbecue venues around the world on The BBQ Atlas.`,
     alternates: { canonical: `/styles/${params.style}` },
+    ...(thin ? { robots: { index: false, follow: true } } : {}),
   };
 }
 

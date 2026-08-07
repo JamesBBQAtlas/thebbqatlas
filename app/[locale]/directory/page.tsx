@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Link } from "@/i18n/navigation";
 import { DirectoryGrid } from "@/components/restaurants/DirectoryGrid";
 import { getRestaurants } from "@/lib/queries/restaurants";
@@ -14,7 +15,12 @@ interface DirectoryPageProps {
   searchParams: { style?: string; price?: string; q?: string; category?: string };
 }
 
-export const metadata = { title: "Directory" };
+export const metadata: Metadata = {
+  title: "Directory",
+  description:
+    "Browse every barbecue venue on The BBQ Atlas by country, city, style and category — a growing, honest map of where to eat live-fire barbecue worldwide.",
+  alternates: { canonical: "/directory" },
+};
 
 export default async function DirectoryPage({ searchParams }: DirectoryPageProps) {
   const all = await getRestaurants();
