@@ -136,4 +136,16 @@ Legend: ☐ untested · ✅ verified · ⚠️ issue found
 
 ---
 
+## 11. Reviews (#315 — no stars, moderated)
+
+- ☐ On a venue page, signed-in members can post a **written** review (no star
+  rating anywhere); it goes to moderation and shows a "pending" confirmation.
+- ☐ Signed-out visitors are prompted to sign in when they try to post.
+- ☐ Approving a review in the Moderation Queue makes it appear on the venue page;
+  `review_count` reflects the number of approved reviews.
+- ☐ Re-submitting edits the existing review and returns it to the queue (one per
+  member per venue).
+- ☐ Native/API: check-in / save / bookmark / review all work with an
+  `Authorization: Bearer` token (Phase 8d), not just a web cookie.
+
 *Maintained by Build. Add rows as features ship; mark ✅/⚠️ as testers report back.*

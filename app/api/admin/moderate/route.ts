@@ -35,11 +35,14 @@ async function recomputeReviewStats(admin: SupabaseClient, restaurantId: string)
     .select("rating")
     .eq("restaurant_id", restaurantId)
     .eq("status", "approved");
-  const ratings = (data ?? [])
+  // review_count = number of approved reviews (written; no-stars). avg_rating is
+  // averaged over any legacy numeric ratings only, and isn't shown in the UI.
+  const rows = data ?? [];
+  const count = rows.length;
+  const ratings = rows
     .map((r) => r.rating)
     .filter((n): n is number => typeof n === "number");
-  const count = ratings.length;
-  const avg = count ? ratings.reduce((a, b) => a + b, 0) / count : 0;
+  const avg = ratings.length ? ratings.reduce((a, b) => a + b, 0) / ratings.length : 0;
   await admin
     .from("restaurants")
     .update({ review_count: count, avg_rating: Number(avg.toFixed(2)) })

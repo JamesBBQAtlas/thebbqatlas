@@ -50,6 +50,7 @@ import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { FeaturedVideo } from "@/components/restaurants/FeaturedVideo";
 import { FeaturedUpgrade } from "@/components/restaurants/FeaturedUpgrade";
 import { VenueReport } from "@/components/restaurants/VenueReport";
+import { VenueReviews } from "@/components/restaurants/VenueReviews";
 import { getGearForStyle } from "@/lib/queries/gear";
 import { groupedHours } from "@/lib/restaurants/hours";
 import { SmallHoursAside } from "@/components/restaurants/SmallHoursAside";
@@ -448,6 +449,10 @@ export default async function RestaurantPage({ params }: Props) {
 
           {/* "X members have been here" — the count expands the public roster */}
           <VenueVisitors total={metrics.visited} visitors={visitorRows} />
+
+          {/* Written, moderated reviews (no stars) */}
+          <VenueReviews restaurantId={restaurant.id} venueName={restaurant.name} />
+
 
           {dishes.length > 0 && (
             <section className="mb-12">
