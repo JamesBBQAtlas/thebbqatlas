@@ -194,6 +194,20 @@ export function itemListJsonLd(
   };
 }
 
+/** FAQPage — the single biggest GEO surface for "best bbq in {city}" answers.
+ *  Answers are composed from real venue data and never rank (Fable H-4). */
+export function faqPageJsonLd(faqs: { q: string; a: string }[]) {
+  return {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    mainEntity: faqs.map((f) => ({
+      "@type": "Question",
+      name: f.q,
+      acceptedAnswer: { "@type": "Answer", text: f.a },
+    })),
+  };
+}
+
 /** A CollectionPage wrapper for hub/landing pages. */
 export function collectionPageJsonLd(name: string, description: string, path: string) {
   return {

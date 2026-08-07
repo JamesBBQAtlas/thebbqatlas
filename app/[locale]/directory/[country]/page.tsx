@@ -11,8 +11,11 @@ import {
   itemListJsonLd,
   collectionPageJsonLd,
   breadcrumbJsonLd,
+  faqPageJsonLd,
 } from "@/lib/seo/jsonld";
 import { groupByCountry, groupByCity } from "@/lib/seo/hubs";
+import { countryIntro, countryFaqs, countryMetaDescription } from "@/lib/seo/hub-content";
+import { HubFaq } from "@/components/seo/HubFaq";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -33,9 +36,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
   if (!country) return { title: "Not Found" };
+  const cityCount = groupByCity(country.venues).size;
   return {
     title: `Barbecue in ${country.name}`,
-    description: `Discover ${country.venues.length} barbecue venues across ${country.name} on The BBQ Atlas — by city and style.`,
+    description: countryMetaDescription(country.name, country.venues, cityCount),
     alternates: { canonical: `/directory/${params.country}` },
   };
 }
@@ -48,6 +52,12 @@ export default async function CountryHubPage({ params }: Props) {
 
   const cities = [...groupByCity(country.venues).values()].sort(
     (a, b) => b.venues.length - a.venues.length
+  );
+  const intro = countryIntro(country.name, country.venues, cities.length);
+  const faqs = countryFaqs(
+    country.name,
+    country.venues,
+    cities.map((c) => c.name)
   );
 
   return (
@@ -66,6 +76,7 @@ export default async function CountryHubPage({ params }: Props) {
               path: `/restaurants/${r.slug}`,
             }))
           ),
+          faqPageJsonLd(faqs),
           breadcrumbJsonLd([
             { name: "Atlas", path: "/" },
             { name: "Directory", path: "/directory" },
@@ -86,10 +97,7 @@ export default async function CountryHubPage({ params }: Props) {
         Barbecue in {country.name}
         <FlagIcon code={country.code} className="text-3xl" />
       </h1>
-      <p className="mt-4 text-lg text-text-secondary">
-        {country.venues.length} {country.venues.length === 1 ? "venue" : "venues"}{" "}
-        across {cities.length} {cities.length === 1 ? "city" : "cities"}.
-      </p>
+      <p className="mt-4 max-w-3xl text-lg leading-relaxed text-text-secondary">{intro}</p>
 
       {cities.length > 1 && (
         <div className="mt-6 flex flex-wrap gap-2">
@@ -112,6 +120,8 @@ export default async function CountryHubPage({ params }: Props) {
           <RestaurantCard key={r.id} restaurant={r} />
         ))}
       </div>
+
+      <HubFaq faqs={faqs} heading={`Barbecue in ${country.name} — FAQ`} />
 
       <div className="mt-12">
         <Link

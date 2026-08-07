@@ -11,8 +11,11 @@ import {
   itemListJsonLd,
   collectionPageJsonLd,
   breadcrumbJsonLd,
+  faqPageJsonLd,
 } from "@/lib/seo/jsonld";
 import { groupByCountry, groupByCity } from "@/lib/seo/hubs";
+import { cityIntro, cityFaqs, cityMetaDescription } from "@/lib/seo/hub-content";
+import { HubFaq } from "@/components/seo/HubFaq";
 import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
 import { routing } from "@/i18n/routing";
 
@@ -42,7 +45,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!country || !city) return { title: "Not Found" };
   return {
     title: `Barbecue in ${city.name}, ${country.name}`,
-    description: `The best barbecue in ${city.name}, ${country.name} — ${city.venues.length} venues mapped on The BBQ Atlas.`,
+    description: cityMetaDescription(city.name, country.name, city.venues),
     alternates: { canonical: `/directory/${params.country}/${params.city}` },
   };
 }
@@ -55,6 +58,8 @@ export default async function CityHubPage({ params }: Props) {
   if (!country || !city) notFound();
 
   const styles = [...new Set(city.venues.map((r) => r.style))] as BbqStyle[];
+  const intro = cityIntro(city.name, country.name, city.venues);
+  const faqs = cityFaqs(city.name, country.name, city.venues);
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-16 sm:px-10">
@@ -72,6 +77,7 @@ export default async function CityHubPage({ params }: Props) {
               path: `/restaurants/${r.slug}`,
             }))
           ),
+          faqPageJsonLd(faqs),
           breadcrumbJsonLd([
             { name: "Atlas", path: "/" },
             { name: "Directory", path: "/directory" },
@@ -97,10 +103,7 @@ export default async function CityHubPage({ params }: Props) {
         Barbecue in {city.name}
         <FlagIcon code={country.code} className="text-3xl" />
       </h1>
-      <p className="mt-4 text-lg text-text-secondary">
-        {city.venues.length} {city.venues.length === 1 ? "venue" : "venues"} in{" "}
-        {city.name}, {country.name}.
-      </p>
+      <p className="mt-4 max-w-3xl text-lg leading-relaxed text-text-secondary">{intro}</p>
 
       {styles.length > 0 && (
         <div className="mt-6 flex flex-wrap gap-2">
@@ -121,6 +124,8 @@ export default async function CityHubPage({ params }: Props) {
           <RestaurantCard key={r.id} restaurant={r} />
         ))}
       </div>
+
+      <HubFaq faqs={faqs} heading={`Barbecue in ${city.name} — FAQ`} />
 
       <div className="mt-12">
         <Link
