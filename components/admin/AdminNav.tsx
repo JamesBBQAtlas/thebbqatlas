@@ -12,6 +12,7 @@ const TABS: { href: string; label: string; badge?: BadgeKey; primary?: boolean }
   { href: "/admin/priority-senders", label: "Priority Senders" },
   { href: "/admin/media", label: "Media", badge: "media" },
   { href: "/admin/watch-read-listen", label: "Watch/Read/Listen" },
+  { href: "/admin/news", label: "News & Missives" },
   { href: "/admin/optimize", label: "Status" },
   { href: "/admin/health", label: "SEO Health" },
   { href: "/admin/audit", label: "Change Log" },
