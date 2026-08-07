@@ -164,6 +164,11 @@ export interface Restaurant {
   enrichment_model?: string | null;
   chain_parent_id?: string | null;
   chain_rostered_at?: string | null;
+  // Phase 6.7 — optional featured video (YouTube id + cached metadata).
+  featured_video_id?: string | null;
+  featured_video_title?: string | null;
+  featured_video_channel?: string | null;
+  featured_video_thumb?: string | null;
 }
 
 export type HeroSource =

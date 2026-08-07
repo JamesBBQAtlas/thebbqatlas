@@ -47,6 +47,7 @@ import { getPublicAvatarSignedUrls, avatarBadge } from "@/lib/account/public-ava
 import { VenueVisitors } from "@/components/restaurants/VenueVisitors";
 import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
+import { FeaturedVideo } from "@/components/restaurants/FeaturedVideo";
 import { getGearForStyle } from "@/lib/queries/gear";
 import { groupedHours } from "@/lib/restaurants/hours";
 import { SmallHoursAside } from "@/components/restaurants/SmallHoursAside";
@@ -407,6 +408,15 @@ export default async function RestaurantPage({ params }: Props) {
                 ))}
               </div>
             </section>
+          )}
+
+          {restaurant.featured_video_id && (
+            <FeaturedVideo
+              videoId={restaurant.featured_video_id}
+              title={restaurant.featured_video_title}
+              channel={restaurant.featured_video_channel}
+              thumb={restaurant.featured_video_thumb}
+            />
           )}
 
           {Array.isArray(restaurant.instagram_posts) &&

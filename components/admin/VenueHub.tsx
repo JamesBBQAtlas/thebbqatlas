@@ -26,6 +26,7 @@ import {
   Ban,
   RefreshCw,
   Archive,
+  Youtube,
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
@@ -1731,6 +1732,9 @@ export function EditorPanel({
         <HoursEditor value={hours} onChange={setHours} />
       </div>
 
+      {/* Featured video (Phase 6.7 B1) — validated via the YouTube Data API */}
+      <FeaturedVideoControl venue={venue} />
+
       {/* Address & map pin (Fix 4) */}
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Address &amp; map pin</p>
@@ -1789,6 +1793,99 @@ export function EditorPanel({
           <Trash2 className="h-3.5 w-3.5" />Delete
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Featured-video control (Phase 6.7 B1). Paste a YouTube URL → the server
+ * validates it exists + is embeddable via the YouTube Data API and caches its
+ * title/channel/thumbnail; the venue page then renders a click-to-play facade.
+ * Empty + Save clears the feature. Reusable for any venue.
+ */
+function FeaturedVideoControl({ venue }: { venue: HubVenue }) {
+  const f = venue.fields as Record<string, unknown>;
+  const initialId = typeof f.featured_video_id === "string" ? f.featured_video_id : "";
+  const [url, setUrl] = useState(
+    initialId ? `https://www.youtube.com/watch?v=${initialId}` : ""
+  );
+  const [meta, setMeta] = useState<{ title: string; channel: string; thumb: string | null } | null>(
+    initialId
+      ? {
+          title: (f.featured_video_title as string) ?? "",
+          channel: (f.featured_video_channel as string) ?? "",
+          thumb: (f.featured_video_thumb as string) ?? null,
+        }
+      : null
+  );
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [msg, setMsg] = useState("");
+
+  async function submit() {
+    setBusy(true);
+    setErr("");
+    setMsg("");
+    try {
+      const res = await fetch("/api/admin/venues/featured-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ restaurantId: venue.id, url: url.trim() }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr((data.error as string) || "Failed.");
+      } else if (data.cleared) {
+        setMeta(null);
+        setMsg("Cleared.");
+      } else {
+        setMeta({ title: data.title, channel: data.channel, thumb: data.thumb });
+        setMsg("Saved.");
+      }
+    } catch {
+      setErr("Network error.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">
+        <Youtube className="mr-1 inline h-3 w-3 align-[-2px]" />
+        Featured video
+      </p>
+      <div className="flex gap-2">
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="Paste a YouTube video URL (empty = clear)"
+          className={fieldInput}
+        />
+        <button
+          type="button"
+          disabled={busy}
+          onClick={submit}
+          className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
+        >
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+          Save
+        </button>
+      </div>
+      {meta && (
+        <div className="flex items-center gap-3 rounded-md border border-border-subtle bg-surface-1 p-2">
+          {meta.thumb ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={meta.thumb} alt="" className="h-12 w-20 rounded object-cover" referrerPolicy="no-referrer" />
+          ) : null}
+          <div className="min-w-0 text-xs">
+            <p className="truncate font-semibold text-text-primary">{meta.title}</p>
+            <p className="text-text-muted">{meta.channel}</p>
+          </div>
+        </div>
+      )}
+      {msg && <span className="text-xs text-emerald-400">{msg}</span>}
+      {err && <span className="text-xs text-destructive">{err}</span>}
     </div>
   );
 }
