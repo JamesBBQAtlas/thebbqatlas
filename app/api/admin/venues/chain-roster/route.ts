@@ -104,6 +104,7 @@ export async function POST(request: Request) {
     search_count: roster.usage.searches,
     cost,
     usage_raw: roster.usage,
+    user_id: ctx.userId,
   });
 
   // 0 or 1 locations means this ISN'T a chain — the candidate was a false

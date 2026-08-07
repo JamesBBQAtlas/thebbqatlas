@@ -76,6 +76,7 @@ export async function POST(request: Request) {
     search_count: 0,
     cost,
     usage_raw: copy.usage,
+    user_id: ctx.userId,
   });
   const priorCost = Number(row.enrichment_cost ?? 0) || 0;
   const patch = {

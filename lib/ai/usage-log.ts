@@ -32,6 +32,8 @@ export interface AiUsageEntry {
   cost: number;
   /** Raw usage block from the API response, so we can re-derive if prices move. */
   usage_raw?: unknown;
+  /** The admin who ran this AI call (Fable M-2) — so spend is answerable to a person. */
+  user_id?: string | null;
 }
 
 /** Derive the provider from the model id the API returned. */
@@ -63,6 +65,7 @@ export async function logAiUsage(db: SupabaseClient, entry: AiUsageEntry): Promi
       search_count: int(entry.search_count),
       cost: Number(entry.cost) || 0,
       usage_raw: entry.usage_raw ?? null,
+      user_id: entry.user_id ?? null,
     });
   } catch {
     // best-effort telemetry — swallow.

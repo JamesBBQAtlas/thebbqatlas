@@ -163,6 +163,45 @@ const REGION_NAMES = new Set<string>([
   "aberdeenshire","angus","argyll and bute","ayrshire","dumfries and galloway",
   "fife","highland","lanarkshire","midlothian","perthshire","renfrewshire",
   "stirlingshire","scottish borders","the scottish borders",
+  // ── Non-Anglo regions (Fable M-10) — high-volume BBQ markets. Region/state/
+  // province names that must not be stored as the settlement. City-name
+  // collisions (e.g. a state whose name equals its capital: São Paulo, Madrid,
+  // Puebla, Murcia, Bremen) are DELIBERATELY OMITTED — same rule as the UK set.
+  // The QA sample is the belt-and-braces for anything not covered here.
+  // Germany (Bundesländer)
+  "bavaria","bayern","baden-württemberg","baden-wurttemberg","north rhine-westphalia",
+  "nordrhein-westfalen","lower saxony","niedersachsen","hesse","hessen","saxony",
+  "sachsen","rhineland-palatinate","rheinland-pfalz","schleswig-holstein","brandenburg",
+  "saxony-anhalt","sachsen-anhalt","thuringia","thüringen","mecklenburg-vorpommern","saarland",
+  // South Africa (provinces)
+  "gauteng","western cape","eastern cape","northern cape","kwazulu-natal","kwazulu natal",
+  "limpopo","mpumalanga","north west","free state",
+  // Mexico (states — capital-colliding ones omitted)
+  "jalisco","nuevo leon","nuevo león","baja california","baja california sur","quintana roo",
+  "yucatan","yucatán","sonora","sinaloa","coahuila","tamaulipas","michoacan","michoacán",
+  "estado de mexico","estado de méxico","chiapas","guerrero","nayarit","sinaloa",
+  // Brazil (states — Rio de Janeiro / São Paulo omitted as city collisions)
+  "minas gerais","bahia","parana","paraná","rio grande do sul","santa catarina","pernambuco",
+  "ceara","ceará","goias","goiás","espirito santo","espírito santo","mato grosso",
+  "mato grosso do sul","para","pará","amazonas","distrito federal","maranhao","maranhão",
+  "rio grande do norte","paraiba","paraíba","piaui","piauí","alagoas","sergipe","tocantins","rondonia","rondônia","acre","amapa","amapá","roraima",
+  // Spain (autonomous communities — Madrid / Murcia omitted as city collisions)
+  "andalusia","andalucia","andalucía","catalonia","cataluña","catalunya","galicia",
+  "basque country","país vasco","pais vasco","castile and leon","castilla y leon",
+  "castilla y león","castile-la mancha","castilla-la mancha","valencian community",
+  "comunidad valenciana","aragon","aragón","extremadura","cantabria","asturias","navarre",
+  "navarra","la rioja","balearic islands","islas baleares","canary islands","islas canarias",
+  // Italy (regions)
+  "lombardy","lombardia","tuscany","toscana","piedmont","piemonte","veneto","emilia-romagna",
+  "sicily","sicilia","sardinia","sardegna","campania","lazio","liguria","calabria","puglia",
+  "apulia","marche","abruzzo","umbria","trentino-alto adige","friuli venezia giulia",
+  "basilicata","molise","valle d'aosta",
+  // France (régions — Paris omitted; it sits in Île-de-France anyway)
+  "île-de-france","ile-de-france","auvergne-rhône-alpes","auvergne-rhone-alpes",
+  "nouvelle-aquitaine","occitanie","hauts-de-france","grand est",
+  "provence-alpes-côte d'azur","provence-alpes-cote d'azur","pays de la loire","normandy",
+  "normandie","brittany","bretagne","bourgogne-franche-comté","bourgogne-franche-comte",
+  "centre-val de loire","corsica","corse",
 ]);
 
 const normToken = (v: string): string =>

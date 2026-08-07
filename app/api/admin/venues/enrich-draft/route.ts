@@ -230,6 +230,7 @@ export async function POST(request: Request) {
       search_count: usage.searches,
       cost,
       usage_raw: usage,
+      user_id: ctx.userId,
     });
     if (row.status === "approved") revalidateVenues();
     // Report EXACTLY what happened so the hub never claims "Found Instagram"
@@ -387,6 +388,7 @@ export async function POST(request: Request) {
     search_count: grokSearches,
     cost: round4(gCost),
     usage_raw: { in_tokens: grokInTokens, out_tokens: grokOutTokens, searches: grokSearches, passes: passLog.length },
+    user_id: ctx.userId,
   });
   await logAiUsage(ctx.db, {
     provider: providerForModel(claudeModel),
@@ -399,6 +401,7 @@ export async function POST(request: Request) {
     search_count: 0,
     cost: round4(cCost),
     usage_raw: copy.usage,
+    user_id: ctx.userId,
   });
 
   const igHandle = dossier.instagram ? normalizeHandle(dossier.instagram) : null;
@@ -650,7 +653,7 @@ export async function POST(request: Request) {
   if (row.status !== "approved") {
     await auditFromPatch(ctx.db, restaurantId, row as Record<string, unknown>, proposed, {
       source: "ai_enrichment",
-      changedBy: null,
+      changedBy: ctx.userId,
       note: `enrich · ${grokModel} + ${claudeModel}${useExisting && builtOn.length ? ` · built on ${builtOn.join(", ")}` : ""}`,
     });
   }

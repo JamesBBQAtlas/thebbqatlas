@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { GROK_ENABLED, GrokError } from "@/lib/ai/grok";
 import { discoverChain, type VenueLead } from "@/lib/ai/enrich";
+import { grokCost, round4 } from "@/lib/ai/cost";
+import { logAiUsage } from "@/lib/ai/usage-log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -32,6 +34,21 @@ export async function POST(request: Request) {
 
   try {
     const chain = await discoverChain(lead);
+    // Exact per-call AI ledger row — chain discovery makes real Grok search
+    // calls and used to be invisible to the spend dashboard (Fable M-1).
+    await logAiUsage(ctx.db, {
+      provider: "xai",
+      model: chain.model,
+      task: "chain_discovery",
+      entity_type: "chain",
+      entity_id: null,
+      input_tokens: chain.usage.in_tokens,
+      output_tokens: chain.usage.out_tokens,
+      search_count: chain.usage.searches,
+      cost: round4(grokCost(chain.usage, chain.model)),
+      usage_raw: chain.usage,
+      user_id: ctx.userId,
+    });
     // Provenance: mirror the venue route's audit trail (F-14). Best-effort.
     try {
       const c = chain as unknown as { citations?: unknown[] };

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { GROK_ENABLED, GrokError } from "@/lib/ai/grok";
 import { researchNews } from "@/lib/ai/enrich";
+import { grokCost, round4 } from "@/lib/ai/cost";
+import { logAiUsage } from "@/lib/ai/usage-log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -37,6 +39,21 @@ export async function POST(request: Request) {
 
   try {
     const draft = await researchNews(topic, category);
+    // Exact per-call AI ledger row — news research makes real Grok search calls
+    // and used to be invisible to the spend dashboard (Fable M-1).
+    await logAiUsage(ctx.db, {
+      provider: "xai",
+      model: draft.model,
+      task: "news_research",
+      entity_type: "news",
+      entity_id: null,
+      input_tokens: draft.usage.in_tokens,
+      output_tokens: draft.usage.out_tokens,
+      search_count: draft.usage.searches,
+      cost: round4(grokCost(draft.usage, draft.model)),
+      usage_raw: draft.usage,
+      user_id: ctx.userId,
+    });
     // Provenance: mirror the venue route's audit trail (F-14). Best-effort.
     try {
       const d = draft as unknown as { citations?: unknown[] };

@@ -312,6 +312,7 @@ export async function POST(request: Request) {
     search_count: usage.searches,
     cost,
     usage_raw: usage,
+    user_id: ctx.userId,
   });
 
   // Audit exactly which operational fields changed (old → new), source ai_enrichment.

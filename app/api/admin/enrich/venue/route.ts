@@ -98,6 +98,7 @@ export async function POST(request: Request) {
     search_count: enriched.usage.searches,
     cost: round4(grokCost(enriched.usage, enriched.model)),
     usage_raw: enriched.usage,
+    user_id: ctx.userId,
   });
 
   // Provenance: log the hunt (and its sources). Best-effort — a logging failure

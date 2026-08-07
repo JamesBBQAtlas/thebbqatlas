@@ -1061,6 +1061,9 @@ export interface NewsDraft {
   category: "news" | "missive";
   citations: string[];
   reviewer_notes: string | null;
+  // Real API usage so the caller can ledger the spend (Fable M-1).
+  usage: { in_tokens: number; out_tokens: number; searches: number };
+  model: string;
 }
 
 const NEWS_SYSTEM = `You are a staff writer for The BBQ Atlas. You research and draft short pieces for the "News & Missives" section. "news" = factual dispatches (openings, festivals, trends, industry moves). "missive" = the Atlas's own reflective voice on craft and culture.
@@ -1091,7 +1094,7 @@ ${
 
 Return the JSON object described in your instructions.`;
 
-  const { data, citations } = await grokJSON<Partial<NewsDraft>>({
+  const { data, citations, usage, model } = await grokJSON<Partial<NewsDraft>>({
     system: NEWS_SYSTEM,
     user,
     search: true,
@@ -1105,6 +1108,8 @@ Return the JSON object described in your instructions.`;
     category: data.category === "missive" ? "missive" : "news",
     citations,
     reviewer_notes: data.reviewer_notes ?? null,
+    usage,
+    model,
   };
 }
 
@@ -1138,6 +1143,9 @@ export interface ChainResult {
   confidence: number;
   reviewer_notes: string | null;
   citations: string[];
+  // Real API usage so the caller can ledger the spend (Fable M-1).
+  usage: { in_tokens: number; out_tokens: number; searches: number };
+  model: string;
 }
 
 const CHAIN_SYSTEM = `You are a meticulous research assistant for The BBQ Atlas. Given fragments about a barbecue business, determine whether it is a MULTI-LOCATION chain and, if so, HUNT the live web to find EVERY physical location it operates.
@@ -1168,7 +1176,7 @@ ${known || "- (start from the name/handle above)"}
 
 Return the JSON object described in your instructions.`;
 
-  const { data, citations } = await grokJSON<Partial<ChainResult>>({
+  const { data, citations, usage, model } = await grokJSON<Partial<ChainResult>>({
     system: CHAIN_SYSTEM,
     user,
   });
@@ -1211,5 +1219,7 @@ Return the JSON object described in your instructions.`;
         : 0,
     reviewer_notes: data.reviewer_notes ?? null,
     citations,
+    usage,
+    model,
   };
 }
