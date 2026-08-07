@@ -73,22 +73,34 @@ async function queryMapTiler(q: string): Promise<GeoResult | null> {
     // Walk the feature + its context for the country (name + ISO code) and the
     // best city-level label. With language=en the `text` fields are English.
     const ctx = Array.isArray(top.context) ? top.context : [];
+    const feats = [top, ...ctx];
     let country: string | null = null;
     let country_code: string | null =
       top.properties?.country_code ? String(top.properties.country_code).toUpperCase() : null;
-    let city: string | null = null;
-    for (const c of [top, ...ctx]) {
+    for (const c of feats) {
       const id = String((c as MtContext).id ?? "");
       if (id.startsWith("country")) {
         country = country ?? enText(c);
         const cc = (c as MtContext).country_code;
         if (!country_code && cc) country_code = String(cc).toUpperCase();
-      } else if (
-        !city &&
-        /^(municipality|municipal_district|place|locality|joint_municipality|neighbourhood|subregion|county)/.test(id)
-      ) {
-        city = enText(c);
       }
+    }
+
+    // City = the MUNICIPALITY / place level, NEVER neighbourhood/suburb/subregion.
+    // MapTiler returns a "super-neighbourhood" or civic-association label at the
+    // neighbourhood level ("Washington Avenue Coalition / Memorial Park") — taking
+    // that as the city corrupts the town (bug: the real city, Houston, sits at the
+    // municipality/place level). Prefer the town-bearing levels, in priority order.
+    const CITY_LEVELS = ["municipality", "municipal_district", "joint_municipality", "place", "locality"];
+    let city: string | null = null;
+    for (const level of CITY_LEVELS) {
+      for (const c of feats) {
+        if (String((c as MtContext).id ?? "").startsWith(level)) {
+          city = enText(c);
+          break;
+        }
+      }
+      if (city) break;
     }
     return { lat, lng, country_code, city, country };
   } catch {

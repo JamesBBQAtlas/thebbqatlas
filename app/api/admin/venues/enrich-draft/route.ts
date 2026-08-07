@@ -23,7 +23,13 @@ import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { desiredVenueSlug } from "@/lib/admin/slug";
-import { composeAddress, preferFullerAddress, bestSettlement } from "@/lib/admin/address";
+import {
+  composeAddress,
+  preferFullerAddress,
+  bestSettlement,
+  isRealTown,
+  settlementCity,
+} from "@/lib/admin/address";
 import { auditFromPatch } from "@/lib/admin/content-audit";
 
 export const dynamic = "force-dynamic";
@@ -446,7 +452,11 @@ export async function POST(request: Request) {
   // geocode instead of pinning the venue in the Atlantic.
   const validCoord = (a: number | null, b: number | null) =>
     typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
-  let city = dossier.city ?? row.city;
+  // Prefer a real submitted/existing town over an AI/geocoder-derived locality:
+  // a human's "Houston" must beat a neighbourhood label the dossier/geocoder
+  // guessed. Only take the dossier's city when the submission didn't already give
+  // us a genuine town.
+  let city = isRealTown(settlementCity(row.city)) ? row.city : (dossier.city ?? row.city);
   let geoCity: string | null = null;
   let country = dossier.country ?? row.country;
   let lat: number | null = null;
@@ -462,7 +472,10 @@ export async function POST(request: Request) {
       lng = geo.lng;
       country_code = geo.country_code;
       geoCity = geo.city ?? null;
-      city = geo.city ?? city;
+      // Do NOT overwrite a good submitted/dossier city with the geocoder's — the
+      // geocoder can return a fine-grained neighbourhood ("…Coalition / Memorial
+      // Park") for a venue that's really in Houston. The geocoder's city is kept
+      // as `geoCity` and only used by bestSettlement as a last-resort candidate.
       country = geo.country ?? country;
     }
   }

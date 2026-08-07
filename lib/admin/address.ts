@@ -93,6 +93,41 @@ export function looksLikePoiCity(city: string | null | undefined): boolean {
   );
 }
 
+/**
+ * Does this "city" value look like a NEIGHBOURHOOD / sub-locality / civic-
+ * association label rather than a real town? A reverse-geocode (MapTiler /
+ * Nominatim) can return a fine-grained locality — a "super-neighbourhood" or a
+ * civic association — as the place name: e.g. "Washington Avenue Coalition /
+ * Memorial Park" for a venue that's actually in Houston. Those must be rejected
+ * as cities. Conservative on purpose — only clear neighbourhood/civic tells:
+ *   • a slashed dual label "A / B" (MapTiler's neighbourhood-feature signature);
+ *   • coalition / neighbourhood / super-neighbourhood / (civic|residents')
+ *     association / civic / homeowners / HOA.
+ * Ambiguous cases (a bare "…District", "…Ward", "…Quarter" that might be a real
+ * place) are deliberately NOT hard-rejected here — bestSettlement's
+ * "prefer the town that appears in the address" rule handles those without risk
+ * of dropping a genuine town name.
+ */
+export function looksLikeSubLocality(city: string | null | undefined): boolean {
+  const s = clean(city);
+  if (!s) return false;
+  // "A / B" slashed dual label — MapTiler neighbourhood signature.
+  if (/\s\/\s/.test(s)) return true;
+  const low = s.toLowerCase();
+  return /\b(coalition|neighbou?rhood|super[-\s]*neighbou?rhood|(?:civic|residents?|homeowners?|home\s*owners?|property\s*owners?)\s*(?:association|assn)|civic\s*club|h\.?o\.?a\.?)\b/.test(
+    low
+  );
+}
+
+/**
+ * Is this a real, storable TOWN — not a POI/landmark, not a county/state/
+ * province, and not a neighbourhood/civic-association label?
+ */
+export function isRealTown(city: string | null | undefined): boolean {
+  const s = clean(city);
+  return Boolean(s) && !looksLikePoiCity(s) && !looksLikeRegion(s) && !looksLikeSubLocality(s);
+}
+
 /** Country / UK-nation tokens we drop from the tail of an address when hunting
  *  for the town. */
 const ADDRESS_COUNTRY = /^(uk|u\.k\.|united kingdom|great britain|england|scotland|wales|northern ireland|usa|u\.s\.a\.|u\.s\.|united states|united states of america|ireland|eire|éire)$/i;
@@ -273,32 +308,59 @@ export function localityFromAddress(address: string | null | undefined): string 
   return "";
 }
 
+/** Does this town appear as a token in the full address string? The real town is
+ *  almost always present in the address; an invented neighbourhood label is not. */
+function cityAppearsInAddress(city: string, address: string | null | undefined): boolean {
+  const target = normCity(city);
+  if (!target) return false;
+  const addr = clean(address);
+  if (!addr) return false;
+  // Exact comma-part match ("…, Houston, TX 77007" → part "Houston").
+  const parts = addr.split(",").map((p) => normCity(p)).filter(Boolean);
+  if (parts.includes(target)) return true;
+  // Whitespace-bounded phrase match across the whole address (town folded into
+  // another part).
+  const hay = ` ${addr.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim()} `;
+  return hay.includes(` ${target} `);
+}
+
 /**
- * Resolve the CITY to a real town: trust a provided/geocoded city when it isn't
- * a POI, else fall back to the town parsed from the address, else the geocoder's
- * settlement — never a POI/landmark. Returns "" only when nothing usable exists
- * (caller should then flag rather than store a POI).
+ * Resolve the CITY to a real town. A candidate is only usable if it's a genuine
+ * town — never a POI/landmark, never a county/state/province ("Cumbria", "TX"),
+ * and never a neighbourhood / civic-association label ("Washington Avenue
+ * Coalition / Memorial Park"). We try, in order: the provided city, the town
+ * parsed out of the full address, then the geocoder's settlement.
+ *
+ * Extra safety (the neighbourhood-overwrite bug): even when the provided city is
+ * a real town, if it does NOT appear anywhere in the address while the
+ * address yields a DIFFERENT real town that DOES, we trust the address-derived
+ * town — the real town is almost always in the address; an invented locality is
+ * not. Returns "" only when nothing usable exists (caller should then flag).
  */
 export function bestSettlement(opts: {
   city?: string | null;
   address?: string | null;
   geoCity?: string | null;
 }): string {
-  // A candidate is only usable if it's a real town — never a POI/landmark and
-  // never a county/state/province ("Cumbria", "TX"). We try, in order: the
-  // provided city, the town parsed out of the full address, then the geocoder's
-  // settlement, and take the first that is a genuine town.
-  const usable = (c: string): boolean =>
-    Boolean(c) && !looksLikePoiCity(c) && !looksLikeRegion(c);
-
   const provided = settlementCity(opts.city);
-  if (usable(provided)) return provided;
   const fromAddress = localityFromAddress(opts.address);
-  if (usable(fromAddress)) return fromAddress;
+
+  if (isRealTown(provided)) {
+    if (
+      isRealTown(fromAddress) &&
+      normCity(fromAddress) !== normCity(provided) &&
+      !cityAppearsInAddress(provided, opts.address) &&
+      cityAppearsInAddress(fromAddress, opts.address)
+    ) {
+      return fromAddress;
+    }
+    return provided;
+  }
+  if (isRealTown(fromAddress)) return fromAddress;
   const geo = settlementCity(opts.geoCity);
-  if (usable(geo)) return geo;
+  if (isRealTown(geo)) return geo;
   // Nothing resolved to a clean town — return "" so the caller flags it for a
-  // human rather than storing a county/state/POI as the city.
+  // human rather than storing a county/state/POI/neighbourhood as the city.
   return "";
 }
 
