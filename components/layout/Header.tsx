@@ -94,8 +94,10 @@ export function Header() {
       {/* Mobile drawer */}
       <nav
         className={cn(
-          "overflow-hidden border-t border-border-subtle bg-surface-0/95 backdrop-blur-xl transition-[max-height] duration-300 lg:hidden",
-          open ? "max-h-96" : "max-h-0"
+          "border-t border-border-subtle bg-surface-0/95 backdrop-blur-xl transition-[max-height] duration-300 lg:hidden",
+          // max-h-96 clipped the last item(s) on tablet (the page hero showed
+          // through the clip). Give it room and let it scroll if ever needed.
+          open ? "max-h-[85vh] overflow-y-auto" : "max-h-0 overflow-hidden"
         )}
       >
         <div className="flex flex-col gap-1 px-4 py-4">

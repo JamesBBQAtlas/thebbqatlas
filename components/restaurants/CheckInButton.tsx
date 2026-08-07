@@ -13,6 +13,9 @@ interface Props {
   restaurantName: string;
   isAuthed: boolean;
   initial: { note: string | null; visibility: CheckInVisibility } | null;
+  /** Called after a successful check-in / update / remove so a parent can
+   *  refresh live counts (Fable H-1 — the venue page is static). */
+  onChanged?: () => void;
 }
 
 export function CheckInButton({
@@ -20,6 +23,7 @@ export function CheckInButton({
   restaurantName,
   isAuthed,
   initial,
+  onChanged,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -55,6 +59,7 @@ export function CheckInButton({
       setCheckedIn(true);
       setOpen(false);
       router.refresh();
+      onChanged?.();
     } else {
       const data = await res.json().catch(() => ({}));
       setError(data.error || "Could not save your check-in.");
@@ -74,6 +79,7 @@ export function CheckInButton({
       setVisibility("public");
       setOpen(false);
       router.refresh();
+      onChanged?.();
     } else {
       setError("Could not remove your check-in.");
     }

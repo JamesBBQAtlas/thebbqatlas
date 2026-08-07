@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Store } from "lucide-react";
 import { CheckInButton } from "@/components/restaurants/CheckInButton";
 import { SaveShareActions } from "@/components/restaurants/SaveShareActions";
@@ -10,7 +10,8 @@ interface Props {
   restaurantId: string;
   restaurantName: string;
   permanentlyClosed: boolean;
-  /** Venue totals (not user-specific) — rendered immediately. */
+  /** Server-rendered venue totals — used as the initial value until the live
+   *  counts arrive (they'd otherwise freeze in the static ISR cache). */
   visited: number;
   saved: number;
 }
@@ -18,17 +19,19 @@ interface Props {
 interface MeState {
   authed: boolean;
   checkIn: { note: string | null; visibility: CheckInVisibility } | null;
-  saved: boolean;
+  savedByUser: boolean;
+  visited: number;
+  saved: number;
 }
 
 /**
  * Client island for the venue sidebar's user-specific actions (Fable H-1) — so
- * the venue page can be static (no per-request cookie read). Fetches the signed-in
- * user's check-in + saved state after hydration and feeds it to the existing
- * CheckInButton / SaveShareActions. Those components read their initial state
- * from props once (via useState), so we key them on the resolved state to remount
- * them the moment it lands — a logged-out visitor sees the correct default with no
- * flash; a logged-in visitor's state fills in a beat later.
+ * the venue page can be static (no per-request cookie read). Fetches the live
+ * visit/save COUNTS (public — they'd otherwise freeze in the ISR cache) plus the
+ * signed-in user's check-in + saved state, and feeds them to the existing
+ * CheckInButton / SaveShareActions. Those read their initial state from props
+ * once, so we key them on the resolved state to remount the moment it lands, and
+ * re-fetch after a check-in/save so the counts update in the same session.
  */
 export function VenueUserActions({
   restaurantId,
@@ -37,23 +40,46 @@ export function VenueUserActions({
   visited,
   saved,
 }: Props) {
-  const [me, setMe] = useState<MeState>({ authed: false, checkIn: null, saved: false });
+  const [me, setMe] = useState<MeState>({
+    authed: false,
+    checkIn: null,
+    savedByUser: false,
+    visited,
+    saved,
+  });
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let cancelled = false;
     fetch(`/api/venues/me?restaurantId=${encodeURIComponent(restaurantId)}`, {
       cache: "no-store",
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: MeState | null) => {
-        if (cancelled || !d) return;
-        setMe({ authed: Boolean(d.authed), checkIn: d.checkIn ?? null, saved: Boolean(d.saved) });
-      })
+      .then(
+        (d: {
+          authed?: boolean;
+          checkIn?: MeState["checkIn"];
+          saved?: boolean;
+          metrics?: { visited: number; saved: number };
+        } | null) => {
+          if (cancelled || !d) return;
+          setMe({
+            authed: Boolean(d.authed),
+            checkIn: d.checkIn ?? null,
+            savedByUser: Boolean(d.saved),
+            visited: d.metrics?.visited ?? visited,
+            saved: d.metrics?.saved ?? saved,
+          });
+        }
+      )
       .catch(() => {});
     return () => {
       cancelled = true;
     };
+    // visited/saved are the initial fallback only — not deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restaurantId]);
+
+  useEffect(() => load(), [load]);
 
   return (
     <div className="space-y-4 rounded-xl border border-border-subtle bg-surface-0 p-6">
@@ -71,22 +97,23 @@ export function VenueUserActions({
           restaurantName={restaurantName}
           isAuthed={me.authed}
           initial={me.checkIn}
+          onChanged={load}
         />
       )}
-      {!permanentlyClosed && (visited > 0 || saved > 0) && (
+      {!permanentlyClosed && (me.visited > 0 || me.saved > 0) && (
         <div className="flex items-center gap-4 border-t border-border-subtle pt-4 text-sm">
-          {visited > 0 && (
+          {me.visited > 0 && (
             <span className="flex items-center gap-1.5 text-text-secondary">
               <span className="font-heading text-lg font-bold text-brand-gold">
-                {visited.toLocaleString()}
+                {me.visited.toLocaleString()}
               </span>
-              {visited === 1 ? "has been here" : "have been here"}
+              {me.visited === 1 ? "has been here" : "have been here"}
             </span>
           )}
-          {saved > 0 && (
+          {me.saved > 0 && (
             <span className="flex items-center gap-1.5 text-text-secondary">
               <span className="font-heading text-lg font-bold text-brand-gold">
-                {saved.toLocaleString()}
+                {me.saved.toLocaleString()}
               </span>
               saved
             </span>
@@ -95,10 +122,11 @@ export function VenueUserActions({
       )}
       <div className="border-t border-border-subtle pt-4">
         <SaveShareActions
-          key={`ss-${me.saved}`}
+          key={`ss-${me.savedByUser}`}
           restaurantId={restaurantId}
           name={restaurantName}
-          initialSaved={me.saved}
+          initialSaved={me.savedByUser}
+          onChanged={load}
         />
       </div>
     </div>

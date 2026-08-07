@@ -16,10 +16,13 @@ export function SaveShareActions({
   restaurantId,
   name,
   initialSaved = false,
+  onChanged,
 }: {
   restaurantId: string;
   name: string;
   initialSaved?: boolean;
+  /** Called after a successful save/unsave so a parent can refresh live counts. */
+  onChanged?: () => void;
 }) {
   const t = useTranslations("Restaurant");
   const [saved, setSaved] = useState(initialSaved);
@@ -43,7 +46,10 @@ export function SaveShareActions({
         window.location.href = "/login";
         return;
       }
-      if (res.ok) setSaved(action === "save");
+      if (res.ok) {
+        setSaved(action === "save");
+        onChanged?.();
+      }
     } catch {
       /* best-effort */
     } finally {
