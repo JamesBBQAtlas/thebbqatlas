@@ -226,6 +226,7 @@ export function VenueHub({
 }) {
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState(initialStatus);
   // Part A — re-enrich builds ON the venue's current details & copy (default ON).
@@ -376,7 +377,10 @@ export function VenueHub({
   // flagship parent appears after a branch-first enrich, the group stays put at
   // the branch's original spot instead of jumping to the bottom. New siblings
   // insert beneath the parent, in place.
-  const grouped = useMemo(() => {
+  // Group into UNITS: one top-level row (flagship / standalone / orphan seed)
+  // plus any chain children that ride along beneath it. Pagination counts UNITS,
+  // so a flagship and its children are never split across a page boundary.
+  const units = useMemo(() => {
     const pos = new Map(shown.map((v, i) => [v.id, i]));
     const shownIds = new Set(shown.map((v) => v.id));
     const seedsByParent = new Map<string, HubVenue[]>();
@@ -397,17 +401,43 @@ export function VenueHub({
       if (kids) for (const k of kids) a = Math.min(a, pos.get(k.id) ?? a);
       return a;
     };
-    const out: { v: HubVenue; indent: boolean }[] = [];
+    const out: { v: HubVenue; indent: boolean }[][] = [];
     for (const v of [...topLevel].sort((x, y) => anchor(x) - anchor(y))) {
-      out.push({ v, indent: v.chainSeed && Boolean(v.chainParentId) });
+      const unit: { v: HubVenue; indent: boolean }[] = [
+        { v, indent: v.chainSeed && Boolean(v.chainParentId) },
+      ];
       const kids = seedsByParent.get(v.id);
       if (kids) {
         kids.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
-        for (const k of kids) out.push({ v: k, indent: true });
+        for (const k of kids) unit.push({ v: k, indent: true });
       }
+      out.push(unit);
     }
     return out;
   }, [shown]);
+
+  // Client-side pagination — 50 top-level units per page. Search/filter/sort all
+  // operate over the WHOLE catalogue above; only the rendered slice is capped, so
+  // the DOM stays small as the catalogue grows.
+  const PAGE_SIZE = 50;
+  const pageCount = Math.max(1, Math.ceil(units.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), pageCount);
+  // Snap back to page 1 whenever the filtered/sorted set changes, so you're never
+  // stranded on an out-of-range page after narrowing the results.
+  useEffect(() => {
+    setPage(1);
+  }, [q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF, oldestFirst]);
+  // Clamp if the current page fell past the end (e.g. rows removed).
+  useEffect(() => {
+    if (page > pageCount) setPage(pageCount);
+  }, [page, pageCount]);
+
+  const pageUnits = units.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const grouped = pageUnits.flat();
+  const pageIds = grouped.map((r) => r.v.id);
+  const topLevelCount = units.length;
+  const pageStart = topLevelCount === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const pageEnd = Math.min(safePage * PAGE_SIZE, topLevelCount);
 
   const metrics = useMemo(() => {
     const m = {
@@ -447,7 +477,10 @@ export function VenueHub({
       return n;
     });
   }
-  const selectAllShown = () => setSelected(new Set(shown.map((v) => v.id)));
+  // Page-scoped by default — a mis-click can't enqueue an enrich run over the
+  // whole catalogue. "Select all N filtered" is the explicit escape hatch.
+  const selectPage = () => setSelected(new Set(pageIds));
+  const selectAllFiltered = () => setSelected(new Set(shown.map((v) => v.id)));
   const clearSel = () => setSelected(new Set());
   const setState = (id: string, state: RunState, msg?: string) =>
     setStatus((p) => ({ ...p, [id]: { state, msg } }));
@@ -1032,12 +1065,18 @@ export function VenueHub({
         <button type="button" onClick={() => setClosedF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${closedF ? "border-destructive/60 bg-destructive/10 text-destructive" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Closed</button>
         <button type="button" onClick={() => setFlagshipF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${flagshipF ? "border-amber-500/60 bg-amber-500/10 text-amber-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Flagship unset</button>
         <button type="button" onClick={() => setOldestFirst((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${oldestFirst ? "border-brand-gold/60 bg-brand-gold/10 text-brand-gold" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`} title="Sort by enrichment age, oldest first">Oldest first</button>
-        <span className="text-xs text-text-muted">{shown.length} shown</span>
+        <span className="text-xs text-text-muted">
+          {shown.length} match{shown.length === 1 ? "" : "es"}
+          {pageCount > 1 && ` · showing ${pageStart}–${pageEnd} of ${topLevelCount}`}
+        </span>
       </div>
 
       {/* Batch bar */}
       <div className="mb-5 flex flex-wrap items-center gap-2 rounded-xl border border-border-subtle bg-surface-0 p-3">
-        <button type="button" onClick={selectAllShown} className="rounded-md border border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold">Select all shown</button>
+        <button type="button" onClick={selectPage} className="rounded-md border border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold">Select {grouped.length} on this page</button>
+        {pageCount > 1 && (
+          <button type="button" onClick={selectAllFiltered} title="Selects every venue that matches the current filters, across all pages" className="rounded-md border border-border-default px-3 py-2 text-xs font-semibold text-text-muted hover:border-brand-gold/60 hover:text-brand-gold">Select all {shown.length} filtered</button>
+        )}
         {selected.size > 0 && <button type="button" onClick={clearSel} className="rounded-md border border-border-default px-3 py-2 text-xs font-semibold text-text-muted hover:text-text-primary">Clear ({selected.size})</button>}
         <div className="mx-1 h-5 w-px bg-border-subtle" />
         {running ? (
@@ -1456,6 +1495,64 @@ export function VenueHub({
           </tbody>
         </table>
       </div>
+
+      {/* Pager — 50 top-level venues per page (chain children ride with their
+          flagship). Filters/sort/search operate over the whole catalogue above. */}
+      {pageCount > 1 && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-sm">
+          <button
+            type="button"
+            onClick={() => setPage(1)}
+            disabled={safePage === 1}
+            className="rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-30"
+          >
+            « First
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={safePage === 1}
+            className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-30"
+          >
+            ‹ Prev
+          </button>
+          <span className="px-1 text-text-secondary">
+            Page{" "}
+            <input
+              type="number"
+              min={1}
+              max={pageCount}
+              value={safePage}
+              onChange={(e) => {
+                const n = parseInt(e.target.value, 10);
+                if (Number.isFinite(n)) setPage(Math.min(Math.max(1, n), pageCount));
+              }}
+              className="w-14 rounded-md border border-border-default bg-surface-0 px-2 py-1 text-center text-sm text-text-primary focus:border-brand-gold/60 focus:outline-none"
+              aria-label="Jump to page"
+            />{" "}
+            of {pageCount}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+            disabled={safePage === pageCount}
+            className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-30"
+          >
+            Next ›
+          </button>
+          <button
+            type="button"
+            onClick={() => setPage(pageCount)}
+            disabled={safePage === pageCount}
+            className="rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-30"
+          >
+            Last »
+          </button>
+          <span className="ml-1 text-xs text-text-muted">
+            {pageStart}–{pageEnd} of {topLevelCount}
+          </span>
+        </div>
+      )}
 
       {/* Slim FLOATING bulk-action bar — so with rows selected at the bottom of a
           long list, the bulk actions are reachable without scrolling to the top.
