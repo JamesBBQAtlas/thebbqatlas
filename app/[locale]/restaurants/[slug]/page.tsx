@@ -49,6 +49,7 @@ import { getApprovedMedia } from "@/lib/queries/media";
 import { CommunityGallery } from "@/components/restaurants/CommunityGallery";
 import { FeaturedVideo } from "@/components/restaurants/FeaturedVideo";
 import { FeaturedUpgrade } from "@/components/restaurants/FeaturedUpgrade";
+import { VenueReport } from "@/components/restaurants/VenueReport";
 import { getGearForStyle } from "@/lib/queries/gear";
 import { groupedHours } from "@/lib/restaurants/hours";
 import { SmallHoursAside } from "@/components/restaurants/SmallHoursAside";
@@ -506,6 +507,9 @@ export default async function RestaurantPage({ params }: Props) {
 
           {/* Owner-only: upgrade this venue to a Featured listing (Phase 5.1). */}
           <FeaturedUpgrade restaurantId={restaurant.id} />
+
+          {/* Owner-only: the venue performance report (Phase 5.2). */}
+          <VenueReport restaurantId={restaurant.id} />
 
           {/* Part of a brand — other locations */}
           {brand && (

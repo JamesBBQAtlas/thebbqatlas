@@ -573,6 +573,88 @@ Thanks for being here early.
   });
 }
 
+/**
+ * Phase 5.2 — the venue owner's monthly performance report. A service email to
+ * the claimed-venue owner: the headline discovery number + the key metrics.
+ * Transactional (it's about their own listing), with an unsubscribe link.
+ */
+export function sendVenueMonthlyReport(opts: {
+  to: string;
+  venueName: string;
+  venueSlug: string;
+  report: {
+    window_days: number;
+    views: { cur: number; prev: number };
+    directions: { cur: number };
+    website: { cur: number };
+    phone: { cur: number };
+    saves: { cur: number };
+    search: { cur: number };
+  };
+  unsubscribeToken?: string | null;
+}) {
+  const r = opts.report;
+  const venueUrl = `${EMAIL_SITE_URL}/restaurants/${opts.venueSlug}`;
+  const delta = r.views.cur - r.views.prev;
+  const trend =
+    r.views.prev === 0
+      ? ""
+      : delta >= 0
+        ? ` (up ${delta} on the previous ${r.window_days} days)`
+        : ` (down ${-delta} on the previous ${r.window_days} days)`;
+
+  const line = (label: string, n: number) =>
+    `<tr><td style="padding:4px 0;color:#6f6152;">${label}</td><td style="padding:4px 0;text-align:right;font-weight:700;color:#241c17;">${n}</td></tr>`;
+  const lineText = (label: string, n: number) => `${label}: ${n}`;
+
+  const bodyHtml = `<p style="margin:0 0 14px;"><strong>${r.views.cur} people</strong> discovered <strong>${opts.venueName}</strong> on The BBQ Atlas in the last ${r.window_days} days${trend}.</p>
+    <table style="width:100%;border-collapse:collapse;margin:0 0 16px;font-size:14px;">
+      ${line("Profile views", r.views.cur)}
+      ${line("Search appearances", r.search.cur)}
+      ${line("Website clicks", r.website.cur)}
+      ${line("Directions tapped", r.directions.cur)}
+      ${line("Phone taps", r.phone.cur)}
+      ${line("Saved to an Atlas", r.saves.cur)}
+    </table>
+    ${ctaButton("See your venue →", venueUrl)}
+    <p style="margin:0 0 18px;">These are the people finding you through the Atlas. A Featured listing puts you in front of more of them.</p>
+    <p style="margin:0;color:#6f6152;">— The BBQ Atlas</p>`;
+
+  const bodyText = `${r.views.cur} people discovered ${opts.venueName} on The BBQ Atlas in the last ${r.window_days} days${trend}.
+
+${lineText("Profile views", r.views.cur)}
+${lineText("Search appearances", r.search.cur)}
+${lineText("Website clicks", r.website.cur)}
+${lineText("Directions tapped", r.directions.cur)}
+${lineText("Phone taps", r.phone.cur)}
+${lineText("Saved to an Atlas", r.saves.cur)}
+
+See your venue: ${venueUrl}
+
+— The BBQ Atlas`;
+
+  const sub = opts.unsubscribeToken ? subUnsub(opts.unsubscribeToken) : null;
+  return sendEmail({
+    to: opts.to,
+    from: T,
+    stream: "transactional",
+    type: "venue_report",
+    subject: `Your ${opts.venueName} report — ${r.views.cur} discovered you`,
+    html: emailShell({
+      title: "Your venue report",
+      preheader: `${r.views.cur} people found ${opts.venueName} this month.`,
+      bodyHtml,
+      footerHtml: sub
+        ? `<p style="margin:10px 0 0;">Don't want these? <a href="${sub.pageUrl}" style="color:#C4622D;">Unsubscribe</a>.</p>`
+        : undefined,
+    }),
+    text: emailText({ title: "Your venue report", bodyText }),
+    headers: sub
+      ? { "List-Unsubscribe": `<${sub.apiUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }
+      : undefined,
+  });
+}
+
 // ============================================================================
 // CONTACT-FORM NOTIFICATION — there is no admin inbox page, so a new contact
 // message would otherwise sit unseen in the table. This pings the team so they
