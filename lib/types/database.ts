@@ -327,6 +327,9 @@ export interface NewsPost {
   is_published: boolean;
   published_at: string;
   created_at: string;
+  // Phase 6.7 (B3) — optional featured video (YouTube id), rendered via the B1
+  // click-to-play facade.
+  featured_video_id?: string | null;
 }
 
 export type CheckInVisibility = "public" | "private";

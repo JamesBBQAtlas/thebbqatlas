@@ -10,6 +10,7 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { newsJsonLd, breadcrumbJsonLd } from "@/lib/seo/jsonld";
 import { TrackView } from "@/components/account/TrackView";
 import { BookmarkButton } from "@/components/content/BookmarkButton";
+import { FeaturedVideo } from "@/components/restaurants/FeaturedVideo";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -139,6 +140,10 @@ export default async function NewsPostPage({ params }: Props) {
       <div className="prose prose-invert mt-10 max-w-none prose-headings:font-heading prose-headings:text-text-primary prose-a:text-brand-gold prose-strong:text-text-primary">
         <ReactMarkdown>{post.content_md}</ReactMarkdown>
       </div>
+
+      {post.featured_video_id && (
+        <FeaturedVideo videoId={post.featured_video_id} />
+      )}
 
       <div className="mt-14 border-t border-border-subtle pt-8">
         <Link
