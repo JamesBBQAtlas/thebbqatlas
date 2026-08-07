@@ -5,6 +5,7 @@ const NOMINATIM = "https://nominatim.openstreetmap.org";
 const HEADERS = {
   "User-Agent": "TheBBQAtlas/1.0 (hello@thebbqatlas.com)",
   Accept: "application/json",
+  "Accept-Language": "en",
 };
 
 // A bare 5-digit (or ZIP+4) string — treat as a US ZIP by default, since the
