@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { MailCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { MARKETING_CONSENT_TEXT, MARKETING_CONSENT_RECORD } from "@/lib/email/consent";
+import { MARKETING_AUTOENROLL_TEXT, MARKETING_AUTOENROLL_RECORD } from "@/lib/email/consent";
 
 type AuthMode = "login" | "signup" | "magic" | "reset";
 
@@ -26,7 +26,6 @@ export function AuthForm({
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [agreedToTerms, setAgreedToTerms] = useState(false);
-  const [marketingOptIn, setMarketingOptIn] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   // When set, we've emailed the user (confirm signup or magic link) and show a
@@ -75,8 +74,9 @@ export function AuthForm({
         options: {
           emailRedirectTo: callbackUrl,
           data: {
-            marketing_opt_in: marketingOptIn,
-            marketing_opt_in_text: MARKETING_CONSENT_RECORD,
+            // Opt-out model: auto-enrolled, with the notice wording logged.
+            marketing_opt_in: true,
+            marketing_opt_in_text: MARKETING_AUTOENROLL_RECORD,
           },
         },
       });
@@ -299,18 +299,11 @@ export function AuthForm({
               </label>
             </div>
 
-            {/* Marketing opt-in — SEPARATE, unticked, never auto-enrolled. */}
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-border-subtle bg-surface-1 p-3">
-              <input
-                type="checkbox"
-                checked={marketingOptIn}
-                onChange={(e) => setMarketingOptIn(e.target.checked)}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-brand-gold"
-              />
-              <span className="text-xs leading-relaxed text-text-secondary">
-                {MARKETING_CONSENT_TEXT}
-              </span>
-            </label>
+            {/* Marketing — soft opt-in (opt-out model): a passive notice, not a
+                blocking checkbox. One-click unsubscribe on every email. */}
+            <p className="px-1 text-xs leading-relaxed text-text-muted">
+              {MARKETING_AUTOENROLL_TEXT}
+            </p>
           </>
         )}
         <button

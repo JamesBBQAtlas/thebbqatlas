@@ -14,3 +14,14 @@ export const MARKETING_CONSENT_TEXT =
 
 /** Persisted with each opt-in (copy + version). Never shown in the UI. */
 export const MARKETING_CONSENT_RECORD = `${MARKETING_CONSENT_TEXT} [${MARKETING_CONSENT_VERSION}]`;
+
+/**
+ * Opt-OUT (soft opt-in) model for new members: a passive notice at signup rather
+ * than an unticked box. Defensible under UK-GDPR/PECR only because the wording is
+ * logged and unsubscribe is one click and honoured.
+ */
+export const MARKETING_AUTOENROLL_TEXT =
+  "We'll send the occasional update — new places, guides and features. Opt out anytime, one click.";
+
+/** Persisted when a member is auto-enrolled at signup. */
+export const MARKETING_AUTOENROLL_RECORD = `${MARKETING_AUTOENROLL_TEXT} [auto-enroll ${MARKETING_CONSENT_VERSION}]`;

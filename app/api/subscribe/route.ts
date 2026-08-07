@@ -74,16 +74,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "server_error" }, { status: 500 });
   }
 
-  // Single opt-in: send the welcome immediately (Appendix A). Deduped by the
-  // audit log so a repeat submit of the same address never re-welcomes. The
-  // send is best-effort — a mail hiccup must never fail a good subscription.
+  // Single opt-in: send the "become a member" welcome immediately — UNLESS the
+  // address already has an account (a member gets no conversion nudge). Deduped
+  // by welcome_sent_at + the audit log; best-effort so a mail hiccup never fails
+  // a good subscription.
   try {
     const { data: sub } = await admin
       .from("email_subscribers")
-      .select("unsubscribe_token")
+      .select("id, unsubscribe_token, welcome_sent_at")
       .eq("email", email)
       .maybeSingle();
-    if (sub?.unsubscribe_token) {
+
+    let isMember = false;
+    try {
+      const { data: members } = await admin.rpc("marketing_members");
+      isMember = ((members ?? []) as { email: string }[]).some(
+        (m) => m.email?.toLowerCase() === email
+      );
+    } catch {
+      /* member helper unavailable — treat as non-member */
+    }
+
+    if (sub?.id && isMember) {
+      await admin
+        .from("email_subscribers")
+        .update({ became_member_at: new Date().toISOString() })
+        .eq("id", sub.id)
+        .is("became_member_at", null);
+    } else if (sub?.id && sub.unsubscribe_token && !sub.welcome_sent_at) {
       const { count } = await admin
         .from("email_log")
         .select("id", { count: "exact", head: true })
@@ -96,6 +114,10 @@ export async function POST(request: Request) {
           unsubscribeToken: String(sub.unsubscribe_token),
         });
       }
+      await admin
+        .from("email_subscribers")
+        .update({ welcome_sent_at: new Date().toISOString() })
+        .eq("id", sub.id);
     }
   } catch {
     /* welcome is best-effort — the subscription itself already succeeded */

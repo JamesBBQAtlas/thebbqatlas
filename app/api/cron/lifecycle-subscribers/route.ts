@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   sendSubscriberWelcome,
+  sendSubscriberDrip1,
   sendSubscriberDrip3,
   sendSubscriberDrip7,
 } from "@/lib/email/senders";
@@ -30,68 +31,89 @@ export const maxDuration = 60;
 async function runSubscriberLifecycle(limit: number) {
   const db = createAdminClient();
   const now = Date.now();
-  const threeDaysAgo = new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString();
-  const sevenDaysAgo = new Date(now - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const dayAgo = (n: number) => new Date(now - n * 24 * 60 * 60 * 1000).toISOString();
+  const oneDayAgo = dayAgo(1);
+  const threeDaysAgo = dayAgo(3);
+  const sevenDaysAgo = dayAgo(7);
+  const nowIso = new Date(now).toISOString();
 
   const { data: subs, error } = await db
     .from("email_subscribers")
-    .select("email, created_at, unsubscribe_token")
+    .select("id, email, created_at, unsubscribe_token, welcome_sent_at, day1_sent_at, day3_sent_at, day7_sent_at, became_member_at")
     .is("unsubscribed_at", null)
     .order("created_at", { ascending: true })
     .limit(limit);
 
   if (error) {
-    return { ok: false, error: error.message, welcome: 0, drip3: 0, drip7: 0 };
+    return { ok: false, error: error.message, welcome: 0, drip1: 0, drip3: 0, drip7: 0 };
   }
   const rows = subs ?? [];
-  if (rows.length === 0) return { ok: true, welcome: 0, drip3: 0, drip7: 0, considered: 0 };
+  if (rows.length === 0)
+    return { ok: true, welcome: 0, drip1: 0, drip3: 0, drip7: 0, becameMember: 0, considered: 0 };
 
-  // What's already been sent? Build email → set(type) from the audit log, only
-  // counting real sends (sent/skipped) so a transient 'failed' can retry.
-  const emails = rows.map((r) => r.email);
-  const sentByEmail = new Map<string, Set<string>>();
-  const { data: logs } = await db
-    .from("email_log")
-    .select("to_email, type, status")
-    .in("to_email", emails)
-    .in("type", ["welcome", "drip_3", "drip_7"])
-    .in("status", ["sent", "skipped"]);
-  for (const l of logs ?? []) {
-    const set = sentByEmail.get(l.to_email) ?? new Set<string>();
-    set.add(l.type);
-    sentByEmail.set(l.to_email, set);
+  // Member emails (lowercased) — the drip STOPS the moment a subscriber has an
+  // account. Best-effort: if the helper is unavailable, no one is wrongly skipped.
+  const memberEmails = new Set<string>();
+  try {
+    const { data: members } = await db.rpc("marketing_members");
+    for (const m of (members ?? []) as { email: string }[]) {
+      if (m.email) memberEmails.add(m.email.toLowerCase());
+    }
+  } catch {
+    /* fall through — treat as no known members this run */
   }
 
+  const stamp = (id: string, col: string) =>
+    db.from("email_subscribers").update({ [col]: nowIso }).eq("id", id);
+
   let welcome = 0;
+  let drip1 = 0;
   let drip3 = 0;
   let drip7 = 0;
+  let becameMember = 0;
 
   for (const r of rows) {
-    const done = sentByEmail.get(r.email) ?? new Set<string>();
     const token = String(r.unsubscribe_token);
     const created = r.created_at as string;
+    const id = r.id as string;
 
-    // 1. Welcome backfill — highest priority, guarantees welcome precedes drips.
-    if (!done.has("welcome")) {
-      await sendSubscriberWelcome({ to: r.email, unsubscribeToken: token });
-      welcome += 1;
-      continue; // one action per subscriber per run
+    // STOP condition: they registered → record it once, send nothing further.
+    if (memberEmails.has(String(r.email).toLowerCase())) {
+      if (!r.became_member_at) {
+        await stamp(id, "became_member_at");
+        becameMember += 1;
+      }
+      continue;
     }
-    // 2. Day-3.
-    if (created <= threeDaysAgo && !done.has("drip_3")) {
+
+    // One action per subscriber per run, in order — welcome, then day 1 → 3 → 7.
+    if (!r.welcome_sent_at) {
+      await sendSubscriberWelcome({ to: r.email, unsubscribeToken: token });
+      await stamp(id, "welcome_sent_at");
+      welcome += 1;
+      continue;
+    }
+    if (created <= oneDayAgo && !r.day1_sent_at) {
+      await sendSubscriberDrip1({ to: r.email, unsubscribeToken: token });
+      await stamp(id, "day1_sent_at");
+      drip1 += 1;
+      continue;
+    }
+    if (created <= threeDaysAgo && !r.day3_sent_at) {
       await sendSubscriberDrip3({ to: r.email, unsubscribeToken: token });
+      await stamp(id, "day3_sent_at");
       drip3 += 1;
       continue;
     }
-    // 3. Day-7 — only after drip_3 has landed in a prior run.
-    if (created <= sevenDaysAgo && done.has("drip_3") && !done.has("drip_7")) {
+    if (created <= sevenDaysAgo && !r.day7_sent_at) {
       await sendSubscriberDrip7({ to: r.email, unsubscribeToken: token });
+      await stamp(id, "day7_sent_at");
       drip7 += 1;
       continue;
     }
   }
 
-  return { ok: true, welcome, drip3, drip7, considered: rows.length };
+  return { ok: true, welcome, drip1, drip3, drip7, becameMember, considered: rows.length };
 }
 
 function parseLimit(url: string): number {

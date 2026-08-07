@@ -354,9 +354,68 @@ function subUnsub(token: string) {
   };
 }
 
+/** Shared "become a member" CTA threaded through the subscriber conversion drip. */
+function signupUrl(to: string): string {
+  return `${EMAIL_SITE_URL}/signup?ref=newsletter&email=${encodeURIComponent(to)}`;
+}
+function memberInviteHtml(to: string): string {
+  return `<p style="margin:0 0 14px;">Want your own corner of the Atlas? Becoming a member is free — save spots to your own map, check in where you've been, and keep your finds in one place.</p>${ctaButton("Become a member →", signupUrl(to))}`;
+}
+function memberInviteText(to: string): string {
+  return `Want your own corner of the Atlas? Becoming a member is free — save spots to your own map, check in where you've been, and keep your finds in one place.\n\nBecome a member: ${signupUrl(to)}`;
+}
+
+/** Newsletter DAY-1 drip — nudge to join, feature spotlight: My Atlas / save spots. */
+export function sendSubscriberDrip1(opts: { to: string; unsubscribeToken: string }) {
+  const { pageUrl, apiUrl } = subUnsub(opts.unsubscribeToken);
+  const map = `${EMAIL_SITE_URL}/map`;
+
+  const bodyHtml = `<p style="margin:0 0 14px;">One day in — here's the single best thing the Atlas does for you.</p>
+    <p style="margin:0 0 14px;">Every pin is a real barbecue place worth knowing about. When one catches your eye, save it to <strong>your</strong> Atlas — a personal map of the spots you want to hit, waiting for you wherever you land next. That's what a membership unlocks, and it's free.</p>
+    ${memberInviteHtml(opts.to)}
+    <p style="margin:0 0 14px;">Or just wander the map for now — no account needed to look.</p>
+    ${ctaButton("Open the map →", map)}
+    <p style="margin:0 0 18px;">More soon.</p>
+    <p style="margin:0;color:#6f6152;">— The BBQ Atlas</p>`;
+
+  const bodyText = `One day in — here's the single best thing the Atlas does for you.
+
+Every pin is a real barbecue place worth knowing about. When one catches your eye, save it to YOUR Atlas — a personal map of the spots you want to hit, waiting for you wherever you land next. That's what a membership unlocks, and it's free.
+
+${memberInviteText(opts.to)}
+
+Or just wander the map for now — no account needed to look: ${map}
+
+More soon.
+
+— The BBQ Atlas`;
+
+  const footerHtml = `<p style="margin:10px 0 0;">You're receiving this because you subscribed to The BBQ Atlas. <a href="${pageUrl}" style="color:#C4622D;">Unsubscribe</a> anytime.</p>`;
+  const footerText = `You're receiving this because you subscribed to The BBQ Atlas. Unsubscribe: ${pageUrl}`;
+
+  return sendEmail({
+    to: opts.to,
+    from: M,
+    stream: "marketing",
+    type: "drip_1",
+    subject: "Make it your map.",
+    html: emailShell({
+      title: "Make it your map.",
+      preheader: "Save spots to your own Atlas — free.",
+      bodyHtml,
+      footerHtml,
+    }),
+    text: emailText({ title: "Make it your map.", bodyText, footerText }),
+    headers: {
+      "List-Unsubscribe": `<${apiUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
+  });
+}
+
 /**
  * Newsletter WELCOME — sent immediately when someone subscribes via the footer
- * (single opt-in, no confirmation). Appendix A copy, verbatim.
+ * (single opt-in, no confirmation). Appendix A copy + a "become a member" CTA.
  */
 export function sendSubscriberWelcome(opts: { to: string; unsubscribeToken: string }) {
   const { pageUrl, apiUrl } = subUnsub(opts.unsubscribeToken);
@@ -367,6 +426,7 @@ export function sendSubscriberWelcome(opts: { to: string; unsubscribeToken: stri
     <p style="margin:0 0 14px;">Here's what we're about: we don't rank barbecue. We celebrate it. No stars, no leaderboards, no "best of" bait. Just honest places, honestly described, on one map you can actually use.</p>
     ${ctaButton("Explore the map →", map)}
     <p style="margin:0 0 14px;">We'll send you a couple of short notes over the next week — where to start, and how to add a place we've missed. After that, we only write when there's something genuinely worth your time.</p>
+    ${memberInviteHtml(opts.to)}
     <p style="margin:0 0 18px;">Glad you're here. Go find something worth the drive.</p>
     <p style="margin:0;color:#6f6152;">— The BBQ Atlas</p>`;
 
@@ -379,6 +439,8 @@ Here's what we're about: we don't rank barbecue. We celebrate it. No stars, no l
 Explore the map: ${map}
 
 We'll send you a couple of short notes over the next week — where to start, and how to add a place we've missed. After that, we only write when there's something genuinely worth your time.
+
+${memberInviteText(opts.to)}
 
 Glad you're here. Go find something worth the drive.
 
@@ -418,6 +480,7 @@ export function sendSubscriberDrip3(opts: { to: string; unsubscribeToken: string
     ${ctaButton("Open the map →", map)}
     <p style="margin:0 0 14px;">Not sure where to start? The guides are a good way in — plain-spoken pieces on fire, smoke, wood, and the craft behind the plate. No gatekeeping, just the good stuff.</p>
     ${ctaButton("Read the guides →", guides)}
+    ${memberInviteHtml(opts.to)}
     <p style="margin:0 0 18px;">More soon.</p>
     <p style="margin:0;color:#6f6152;">— The BBQ Atlas</p>`;
 
@@ -430,6 +493,8 @@ Open the map: ${map}
 Not sure where to start? The guides are a good way in — plain-spoken pieces on fire, smoke, wood, and the craft behind the plate. No gatekeeping, just the good stuff.
 
 Read the guides: ${guides}
+
+${memberInviteText(opts.to)}
 
 More soon.
 
@@ -467,6 +532,7 @@ export function sendSubscriberDrip7(opts: { to: string; unsubscribeToken: string
     <p style="margin:0 0 14px;">So, a small ask. If you know a great barbecue place we haven't got yet, tell us. We'll go find it, make sure it's real, and add it. That's how the Atlas grows — not from a marketing team, but from people who actually eat this food.</p>
     ${ctaButton("Submit a place →", submit)}
     <p style="margin:0 0 14px;">No survey, no feedback form, no "how did we do." Good barbecue doesn't ask how it did — it already knows. We just want the next great place on the map.</p>
+    ${memberInviteHtml(opts.to)}
     <p style="margin:0 0 18px;">Thanks for being here early.</p>
     <p style="margin:0;color:#6f6152;">— The BBQ Atlas</p>`;
 
@@ -477,6 +543,8 @@ So, a small ask. If you know a great barbecue place we haven't got yet, tell us.
 Submit a place: ${submit}
 
 No survey, no feedback form, no "how did we do." Good barbecue doesn't ask how it did — it already knows. We just want the next great place on the map.
+
+${memberInviteText(opts.to)}
 
 Thanks for being here early.
 
