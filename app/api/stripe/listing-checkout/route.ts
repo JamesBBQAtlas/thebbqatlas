@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/server";
 import { LISTING } from "@/lib/stripe/config";
 import { ownsVenue } from "@/lib/account/listing";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 /**
  * Start a Stripe Checkout session for the Featured listing (Phase 5.1). Only the
@@ -11,6 +12,9 @@ import { ownsVenue } from "@/lib/account/listing";
  * restaurant_id lets the webhook set the entitlement on the right restaurant.
  */
 export async function POST(request: Request) {
+  if (!(await rateLimit(`listing-checkout:${clientIp(request)}`, 15, 3600))) {
+    return NextResponse.json({ error: "Too many requests — try again later." }, { status: 429 });
+  }
   if (!stripe || !LISTING.priceId) {
     return NextResponse.json({ error: "Featured listings aren't switched on yet." }, { status: 503 });
   }

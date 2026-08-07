@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 /**
  * Owner/seller claims a venue. Creates a pending claim (one per user+venue)
@@ -9,6 +10,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * account type so their My Atlas reflects their new role immediately.
  */
 export async function POST(request: Request) {
+  // Phase 8c — cap claim spam (10/IP/hour).
+  if (!(await rateLimit(`claim:${clientIp(request)}`, 10, 3600))) {
+    return NextResponse.json({ error: "Too many requests — try again later." }, { status: 429 });
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
