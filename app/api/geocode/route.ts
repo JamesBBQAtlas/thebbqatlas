@@ -17,8 +17,10 @@ async function nominatim(path: string) {
 }
 
 export async function GET(request: Request) {
-  // Rate limit: 30 lookups per IP per minute (proxies external Nominatim).
-  if (!(await rateLimit(`geocode:${clientIp(request)}`, 30, 60))) {
+  // Rate limit: 30 lookups per IP per minute (proxies external Nominatim). This
+  // route hits a paid external quota, so it's fail-closed — a limiter outage
+  // denies rather than letting an abuser run the bill up (Fable M-4).
+  if (!(await rateLimit(`geocode:${clientIp(request)}`, 30, 60, { failClosed: true }))) {
     return NextResponse.json(
       { error: "Too many lookups — please slow down." },
       { status: 429 }
@@ -56,7 +58,20 @@ export async function GET(request: Request) {
     }
 
     if (lat && lng) {
-      const url = `${NOMINATIM}/reverse?format=json&addressdetails=1&lat=${lat}&lon=${lng}`;
+      // Validate as real coordinates before interpolating into the upstream URL
+      // (param injection guard, Fable Low) — and pass the parsed numbers, never
+      // the raw strings.
+      const latN = Number(lat);
+      const lngN = Number(lng);
+      if (
+        !Number.isFinite(latN) ||
+        !Number.isFinite(lngN) ||
+        Math.abs(latN) > 90 ||
+        Math.abs(lngN) > 180
+      ) {
+        return NextResponse.json({ error: "Invalid coordinates" }, { status: 400 });
+      }
+      const url = `${NOMINATIM}/reverse?format=json&addressdetails=1&lat=${latN}&lon=${lngN}`;
       const res = await fetch(url, { headers: HEADERS });
       const data = await res.json();
       return NextResponse.json(data);
