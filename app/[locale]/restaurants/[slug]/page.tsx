@@ -39,6 +39,8 @@ import {
   formatEventDates,
 } from "@/lib/constants/categories";
 import { createClient } from "@/lib/supabase/server";
+import { headers } from "next/headers";
+import { recordVenueView } from "@/lib/analytics/record";
 import { getVenueMetrics, getUserCheckIn } from "@/lib/queries/checkins";
 import { getRecentVisitors } from "@/lib/queries/profiles";
 import { getPublicAvatarSignedUrls, avatarBadge } from "@/lib/account/public-avatar";
@@ -123,6 +125,17 @@ export default async function RestaurantPage({ params }: Props) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Capture the profile view (Fable C-1): anonymous + signed-in, deduped once
+  // per session per day, bots and venue-owner self-views excluded. Written
+  // server-side so ad-blockers can't drop the anonymous majority.
+  // (When Phase 3 makes this route static, relocate this to middleware.)
+  await recordVenueView({
+    restaurantId: restaurant.id,
+    headers: headers(),
+    userId: user?.id ?? null,
+    ownerId: (restaurant as { owner_id?: string | null }).owner_id ?? null,
+  });
 
   const brandId = restaurant.brand_id ?? null;
   const [dishes, allRestaurants, metrics, myCheckIn, media, siblings, brand, gear, visitors] =
@@ -583,6 +596,18 @@ export default async function RestaurantPage({ params }: Props) {
                       <FlagIcon code={code} className="text-base" />
                       {countryName(code, restaurant.country)}
                     </dd>
+                    {restaurant.lat != null && restaurant.lng != null && (
+                      <dd className="mt-1.5">
+                        <TrackedLink
+                          href={`https://www.google.com/maps/dir/?api=1&destination=${restaurant.lat},${restaurant.lng}`}
+                          eventType="map"
+                          restaurantId={restaurant.id}
+                          className="inline-flex items-center gap-1 text-[0.8125rem] font-semibold text-brand-gold transition-colors hover:text-brand-gold-light"
+                        >
+                          Get directions
+                        </TrackedLink>
+                      </dd>
+                    )}
                   </div>
                 </div>
               )}
@@ -593,8 +618,15 @@ export default async function RestaurantPage({ params }: Props) {
                     <dt className="u-eyebrow text-[0.6875rem] text-text-muted">
                       {t("phone")}
                     </dt>
-                    <dd className="text-[0.9375rem] text-text-primary">
-                      {restaurant.phone}
+                    <dd className="text-[0.9375rem]">
+                      <TrackedLink
+                        href={`tel:${restaurant.phone.replace(/[^0-9+]/g, "")}`}
+                        eventType="phone"
+                        restaurantId={restaurant.id}
+                        className="text-text-primary transition-colors hover:text-brand-gold"
+                      >
+                        {restaurant.phone}
+                      </TrackedLink>
                     </dd>
                   </div>
                 </div>
@@ -668,20 +700,39 @@ export default async function RestaurantPage({ params }: Props) {
                 Find them
               </h3>
               <div className="flex flex-wrap gap-2">
-                {socials.map((s) => (
-                  <a
-                    key={s.label}
-                    href={s.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label={s.label}
-                    title={s.label}
-                    className="inline-flex items-center gap-2 rounded-full border border-border-default px-3.5 py-1.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold"
-                  >
-                    <SocialIcon kind={s.kind} className="h-4 w-4" />
-                    <span>{s.label}</span>
-                  </a>
-                ))}
+                {socials.map((s) => {
+                  const cls =
+                    "inline-flex items-center gap-2 rounded-full border border-border-default px-3.5 py-1.5 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold";
+                  // Instagram is the social clicks a venue actually cares about —
+                  // track it (Fable C-1). Others stay plain outbound links.
+                  return s.kind === "instagram" ? (
+                    <TrackedLink
+                      key={s.label}
+                      href={s.href}
+                      eventType="instagram"
+                      restaurantId={restaurant.id}
+                      ariaLabel={s.label}
+                      title={s.label}
+                      className={cls}
+                    >
+                      <SocialIcon kind={s.kind} className="h-4 w-4" />
+                      <span>{s.label}</span>
+                    </TrackedLink>
+                  ) : (
+                    <a
+                      key={s.label}
+                      href={s.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={s.label}
+                      title={s.label}
+                      className={cls}
+                    >
+                      <SocialIcon kind={s.kind} className="h-4 w-4" />
+                      <span>{s.label}</span>
+                    </a>
+                  );
+                })}
               </div>
             </div>
           )}

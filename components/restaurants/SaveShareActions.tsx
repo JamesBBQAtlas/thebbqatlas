@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Bookmark, Share2, Check } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils/cn";
+import { logClick } from "@/lib/analytics/track";
 
 /**
  * Save + Share actions for a restaurant. Save posts to the saved-spots API
@@ -31,6 +32,7 @@ export function SaveShareActions({
     // Toggle: the API expects { restaurantId, action } — sending the wrong shape
     // (restaurant_id, no action) was silently 400ing, so nothing ever saved.
     const action = saved ? "unsave" : "save";
+    if (action === "save") logClick({ event_type: "save", restaurant_id: restaurantId });
     try {
       const res = await fetch("/api/saved-spots", {
         method: "POST",
@@ -50,6 +52,7 @@ export function SaveShareActions({
   }
 
   async function handleShare() {
+    logClick({ event_type: "share", restaurant_id: restaurantId });
     const url = typeof window !== "undefined" ? window.location.href : "";
     if (typeof navigator !== "undefined" && navigator.share) {
       try {

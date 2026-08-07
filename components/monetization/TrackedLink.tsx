@@ -15,12 +15,16 @@ export function TrackedLink({
   restaurantId,
   children,
   className,
+  ariaLabel,
+  title,
 }: {
   href: string;
   eventType: ClickEventPayload["event_type"];
   restaurantId?: string | null;
   children: ReactNode;
   className?: string;
+  ariaLabel?: string;
+  title?: string;
 }) {
   const pathname = usePathname();
   const external = /^https?:/i.test(href);
@@ -29,6 +33,8 @@ export function TrackedLink({
     <a
       href={href}
       className={className}
+      aria-label={ariaLabel}
+      title={title}
       onClick={() =>
         logClick({
           event_type: eventType,

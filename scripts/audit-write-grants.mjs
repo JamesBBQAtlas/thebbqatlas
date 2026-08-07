@@ -50,6 +50,11 @@ const SERVICE_ROLE = new Set([
   // Outreach attempt log — admin-only, written through the service-role client
   // (same locked pattern as contact_messages); RLS-on, no anon/authenticated.
   "outreach_log",
+  // Analytics capture (Fable C-1) — append-only, written server-side via the
+  // service-role client (venue page render / hardened /api/track). RLS-on with
+  // no policies: anon/authenticated can neither read nor write.
+  "venue_views",
+  "search_impressions",
 ]);
 
 const WRITE_METHODS = /\.(insert|update|delete|upsert)\s*\(/;
