@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 import { sendContactNotification } from "@/lib/email/senders";
+import { isPriorityUser } from "@/lib/priority/senders";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +48,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Message is too long." }, { status: 400 });
   }
 
+  // Trust signal from the SESSION, not the email header (can't be spoofed): a
+  // signed-in venue owner or premium member is flagged priority in admin intake.
+  let userId: string | null = null;
+  let priority = false;
+  try {
+    const s = await createClient();
+    userId = (await s.auth.getUser()).data.user?.id ?? null;
+    if (userId) priority = await isPriorityUser(userId);
+  } catch {
+    /* anonymous — normal intake */
+  }
+
   const db = createAdminClient();
 
   const { error } = await db.from("contact_messages").insert({
@@ -53,6 +67,8 @@ export async function POST(request: Request) {
     email,
     subject,
     message,
+    user_id: userId,
+    priority,
   });
   if (error) {
     return NextResponse.json({ error: "Could not send — please try again." }, { status: 500 });

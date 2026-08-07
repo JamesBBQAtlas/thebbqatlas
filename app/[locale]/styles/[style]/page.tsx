@@ -6,6 +6,7 @@ import { Link } from "@/i18n/navigation";
 import { getRestaurants } from "@/lib/queries/restaurants";
 import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { JsonLd } from "@/components/seo/JsonLd";
+import { SearchImpressionBeacon } from "@/components/seo/SearchImpressionBeacon";
 import {
   itemListJsonLd,
   collectionPageJsonLd,
@@ -81,6 +82,13 @@ export default async function StyleHubPage({ params }: Props) {
           ]),
         ]}
       />
+
+      {venues.length > 0 && (
+        <SearchImpressionBeacon
+          page={`style:${style}`}
+          items={venues.slice(0, 50).map((r, i) => ({ restaurantId: r.id, position: i + 1 }))}
+        />
+      )}
 
       <nav className="mb-4 text-sm text-text-muted">
         <Link href="/styles" className="hover:text-brand-gold">

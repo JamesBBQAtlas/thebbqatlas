@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Link } from "@/i18n/navigation";
+import { SearchImpressionBeacon } from "@/components/seo/SearchImpressionBeacon";
 import { DirectoryGrid } from "@/components/restaurants/DirectoryGrid";
 import { getRestaurants } from "@/lib/queries/restaurants";
 import { DirectoryFilters } from "@/components/restaurants/DirectoryFilters";
@@ -57,6 +58,10 @@ export default async function DirectoryPage({ searchParams }: DirectoryPageProps
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10">
+      <SearchImpressionBeacon
+        page="directory"
+        items={restaurants.slice(0, 50).map((r, i) => ({ restaurantId: r.id, position: i + 1 }))}
+      />
       <h1 className="text-3xl font-bold mb-2">BBQ Directory</h1>
       <p className="text-white/60 mb-6">Search and filter {all.length} spots worldwide</p>
 

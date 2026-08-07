@@ -16,6 +16,7 @@ import {
 import { groupByCountry, groupByCity } from "@/lib/seo/hubs";
 import { countryIntro, countryFaqs, countryMetaDescription } from "@/lib/seo/hub-content";
 import { HubFaq } from "@/components/seo/HubFaq";
+import { SearchImpressionBeacon } from "@/components/seo/SearchImpressionBeacon";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -83,6 +84,11 @@ export default async function CountryHubPage({ params }: Props) {
             { name: country.name, path: `/directory/${country.slug}` },
           ]),
         ]}
+      />
+
+      <SearchImpressionBeacon
+        page={`country:${country.slug}`}
+        items={country.venues.slice(0, 50).map((r, i) => ({ restaurantId: r.id, position: i + 1 }))}
       />
 
       <nav className="mb-4 text-sm text-text-muted">
