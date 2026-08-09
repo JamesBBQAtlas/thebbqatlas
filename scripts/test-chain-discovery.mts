@@ -12,9 +12,9 @@ function ok(name: string, cond: boolean, extra?: unknown) {
 }
 
 console.log("\n[country anchoring]");
-ok("ccTLD .com.au → Australia", countryFromHost("thirdwavebbq.com.au") === "Australia");
+ok("ccTLD .com.au → Australia", countryFromHost("example-bbq.com.au") === "Australia");
 ok("ccTLD .co.uk → United Kingdom", countryFromHost("example.co.uk") === "United Kingdom");
-ok("generic .com → null", countryFromHost("mission-bbq.com") === null);
+ok("generic .com → null", countryFromHost("some-bbq-brand.com") === null);
 ok("US address detected", countryFromAddress("123 Main St, Austin, TX 78701") === "United States");
 ok("UK postcode detected", countryFromAddress("10 High St, London SW1X 7HJ") === "United Kingdom");
 ok("AU state+postcode detected", countryFromAddress("5 Ascot Vale Rd, Ascot Vale VIC 3032") === "Australia");
