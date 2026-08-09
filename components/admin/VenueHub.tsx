@@ -245,6 +245,7 @@ export function VenueHub({
   const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
+  const [showAll, setShowAll] = useState(false);
   const [q, setQ] = useState("");
   const [statusF, setStatusF] = useState(initialStatus);
   // Part A — re-enrich builds ON the venue's current details & copy (default ON).
@@ -438,7 +439,10 @@ export function VenueHub({
   // operate over the WHOLE catalogue above; only the rendered slice is capped, so
   // the DOM stays small as the catalogue grows.
   const PAGE_SIZE = 50;
-  const pageCount = Math.max(1, Math.ceil(units.length / PAGE_SIZE));
+  // "Show all" escape hatch (Part 1 §6) — render every filtered unit on one page
+  // so a large chain (or the whole catalogue) is fully browsable without paging.
+  const effSize = showAll ? Math.max(units.length, 1) : PAGE_SIZE;
+  const pageCount = Math.max(1, Math.ceil(units.length / effSize));
   const safePage = Math.min(Math.max(1, page), pageCount);
   // Snap back to page 1 whenever the filtered/sorted set changes, so you're never
   // stranded on an out-of-range page after narrowing the results.
@@ -450,12 +454,28 @@ export function VenueHub({
     if (page > pageCount) setPage(pageCount);
   }, [page, pageCount]);
 
-  const pageUnits = units.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const pageUnits = units.slice((safePage - 1) * effSize, safePage * effSize);
   const grouped = pageUnits.flat();
   const pageIds = grouped.map((r) => r.v.id);
+  // Header select-all (Part 1 §6): reflects selection over the rendered rows,
+  // with an indeterminate state when only some are picked. Toggling is additive
+  // so selections on other pages / "all filtered" are preserved.
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+  const somePageSelected = !allPageSelected && pageIds.some((id) => selected.has(id));
+  const headerCbRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (headerCbRef.current) headerCbRef.current.indeterminate = somePageSelected;
+  }, [somePageSelected, safePage, pageIds.length]);
+  const togglePageSelection = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (pageIds.every((id) => next.has(id))) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
+      return next;
+    });
   const topLevelCount = units.length;
-  const pageStart = topLevelCount === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const pageEnd = Math.min(safePage * PAGE_SIZE, topLevelCount);
+  const pageStart = topLevelCount === 0 ? 0 : (safePage - 1) * effSize + 1;
+  const pageEnd = Math.min(safePage * effSize, topLevelCount);
 
   const metrics = useMemo(() => {
     const m = {
@@ -804,37 +824,45 @@ export function VenueHub({
       res = await fetchWithTimeout(
         "/api/admin/venues/chain-roster",
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: v.id }) },
-        240_000
+        290_000
       );
     } catch (e) {
       setState(v.id, "idle");
       const timedOut = e instanceof DOMException && e.name === "AbortError";
       setRowResult((p) => ({
         ...p,
-        [v.id]: { err: timedOut ? "Roster scan timed out — try again." : "Roster scan failed — try again." },
+        [v.id]: { err: timedOut ? "Discovery timed out — re-run to continue (progress is saved)." : "Discovery failed — try again." },
       }));
       return;
     }
     const data = await res.json().catch(() => ({}));
     setState(v.id, "idle");
     if (!res.ok) {
-      setRowResult((p) => ({ ...p, [v.id]: { err: `Roster scan failed — ${data.error ?? "try again"}` } }));
+      setRowResult((p) => ({ ...p, [v.id]: { err: `Discovery failed — ${data.error ?? "try again"}` } }));
+      return;
+    }
+    // Couldn't resolve the site, or no locations page found — surface the reason.
+    if (data.needs_site || data.source_type === "none" || data.ok === false) {
+      setRowResult((p) => ({ ...p, [v.id]: { warn: data.message ?? "Couldn't discover locations — see the venue's attention flag." } }));
+      router.refresh();
       return;
     }
     if (data.not_a_chain) {
       setRowResult((p) => ({
         ...p,
-        [v.id]: { msg: data.message ?? "No other locations found — treated as a single venue." },
+        [v.id]: { msg: data.message ?? "Only one location on the official site — treated as a single venue." },
       }));
       router.refresh();
       return;
     }
     const found = data.found ?? 0;
     const added = data.added ?? 0;
+    const src = data.source_note ? `${data.source_note}. ` : "";
+    const part = data.partial ? " PARTIAL — re-run to continue. " : " ";
     setRowResult((p) => ({
       ...p,
       [v.id]: {
-        warn: `Found ${found} location${found === 1 ? "" : "s"} (${added} new) — flagship not set. Pick the original with “Set as flagship”.`,
+        warn: `${src}${found} location${found === 1 ? "" : "s"} (${added} new).${part}Flagship not set — pick the original with “Set as flagship”.`,
       },
     }));
     router.refresh();
@@ -1116,13 +1144,30 @@ export function VenueHub({
         )}
       </div>
       {confirmBatch && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-brand-gold/50 bg-brand-gold/10 px-4 py-3">
-          <span className="text-sm text-text-primary">
-            This will run <strong>{confirmBatch.kind}</strong> on <strong>{confirmBatch.n}</strong> venues — estimated <strong>{fmtUsd(confirmBatch.est)}</strong>. Proceed?
-          </span>
-          <div className="ml-auto flex gap-2">
-            <button type="button" onClick={() => setConfirmBatch(null)} className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted hover:text-text-primary">Cancel</button>
-            <button type="button" onClick={() => doBatch(confirmBatch.kind)} className="rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90">Confirm &amp; run</button>
+        // Part 1 (§6) — a CENTRED, visible overlay. It used to be an inline
+        // banner with no positioning, so above ~20 venues it rendered off-screen
+        // and looked like a hard "20 cap". It never was one: confirm here and the
+        // whole selection runs, whatever its size.
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setConfirmBatch(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-brand-gold/50 bg-surface-0 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="font-heading text-lg font-bold text-text-primary">Confirm batch run</h3>
+            <p className="mt-2 text-sm text-text-secondary">
+              This will run <strong className="text-text-primary">{confirmBatch.kind}</strong> on{" "}
+              <strong className="text-text-primary">{confirmBatch.n}</strong> venue{confirmBatch.n === 1 ? "" : "s"} —
+              estimated <strong className="text-brand-gold">{fmtUsd(confirmBatch.est)}</strong> total.
+            </p>
+          <div className="mt-5 ml-auto flex justify-end gap-2">
+            <button type="button" onClick={() => setConfirmBatch(null)} className="rounded-md border border-border-default px-4 py-2 text-xs font-semibold text-text-muted hover:text-text-primary">Cancel</button>
+            <button type="button" onClick={() => doBatch(confirmBatch.kind)} className="rounded-md bg-brand-gold px-4 py-2 text-xs font-bold uppercase text-text-inverse hover:bg-brand-gold/90">Confirm &amp; run {confirmBatch.n}</button>
+          </div>
           </div>
         </div>
       )}
@@ -1219,7 +1264,17 @@ export function VenueHub({
         <table className="w-full min-w-[1000px] text-left text-sm">
           <thead className="bg-surface-1 text-xs uppercase tracking-[0.05em] text-text-muted">
             <tr>
-              <th className="sticky left-0 z-20 w-11 bg-surface-1 px-3 py-3"></th>
+              <th className="sticky left-0 z-20 w-11 bg-surface-1 px-3 py-3">
+                <input
+                  ref={headerCbRef}
+                  type="checkbox"
+                  checked={allPageSelected}
+                  onChange={togglePageSelection}
+                  className="h-4 w-4 accent-[#D4AF37]"
+                  aria-label="Select all venues on this page"
+                  title="Select all on this page"
+                />
+              </th>
               <th className="sticky left-11 z-20 bg-surface-1 px-3 py-3 font-semibold">Venue</th>
               <th className="px-3 py-3 font-semibold">Status</th>
               <th className="px-3 py-3 font-semibold">📷</th>
@@ -1542,6 +1597,17 @@ export function VenueHub({
 
       {/* Pager — 50 top-level venues per page (chain children ride with their
           flagship). Filters/sort/search operate over the whole catalogue above. */}
+      {(units.length > PAGE_SIZE || showAll) && (
+        <div className="mt-4 flex justify-center">
+          <button
+            type="button"
+            onClick={() => { setShowAll((s) => !s); setPage(1); }}
+            className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"
+          >
+            {showAll ? "Paginate (50 / page)" : `Show all ${topLevelCount} on one page`}
+          </button>
+        </div>
+      )}
       {pageCount > 1 && (
         <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-sm">
           <button
