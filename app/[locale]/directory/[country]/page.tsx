@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { MapPin, ArrowRight } from "lucide-react";
 import { Link } from "@/i18n/navigation";
@@ -36,7 +36,7 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
-  if (!country) return { title: "Not Found" };
+  if (!country) return { title: "Not Found", robots: { index: false } };
   const cityCount = groupByCity(country.venues).size;
   return {
     title: `Barbecue in ${country.name}`,
@@ -49,7 +49,9 @@ export default async function CountryHubPage({ params }: Props) {
   setRequestLocale(params.locale);
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
-  if (!country) notFound();
+  // Part 6 — an emptied/stale country hub consolidates to the directory root
+  // rather than dead-ending on a 404.
+  if (!country) redirect("/directory");
 
   const cities = [...groupByCity(country.venues).values()].sort(
     (a, b) => b.venues.length - a.venues.length

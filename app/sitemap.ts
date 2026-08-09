@@ -113,6 +113,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       priority: 0.7,
     });
     for (const city of groupByCity(country.venues).values()) {
+      // Part 6 — a single-venue city hub is thin (near-duplicate of that venue's
+      // own page) and is noindex'd on the page itself, so keep it out of the
+      // sitemap too. Multi-venue city hubs stay.
+      if (city.venues.length < 2) continue;
       locationEntries.push({
         url: abs(`/directory/${country.slug}/${city.slug}`),
         lastModified: newestVenue(city.venues),

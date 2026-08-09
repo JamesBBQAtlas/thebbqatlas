@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { ArrowRight } from "lucide-react";
 import { Link } from "@/i18n/navigation";
@@ -26,6 +26,12 @@ interface Props {
 
 export const revalidate = 3600;
 
+// Part 6 (SEO triage) — a city hub with only ONE venue is thin: its content
+// barely differs from that single venue's page, which is what makes Google flag
+// it "Duplicate without user-selected canonical". Below this many venues the hub
+// is noindex'd (and dropped from the sitemap) so the venue page carries the SEO.
+const HUB_INDEX_MIN_VENUES = 2;
+
 export async function generateStaticParams() {
   const all = await getRestaurants();
   const params: { country: string; city: string }[] = [];
@@ -43,11 +49,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
   const city = country && groupByCity(country.venues).get(params.city);
-  if (!country || !city) return { title: "Not Found" };
+  // A missing hub redirects (see below); keep its metadata noindex just in case.
+  if (!country || !city) return { title: "Not Found", robots: { index: false } };
+  const thin = city.venues.length < HUB_INDEX_MIN_VENUES;
   return {
     title: `Barbecue in ${city.name}, ${country.name}`,
     description: cityMetaDescription(city.name, country.name, city.venues),
     alternates: { canonical: `/directory/${params.country}/${params.city}` },
+    // Thin single-venue hubs are noindex (but still followed) — the venue page ranks.
+    ...(thin ? { robots: { index: false, follow: true } } : {}),
   };
 }
 
@@ -56,7 +66,14 @@ export default async function CityHubPage({ params }: Props) {
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
   const city = country && groupByCity(country.venues).get(params.city);
-  if (!country || !city) notFound();
+  // Part 6 — a hub that no longer exists (its last venue moved/closed, or a
+  // stale indexed URL like /directory/united-states/dudley) must not dead-end on
+  // a 404. Consolidate it up to its parent instead: unknown city → the country
+  // hub, unknown country → the directory root. A temporary redirect (not
+  // permanent) because hubs are data-driven and can legitimately reappear when a
+  // venue is added there again.
+  if (!country) redirect("/directory");
+  if (!city) redirect(`/directory/${params.country}`);
 
   const styles = [...new Set(city.venues.map((r) => r.style))] as BbqStyle[];
   const intro = cityIntro(city.name, country.name, city.venues);
