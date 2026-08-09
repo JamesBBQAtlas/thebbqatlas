@@ -22,6 +22,7 @@ import { geocodeAddress } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
+import { looksLikeSeedStub } from "@/lib/admin/seed-copy";
 import { desiredVenueSlug } from "@/lib/admin/slug";
 import {
   composeAddress,
@@ -261,7 +262,12 @@ export async function POST(request: Request) {
   // still enrich the STRUCTURED gaps (hours, phone, socials, price, styles) and
   // hold any freshly-written copy as pending_changes for the operator to review —
   // their live words stay untouched. `overwriteManual` (explicit confirm) lifts this.
-  const protectCopy = Boolean(row.manual_copy) && !overwriteManual;
+  //
+  // Part 2 (copy-deadlock fix): a SEED STUB is never protected copy, even if
+  // manual_copy was set. Without this, a venue whose description is still the
+  // auto stub can be enriched repeatedly (spending money) and never get copy.
+  const copyIsPlaceholder = looksLikeSeedStub(row.description as string | null);
+  const protectCopy = Boolean(row.manual_copy) && !overwriteManual && !copyIsPlaceholder;
 
   // ---- full mode: bounded dossier + Haiku copy ---------------------------
   // Research runs in at most a few bounded passes sharing ONE hard total-search
@@ -687,6 +693,16 @@ export async function POST(request: Request) {
     built_on: useExisting ? builtOn : [],
     fact_conflicts: factConflicts.map((c) => c.field),
     copy_protected: protectCopy && Object.keys(copyProposal).length > 0,
+    // Part 2 (3): never silently withhold copy after a paid run — say why.
+    copy_note: (() => {
+      if (copy.hook || copy.description) {
+        return protectCopy && Object.keys(copyProposal).length > 0
+          ? "New copy written but held — existing copy is hand-edited (protected). Approve to apply."
+          : "Copy written.";
+      }
+      if (thin) return "No copy written — dossier too thin for an honest page.";
+      return "No copy written.";
+    })(),
     copy: { hook: copy.hook, description: copy.description },
     cost: thisCost,
     over_ceiling: overCeiling,

@@ -6,6 +6,7 @@ import { settlementCity } from "@/lib/admin/address";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { auditFromPatch, auditField } from "@/lib/admin/content-audit";
 import { BBQ_STYLES } from "@/lib/constants/styles";
+import { looksLikeSeedStub } from "@/lib/admin/seed-copy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -48,9 +49,18 @@ export async function POST(request: Request) {
   let touchedCopy = false;
   if (has("hook")) { patch.hook = str(body.hook) ?? ""; touchedCopy = true; }
   if (has("description")) { patch.description = str(body.description) ?? ""; touchedCopy = true; }
-  if (touchedCopy) {
+  // Part 2 (copy-deadlock): only PROTECT genuinely hand-written copy. Saving the
+  // editor without changing the auto seed stub (still "<name> — barbecue in
+  // <city>.") must NOT flip manual_copy on — that's what deadlocked enrichment.
+  const savedDescription = has("description")
+    ? (patch.description as string)
+    : (row.description as string | null);
+  if (touchedCopy && !looksLikeSeedStub(savedDescription)) {
     patch.manual_copy = true;
     patch.manual_copy_at = new Date().toISOString();
+  } else if (touchedCopy) {
+    // Editing/keeping a stub → explicitly leave it unprotected so it can enrich.
+    patch.manual_copy = false;
   }
 
   // ---- Plain text fields ----------------------------------------------------
