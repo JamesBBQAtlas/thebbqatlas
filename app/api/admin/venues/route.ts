@@ -140,6 +140,10 @@ export async function POST(request: Request) {
     brand_id: brandId,
     location_label: v.location_label ?? null,
     category: v.category && CATEGORIES.has(v.category) ? v.category : "restaurant",
+    // Part 5 — the operator chose the item type on the Add-listing form, so it's
+    // a confirmed manual value: protect it from being reclassified by a re-enrich.
+    manual_category: true,
+    manual_category_at: new Date().toISOString(),
     event_starts_at: v.event_starts_at || null,
     event_ends_at: v.event_ends_at || null,
     enrichment_sources: citations.length ? citations : null,

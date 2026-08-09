@@ -7,6 +7,7 @@ import { revalidateVenues } from "@/lib/cache/venues";
 import { auditFromPatch, auditField } from "@/lib/admin/content-audit";
 import { BBQ_STYLES } from "@/lib/constants/styles";
 import { looksLikeSeedStub } from "@/lib/admin/seed-copy";
+import { ITEM_CATEGORIES } from "@/lib/ai/enrich";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -36,7 +37,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, description, hook, style, address, city, country, lat, lng, instagram_handle, website, hero_image_url, is_featured, permanently_closed, status, chain_parent_id, flagship_unset, needs_attention, attention_reason"
+      "id, name, description, hook, style, category, manual_category, address, city, country, lat, lng, instagram_handle, website, hero_image_url, is_featured, permanently_closed, status, chain_parent_id, flagship_unset, needs_attention, attention_reason"
     )
     .eq("id", restaurantId)
     .single();
@@ -82,6 +83,16 @@ export async function POST(request: Request) {
   if (has("style")) {
     const s = str(body.style);
     if (s && (BBQ_STYLES as readonly string[]).includes(s)) patch.style = s;
+  }
+  // Part 5 — the operator setting the ITEM TYPE by hand is a confirmed value:
+  // protect it (manual_category) so a later AI re-enrich never reclassifies it.
+  if (has("category")) {
+    const c = str(body.category);
+    if (c && (ITEM_CATEGORIES as readonly string[]).includes(c) && c !== row.category) {
+      patch.category = c;
+      patch.manual_category = true;
+      patch.manual_category_at = new Date().toISOString();
+    }
   }
   if (has("price_level")) {
     const n = Number(body.price_level);

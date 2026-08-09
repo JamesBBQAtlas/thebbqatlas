@@ -1,5 +1,5 @@
 import { parseCsv, normalizeHandle } from "./seed-import";
-import type { VenueDossier } from "@/lib/ai/enrich";
+import { normalizeItemCategory, type VenueDossier } from "@/lib/ai/enrich";
 
 /**
  * "Import facts sheet" (COST-EFFICIENT-ENRICHMENT §4). Parse a completed dossier
@@ -78,6 +78,9 @@ export function rowToDossier(row: Record<string, string>): VenueDossier {
       /instagram\.com\/(p|reel)\//.test(u)
     ),
     location_label: g("location_label"),
+    // Item type from the sheet if given (e.g. "cooking school"), else null so a
+    // later enrich classifies it; normalised to the enum.
+    item_category: normalizeItemCategory(g("item_category", "category")),
     is_chain: false, // facts sheets are per-venue; chains are handled in-app
     chain_locations: [],
     chain_locations_url: null,

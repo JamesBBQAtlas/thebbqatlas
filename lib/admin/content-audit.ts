@@ -29,6 +29,7 @@ export const TRACKED_COLUMNS: Record<string, string> = {
   description: "description",
   hook: "hook",
   style: "style",
+  category: "item_type",
   address: "address",
   city: "city",
   country: "country",

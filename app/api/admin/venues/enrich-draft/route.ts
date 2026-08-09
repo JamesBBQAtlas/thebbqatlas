@@ -12,6 +12,9 @@ import {
   classifyStyle,
   priceBandToLevel,
   mapSocials,
+  categoryGate,
+  ITEM_CATEGORY_LABELS,
+  type ItemCategory,
   type VenueDossier,
   type VenueLead,
 } from "@/lib/ai/enrich";
@@ -68,7 +71,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, slug, name, description, hook, style, location_label, instagram_url, instagram_handle, website, phone, address, city, country, lat, lng, hours, price_level, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, hero_image_url, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
+      "id, slug, name, description, hook, style, category, manual_category, location_label, instagram_url, instagram_handle, website, phone, address, city, country, lat, lng, hours, price_level, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, hero_image_url, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
     )
     .eq("id", restaurantId)
     .single();
@@ -557,6 +560,25 @@ export async function POST(request: Request) {
   // Mexico/México split re-appearing as we enrich).
   if (country) proposed.country = canonicalCountry(country);
 
+  // Part 5 — item TYPE (category). Enrichment CLASSIFIES the type from the
+  // dossier; the value is a PROPOSAL. A hand-set category (manual_category) is
+  // protected and never clobbered by a re-enrich; a bulk-import 'restaurant'
+  // default is NOT protected, so it can be reclassified. The category is always
+  // PRESERVED (we only ever set it, never blank it) so a non-venue held for a
+  // later wave keeps its type, ready to publish when that wave turns on.
+  const gate = categoryGate({
+    manualSet: Boolean(row.manual_category),
+    proposed: dossier.item_category,
+    current: (row.category as ItemCategory | null) ?? null,
+  });
+  const effectiveCategory = gate.effective;
+  const nonVenueCategory = gate.nonVenue;
+  const categoryUnclear = gate.unclear;
+  if (gate.write) {
+    proposed.category = gate.write;
+    proposed.manual_category = false;
+  }
+
   // Slug regeneration (root-cause fix): when enrich corrects a venue's city/name,
   // its slug can go stale (a Dallas venue stuck at a "…-austin" URL). Regenerate
   // it — but ONLY for a not-yet-approved row (safe/low-traffic), and always leave
@@ -626,10 +648,16 @@ export async function POST(request: Request) {
     hasNonLatinScript(address as string) ? "address" : null,
   ].filter(Boolean) as string[];
   const nonLatin = nonLatinFields.length > 0;
+  // Note: `coarseGeocode` is not a standalone trigger — a coarse-only re-geocode
+  // only matters when we end up with NO valid pin (that's `noValidLocation`,
+  // which drives the "verify pin" reason below); if the row already had a good
+  // pin we didn't overwrite it, so there's nothing to flag.
   const attention =
     overCeiling ||
     searchRunaway ||
     noValidLocation ||
+    nonVenueCategory ||
+    categoryUnclear ||
     factConflicts.length > 0 ||
     nonLatin ||
     (effectivelySibling ? locationFactsMissing : copy.needs_attention);
@@ -647,6 +675,10 @@ export async function POST(request: Request) {
               : effectivelySibling
                 ? "This outpost's own location facts (address) are missing — add them, then re-enrich."
                 : "No address to place this venue on the map — add one, then re-enrich."
+          : nonVenueCategory
+            ? `Item type = ${ITEM_CATEGORY_LABELS[effectiveCategory as ItemCategory]} — not a dine-in venue; parked for a later wave.`
+          : categoryUnclear
+            ? "Item type unclear — set manually."
           : factConflicts.length
             ? describeConflicts(factConflicts)
             : nonLatin

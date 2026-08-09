@@ -197,6 +197,30 @@ Return the JSON object described in your instructions.`;
 // ===========================================================================
 
 /** Grok's structured, facts-only research output for ONE venue. */
+// Part 5 — the item-type enum + helpers live in a framework-agnostic module so
+// the client admin UI can import them without pulling in this server module.
+// Imported here for local use AND re-exported for existing importers of enrich.
+import {
+  ITEM_CATEGORIES,
+  ITEM_CATEGORY_LABELS,
+  ITEM_CATEGORY_OPTIONS,
+  DINE_IN_CATEGORIES,
+  isDineInCategory,
+  normalizeItemCategory,
+  categoryGate,
+  type ItemCategory,
+} from "@/lib/constants/item-categories";
+export {
+  ITEM_CATEGORIES,
+  ITEM_CATEGORY_LABELS,
+  ITEM_CATEGORY_OPTIONS,
+  DINE_IN_CATEGORIES,
+  isDineInCategory,
+  normalizeItemCategory,
+  categoryGate,
+  type ItemCategory,
+};
+
 export interface VenueDossier {
   name: string | null;
   also_known_as: string[];
@@ -234,6 +258,14 @@ export interface VenueDossier {
   recent_instagram_posts: string[];
   /** For one location of a chain: the branch label (e.g. "Leawood"); else null. */
   location_label: string | null;
+  /**
+   * Part 5 — the item TYPE, classified from the business's own site/socials into
+   * one of the `map_item_category` enum values. null when it can't be classified
+   * confidently (the enricher then flags "item type unclear — set manually" and
+   * never guesses). Feeds the moderation gate (Part 2): anything that is not a
+   * dine-in venue (`restaurant`/`food_truck`) is held out of `approved`.
+   */
+  item_category: ItemCategory | null;
   /** True if this business has more than one physical location. */
   is_chain: boolean;
   /**
@@ -286,13 +318,14 @@ Field notes:
 - "recent_instagram_posts": up to 6 recent PUBLIC Instagram post/reel permalinks from this venue, for an on-page photo section. [] if none found.
 - "name": the venue's clean name WITHOUT the city or branch baked in (e.g. "Joe's Kansas City Bar-B-Que", not "…Bar-B-Que Leawood").
 - "location_label": if this is ONE location of a multi-location business, the branch label only (e.g. "Leawood", "Olathe"); else null. Never fold it into "name".
+- "item_category": WHAT THIS BUSINESS IS, classified from its OWN site/socials as EXACTLY ONE of: "restaurant" (a fixed-premises dine-in/counter-service BBQ venue), "food_truck" (a mobile truck/trailer or a pop-up with no fixed dining room), "caterer" (catering-only / event hire, NO premises the public can visit), "retailer" (a shop or an online sauce / rub / merch / equipment brand — product, not a place to eat), "market" (a food market or hall), "event" (a single dated happening), "festival" (a recurring BBQ festival/competition), "school" (cooking classes / BBQ school / an educator or consultancy teaching, not serving). This is a STRONG rule — always attempt it from what the business actually does. If you genuinely cannot tell which one it is, set null and add "item_category" to "unknowns" — NEVER guess. Classifying this does NOT cost an extra search; judge it from what you already read.
 - "is_chain": true ONLY as a cheap signal that the business appears to run more than one physical location (e.g. a "Locations" nav link on its site) — do NOT search to confirm. false for a single independent venue.
 - "chain_locations": ALWAYS [] here — never enumerate other branches (a separate step does that).
 - "flagship_location": ALWAYS null here — never hunt for the original (a separate step + a human decide that).
 - "chain_locations_url": the URL of the site's "Locations"/"Find us" page IF that link is visible on a page you already read; else null. Do NOT open or scan it.
 - "lat"/"lng": decimal coordinates if you can verify them, else null.
 
-Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, opening_date, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, is_chain, flagship_location, chain_locations, chain_locations_url, sources, unknowns.`;
+Respond ONLY with a JSON object with exactly these keys: name, also_known_as, what_it_is, address, city, region_state, country, postcode, lat, lng, phone, website, instagram, other_socials, hours, established, opening_date, founders_pitmaster, bbq_style, specialities, cook_method, wood_fuel, price_band, awards_press, setting_vibe, ordering_notes, best_photo_post_url, recent_instagram_posts, location_label, item_category, is_chain, flagship_location, chain_locations, chain_locations_url, sources, unknowns.`;
 
 const asArray = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.trim()) : [];
@@ -382,6 +415,7 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
       .filter((u) => /instagram\.com\/(p|reel)\//.test(u))
       .slice(0, 6),
     location_label: asStr(data.location_label),
+    item_category: normalizeItemCategory((data as { item_category?: unknown }).item_category),
     is_chain: data.is_chain === true,
     flagship_location: (() => {
       const fl = data.flagship_location as

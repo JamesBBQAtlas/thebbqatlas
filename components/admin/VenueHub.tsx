@@ -30,6 +30,12 @@ import {
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { compareVenues, SORT_KEYS, type SortKey, type SortDir } from "@/lib/admin/venue-sort";
+import {
+  ITEM_CATEGORY_LABELS,
+  ITEM_CATEGORY_OPTIONS,
+  isDineInCategory,
+  type ItemCategory,
+} from "@/lib/constants/item-categories";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 import { PinMap } from "@/components/admin/PinMap";
 import { HoursEditor } from "@/components/admin/HoursEditor";
@@ -43,6 +49,8 @@ export interface HubVenue {
   status: string;
   style: string;
   styleLabel: string;
+  category: string | null;
+  manualCategory: boolean;
   enriched_at: string | null;
   needs_attention: boolean;
   attention_reason: string | null;
@@ -1415,6 +1423,17 @@ export function VenueHub({
                             <Star className="h-3 w-3 fill-brand-gold" />Featured
                           </span>
                         )}
+                        {/* Part 5 — flag a non-dine-in item type right on the row so
+                            a non-venue (cooking school, caterer, shop…) is obvious
+                            in the queue. Restaurants/food-trucks show no chip. */}
+                        {v.category && !isDineInCategory(v.category as ItemCategory) && (
+                          <span
+                            title={`Item type: ${ITEM_CATEGORY_LABELS[v.category as ItemCategory] ?? v.category}${v.manualCategory ? " (set by operator)" : " (classified by enrichment)"} — not a dine-in venue`}
+                            className="ml-2 inline-flex items-center rounded-full border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 align-[1px] text-[0.625rem] font-bold uppercase tracking-[0.05em] text-amber-400"
+                          >
+                            {ITEM_CATEGORY_LABELS[v.category as ItemCategory] ?? v.category}
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-text-muted">{[v.city, v.country].filter(Boolean).join(", ")} · {v.styleLabel}</div>
                       {v.chainSeed && v.chainParentId && flagshipById.get(v.chainParentId) && (
@@ -1867,6 +1886,9 @@ export function EditorPanel({
   const [ttUrl, setTtUrl] = useState(s("tiktok_url"));
   const [ytUrl, setYtUrl] = useState(s("youtube_url"));
   const [style, setStyle] = useState(venue.style);
+  const [category, setCategory] = useState<string>(
+    (typeof f.category === "string" && f.category) || venue.category || "restaurant"
+  );
   const [price, setPrice] = useState(Number(f.price_level) || 2);
   const [offerings, setOfferings] = useState(
     Array.isArray(f.offerings) ? (f.offerings as string[]).join(", ") : ""
@@ -1901,6 +1923,7 @@ export function EditorPanel({
       tiktok_url: ttUrl,
       youtube_url: ytUrl,
       style,
+      category,
       price_level: price,
       offerings: offerings.split(",").map((o) => o.trim()).filter(Boolean),
       hours,
@@ -1959,6 +1982,14 @@ export function EditorPanel({
           <select value={style} onChange={(e) => setStyle(e.target.value)} className={fieldInput}>
             {styleOptions.map((o) => <option key={o.slug} value={o.slug}>{o.label}</option>)}
           </select>
+        </Field>
+        <Field label="Item type">
+          <select value={category} onChange={(e) => setCategory(e.target.value)} className={fieldInput}>
+            {ITEM_CATEGORY_OPTIONS.map((o) => <option key={o.slug} value={o.slug}>{o.label}</option>)}
+          </select>
+          {!isDineInCategory(category as ItemCategory) && (
+            <p className="mt-1 text-[0.6875rem] text-amber-400/90">Not a dine-in venue — held out of live until a later wave. Saving confirms this type; a re-enrich won&apos;t change it.</p>
+          )}
         </Field>
         <Field label="Price band">
           <select value={price} onChange={(e) => setPrice(Number(e.target.value))} className={fieldInput}>
