@@ -7,6 +7,7 @@
  */
 import {
   extractAddressesFromText,
+  parseVisibleText,
   findLocatorLinks,
   refineCandidates,
 } from "../lib/admin/chain-discovery/parse";
@@ -130,6 +131,29 @@ console.log("\n[FAIL-1 fix — fuzzy brand token for dedupe]");
   ok("the two brand variants share a token", brandToken("Thatcher Barbecue Company") === brandToken("Thatcher BBQ Company"));
   ok("keeps the distinctive word past generic ones", brandToken("Franklin Barbecue") === "franklin");
   ok("an all-generic name yields no token (proximity covers it)", brandToken("The Smokehouse BBQ Co") === "");
+}
+
+console.log("\n[round-2 — MULTI-LINE address blocks (the Thatcher /location/ regression)]");
+{
+  // street on one line, city/ST/ZIP on the next — the exact failing shape.
+  const twoLine = "THATCHER BARBECUE CO.\n918 Natural Bridge Rd.\nSlade, KY 40376\n(606) 947-8040";
+  const got = extractAddressesFromText(twoLine);
+  ok("extracts the split street + city/zip as one clean address",
+    got.some((c) => c.address === "918 Natural Bridge Rd., Slade, KY 40376"));
+
+  // <br>-separated inside a <p> — cheerio .text() would glue these without the fix.
+  const brHtml = `<div class="location"><h2>Thatcher</h2><p>918 Natural Bridge Rd.<br>Slade, KY 40376</p><p>(606) 947-8040</p></div>`;
+  ok("<br>-separated block resolves to the clean address",
+    parseVisibleText(brHtml).some((c) => c.address === "918 Natural Bridge Rd., Slade, KY 40376"));
+
+  // separate <div> lines.
+  const blockHtml = `<div><div>918 Natural Bridge Rd.</div><div>Slade, KY 40376</div></div>`;
+  ok("block-element-separated address resolves",
+    parseVisibleText(blockHtml).some((c) => c.address === "918 Natural Bridge Rd., Slade, KY 40376"));
+
+  // a lone street line with no following city/zip line must NOT invent an address.
+  ok("a lone street line alone yields nothing (no invention)",
+    extractAddressesFromText("918 Natural Bridge Rd.\nOpen Thursday–Sunday").length === 0);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

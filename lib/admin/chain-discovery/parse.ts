@@ -311,13 +311,48 @@ export function extractAddressesFromText(text: string, sourceUrl: string | null 
     const postcode = m[2].replace(/\s+/g, " ").trim();
     push({ street, postcode, address: `${street} ${postcode}` });
   }
+
+  // (2) MULTI-LINE block (round-2 fix): a street-number line IMMEDIATELY followed
+  //     by a "City, ST ZIP" line is one address — the exact Thatcher /location/
+  //     shape ("918 Natural Bridge Rd." then "Slade, KY 40376" on the next line).
+  //     Joins the pair into one clean address. Deduped against (1) via `push`.
+  const lines = clean.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (!STREET_LINE.test(lines[i])) continue;
+    const cm = lines[i + 1].match(CITY_STATE_ZIP_LINE);
+    if (!cm) continue;
+    const street = lines[i].replace(/,\s*$/, "").trim();
+    const city = cm[1].trim();
+    const region = cm[2].toUpperCase();
+    const postcode = cm[3];
+    push({ street, city, region, postcode, address: `${street}, ${city}, ${region} ${postcode}` });
+  }
+
   return out;
 }
 
-/** Pull an HTML page's visible text (drop script/style, collapse tags to spaces). */
+// A street line on its own: a building number then a street-type token — the
+// first half of a MULTI-LINE address block.
+const STREET_LINE = /^\d{1,6}\s+.*\b(st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|hwy|highway|pkwy|parkway|ct|court|pl|place|sq|square|ter|terrace|cir|circle|pike|trail|trl|route|rt|row|walk|crescent|cres|close|grove|parade|pde|esplanade)\b\.?$/i;
+// A "City, ST 12345" line on its own — the second half of a multi-line US block.
+const CITY_STATE_ZIP_LINE = /^([A-Za-z][A-Za-z.'\- ]{1,28}),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)\b/;
+
+/**
+ * Pull an HTML page's visible text — inserting a NEWLINE at every block/<br>
+ * boundary FIRST (round-2 fix). cheerio's `.text()` concatenates adjacent
+ * elements with no separator, gluing a multi-line address into "Rd.Slade" so the
+ * pattern matches nothing. Adding explicit line breaks at element boundaries
+ * keeps a street line and its city/ZIP line on separate lines for the joiner.
+ */
 export function visibleText(html: string): string {
   const $ = cheerio.load(html);
   $("script, style, noscript, svg").remove();
+  $("br").replaceWith("\n");
+  // Only BLOCK-level boundaries (never inline <span>, which would fragment a
+  // mid-address span and break a single-line address).
+  $("p, div, li, tr, td, th, h1, h2, h3, h4, h5, h6, address, section, article, header, footer").each((_, el) => {
+    $(el).append("\n");
+  });
   return $("body").text() || $.root().text();
 }
 

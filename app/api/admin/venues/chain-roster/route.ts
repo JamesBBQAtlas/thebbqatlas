@@ -138,48 +138,47 @@ export async function POST(request: Request) {
   // <2-branch result is a LOUD failure — never a silent "not a chain".
   const knownChain = Boolean(dossier.is_chain);
 
-  // Part 4B — LOUD on failure. A known chain that yields <2 real dine-in branches
-  // gets a hard needs_attention that shows its working: the exact URLs crawled,
-  // every raw address string seen, and why the result fell short — never a bare [].
-  if (discovery.locations.length < 2 && knownChain) {
+  // Part 4B — LOUD on failure, but ONLY when extraction found NOTHING (round-2
+  // fix). Finding exactly ONE real location is a VALID result — a single venue, or
+  // a chain whose other branches have closed — so it is LINKED/deduped below, not
+  // errored. The hard failure is reserved for a genuine extraction miss (0 found).
+  if (discovery.locations.length === 0) {
     const urlList = discovery.crawledUrls.slice(0, 20);
     const rawList = discovery.rawAddresses.slice(0, 20);
-    const reason =
-      `Chain discovery found ${discovery.locations.length} dine-in branch(es) — expected ≥2. ` +
-      `Crawled ${discovery.crawledUrls.length} page(s); saw ${discovery.rawAddresses.length} raw address string(s)` +
-      (discovery.lowConfidence.length ? `, ${discovery.lowConfidence.length} HQ/shipping (not rostered)` : "") +
-      `. Review the crawl (dossier.discovery_debug) and add branches manually if needed.`;
-    await ctx.db.from("restaurants").update({
-      enrichment_cost: round4(priorCost + grokCostTotal),
-      needs_attention: true,
-      attention_reason: reason,
-      dossier: {
-        ...dossier,
-        is_chain: true,
-        discovery_source_type: discovery.sourceType,
-        discovery_debug: {
-          crawled_urls: urlList,
-          raw_addresses: rawList,
-          low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
-          notes: discovery.notes,
-          at: new Date().toISOString(),
+    if (knownChain) {
+      const reason =
+        `Chain discovery extracted 0 addresses from ${discovery.crawledUrls.length} crawled page(s)` +
+        (discovery.lowConfidence.length ? ` (${discovery.lowConfidence.length} HQ/shipping seen, not rostered)` : "") +
+        `. Review the crawl (dossier.discovery_debug) and add branches manually if needed.`;
+      await ctx.db.from("restaurants").update({
+        enrichment_cost: round4(priorCost + grokCostTotal),
+        needs_attention: true,
+        attention_reason: reason,
+        dossier: {
+          ...dossier,
+          is_chain: true,
+          discovery_source_type: discovery.sourceType,
+          discovery_debug: {
+            crawled_urls: urlList,
+            raw_addresses: rawList,
+            low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
+            notes: discovery.notes,
+            at: new Date().toISOString(),
+          },
         },
-      },
-    }).eq("id", restaurantId);
-    revalidateVenues();
-    return NextResponse.json({
-      ok: false, brand, website, chain_underfilled: true, source_type: discovery.sourceType,
-      found: discovery.locations.length, added: 0,
-      crawled_urls: urlList, raw_addresses: rawList,
-      low_confidence: discovery.lowConfidence.map((l) => l.address),
-      notes: discovery.notes,
-      message: reason,
-      cost: grokCostTotal,
-    }, { status: 200 });
-  }
-
-  // Not asserted a chain AND <2 found → a genuine single venue. Clear chain flags.
-  if (discovery.locations.length <= 1) {
+      }).eq("id", restaurantId);
+      revalidateVenues();
+      return NextResponse.json({
+        ok: false, brand, website, chain_underfilled: true, source_type: discovery.sourceType,
+        found: 0, added: 0,
+        crawled_urls: urlList, raw_addresses: rawList,
+        low_confidence: discovery.lowConfidence.map((l) => l.address),
+        notes: discovery.notes,
+        message: reason,
+        cost: grokCostTotal,
+      }, { status: 200 });
+    }
+    // Not flagged a chain and nothing found — clear chain framing, no error.
     await ctx.db.from("restaurants").update({
       enrichment_cost: round4(priorCost + grokCostTotal),
       chain_candidate: false, flagship_unset: false, chain_rostered_at: null,
@@ -188,14 +187,19 @@ export async function POST(request: Request) {
     revalidateVenues();
     return NextResponse.json({
       ok: true, brand, website, not_a_chain: true, source_type: discovery.sourceType,
-      found: discovery.locations.length, added: 0, notes: discovery.notes,
+      found: 0, added: 0, notes: discovery.notes,
       low_confidence: discovery.lowConfidence.map((l) => l.address),
       cost: grokCostTotal,
-      message: "Only one location found on the official site — treated as a single venue.",
+      message: "No locations found on the official site.",
     });
   }
 
-  // ── Step 5 — seed/reconcile every branch (idempotent, deduped) ────────────
+  // One real location is a valid single-venue outcome (not a multi-location chain).
+  const singleLocation = discovery.locations.length < 2;
+
+  // ── Step 5 — seed/reconcile every branch (idempotent, deduped). Runs even for a
+  // single location, so a found address LINKS to an existing record (no duplicate,
+  // no error). ────────────────────────────────────────────────────────────────
   const result = await seedChainLocations(
     ctx.db,
     restaurantId,
@@ -240,9 +244,9 @@ export async function POST(request: Request) {
   await ctx.db.from("restaurants").update({
     enrichment_cost: round4(priorCost + grokCostTotal),
     chain_rostered_at: nowIso,
-    // Crown the parent as flagship only when a signal identifies it; otherwise the
-    // operator still picks the original.
-    flagship_unset: !flagshipCrowned,
+    // Crown the parent as flagship only when a signal identifies it; a single
+    // location is trivially its own flagship, so it's never left "flagship unset".
+    flagship_unset: singleLocation ? false : !flagshipCrowned,
     chain_candidate: false,
     country: canonicalCountry(anchoredCountry) || row.country,
     dossier: {
@@ -279,7 +283,7 @@ export async function POST(request: Request) {
       },
     },
   }).eq("id", restaurantId);
-  await ctx.db.from("restaurants").update({ flagship_unset: !flagshipCrowned }).eq("chain_parent_id", restaurantId);
+  await ctx.db.from("restaurants").update({ flagship_unset: singleLocation ? false : !flagshipCrowned }).eq("chain_parent_id", restaurantId);
 
   await auditField(ctx.db, restaurantId, "chain", null,
     { rostered: true, added: result.added.length, linked: result.linked, distinct: distinctRostered, source: discovery.sourceType },
@@ -296,12 +300,20 @@ export async function POST(request: Request) {
   const partSuffix = discovery.partial ? " · PARTIAL (re-run to continue)" : "";
   const dupSuffix = result.possibleDuplicates ? ` · ${result.possibleDuplicates} possible duplicate${result.possibleDuplicates === 1 ? "" : "s"} flagged` : "";
 
+  // A single-location outcome is reported as a single venue, not a chain — with
+  // the found address linked/deduped, never errored (round-2 fix).
+  const message = singleLocation
+    ? `One location found — ${result.linked ? "linked to the existing record" : result.added.length ? "added" : "already on file"}; treated as a single venue, not a multi-location chain.`
+    : `${distinctRostered} distinct locations rostered.`;
+
   return NextResponse.json({
     ok: true,
     brand,
     website,
-    flagship_unset: !flagshipCrowned,
-    flagship_crowned: flagshipCrowned,
+    single_location: singleLocation,
+    not_a_chain: singleLocation,
+    flagship_unset: singleLocation ? false : !flagshipCrowned,
+    flagship_crowned: flagshipCrowned || singleLocation,
     suggested_flagship: suggestedFlagship,
     source_type: discovery.sourceType,
     source_note: `${distinctRostered} distinct location${distinctRostered === 1 ? "" : "s"} ${sourceLabel}${discovery.country ? ` · ${discovery.country}` : ""}`,
@@ -319,7 +331,9 @@ export async function POST(request: Request) {
     needs_location: result.needsLocation,
     low_confidence: discovery.lowConfidence.map((l) => l.address),
     notes: discovery.notes,
-    summary: `${distinctRostered} distinct · ${result.added.length} new · ${result.linked} linked · ${alreadyPresent} already present${dupSuffix}${locSuffix}${partSuffix}`,
+    summary: singleLocation
+      ? `1 location · ${result.linked ? "linked existing" : result.added.length ? "new" : "already present"} · single venue`
+      : `${distinctRostered} distinct · ${result.added.length} new · ${result.linked} linked · ${alreadyPresent} already present${dupSuffix}${locSuffix}${partSuffix}`,
     seeded: result.added,
     cost: grokCostTotal,
   });
