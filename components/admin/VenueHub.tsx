@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Sparkles,
   PenLine,
@@ -29,6 +29,7 @@ import {
   Youtube,
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
+import { compareVenues, SORT_KEYS, type SortKey, type SortDir } from "@/lib/admin/venue-sort";
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 import { PinMap } from "@/components/admin/PinMap";
 import { HoursEditor } from "@/components/admin/HoursEditor";
@@ -258,7 +259,34 @@ export function VenueHub({
   const [attnF, setAttnF] = useState(Boolean(initialFilters?.attn)); // needs_attention
   const [closedF, setClosedF] = useState(Boolean(initialFilters?.closed)); // permanently_closed
   const [flagshipF, setFlagshipF] = useState(Boolean(initialFilters?.flagship)); // flagship_unset
-  const [oldestFirst, setOldestFirst] = useState(false);
+  // Column sort — default ENRICHED newest-first; initialised from the URL so a
+  // refresh keeps it (?sort=enriched&dir=desc). Sorts the WHOLE filtered set.
+  const searchParams = useSearchParams();
+  const [sortKey, setSortKey] = useState<SortKey>(() => {
+    const s = searchParams.get("sort");
+    return (s && (SORT_KEYS as string[]).includes(s) ? s : "enriched") as SortKey;
+  });
+  const [sortDir, setSortDir] = useState<SortDir>(() => {
+    const d = searchParams.get("dir");
+    return d === "asc" || d === "desc" ? d : "desc";
+  });
+  // First click on a column sorts ascending; clicking the active column flips it.
+  const setSort = (key: SortKey) => {
+    if (key === sortKey) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+  const sortCaret = (key: SortKey) => (sortKey === key ? (sortDir === "asc" ? "▲" : "▼") : "↕");
+  const SortBtn = ({ k, label }: { k: SortKey; label: string }) => (
+    <button
+      type="button"
+      onClick={() => setSort(k)}
+      className={`inline-flex items-center gap-1 ${sortKey === k ? "text-brand-gold" : "hover:text-brand-gold"}`}
+      title={`Sort by ${label}${sortKey === k ? ` (${sortDir})` : ""}`}
+    >
+      {label}
+      <span className={`text-[0.625rem] ${sortKey === k ? "" : "text-text-muted/50"}`}>{sortCaret(k)}</span>
+    </button>
+  );
   const [status, setStatus] = useState<Record<string, { state: RunState; msg?: string }>>({});
   const [running, setRunning] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -378,14 +406,9 @@ export function VenueHub({
       if (needle && !`${v.name} ${v.city ?? ""} ${v.country ?? ""}`.toLowerCase().includes(needle)) return false;
       return true;
     });
-    // Oldest-first by enrichment age (never-enriched = oldest). Chains still group
-    // under their parent (the group anchors at its oldest member's position).
-    if (oldestFirst) {
-      const rank = (v: HubVenue) => (v.enriched_at ? new Date(v.enriched_at).getTime() : 0);
-      list.sort((a, b) => rank(a) - rank(b));
-    }
+    // Sorting is applied at the UNIT level (below), so chain groups stay intact.
     return list;
-  }, [venues, q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF, oldestFirst]);
+  }, [venues, q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF]);
 
   // Group a chain's sibling seeds directly beneath their parent so a detected
   // chain reads as one block ("parent + its N seeds"), not scattered rows.
@@ -435,26 +458,44 @@ export function VenueHub({
     return out;
   }, [shown]);
 
+  // Sort the whole filtered set at the UNIT level (by each unit's top-level /
+  // flagship venue), so the order is correct across ALL pages — then paginate.
+  // Chain children stay grouped under their parent.
+  const sortedUnits = useMemo(() => {
+    return [...units].sort((ua, ub) => compareVenues(ua[0].v, ub[0].v, sortKey, sortDir));
+  }, [units, sortKey, sortDir]);
+
   // Client-side pagination — 50 top-level units per page. Search/filter/sort all
   // operate over the WHOLE catalogue above; only the rendered slice is capped, so
   // the DOM stays small as the catalogue grows.
   const PAGE_SIZE = 50;
-  // "Show all" escape hatch (Part 1 §6) — render every filtered unit on one page
-  // so a large chain (or the whole catalogue) is fully browsable without paging.
-  const effSize = showAll ? Math.max(units.length, 1) : PAGE_SIZE;
-  const pageCount = Math.max(1, Math.ceil(units.length / effSize));
+  // "Show all" escape hatch — render every filtered unit on one page so a large
+  // chain (or the whole catalogue) is fully browsable without paging.
+  const effSize = showAll ? Math.max(sortedUnits.length, 1) : PAGE_SIZE;
+  const pageCount = Math.max(1, Math.ceil(sortedUnits.length / effSize));
   const safePage = Math.min(Math.max(1, page), pageCount);
   // Snap back to page 1 whenever the filtered/sorted set changes, so you're never
   // stranded on an out-of-range page after narrowing the results.
   useEffect(() => {
     setPage(1);
-  }, [q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF, oldestFirst]);
+  }, [q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF, sortKey, sortDir]);
   // Clamp if the current page fell past the end (e.g. rows removed).
   useEffect(() => {
     if (page > pageCount) setPage(pageCount);
   }, [page, pageCount]);
+  // Reflect the active sort in the URL (so a refresh keeps it); default
+  // (enriched desc) drops the params for a clean URL. replaceState avoids a
+  // server round-trip / refetch.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (sortKey === "enriched" && sortDir === "desc") { params.delete("sort"); params.delete("dir"); }
+    else { params.set("sort", sortKey); params.set("dir", sortDir); }
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+  }, [sortKey, sortDir]);
 
-  const pageUnits = units.slice((safePage - 1) * effSize, safePage * effSize);
+  const pageUnits = sortedUnits.slice((safePage - 1) * effSize, safePage * effSize);
   const grouped = pageUnits.flat();
   const pageIds = grouped.map((r) => r.v.id);
   // Header select-all (Part 1 §6): reflects selection over the rendered rows,
@@ -473,7 +514,7 @@ export function VenueHub({
       else pageIds.forEach((id) => next.add(id));
       return next;
     });
-  const topLevelCount = units.length;
+  const topLevelCount = sortedUnits.length;
   const pageStart = topLevelCount === 0 ? 0 : (safePage - 1) * effSize + 1;
   const pageEnd = Math.min(safePage * effSize, topLevelCount);
 
@@ -1110,7 +1151,9 @@ export function VenueHub({
         <button type="button" onClick={() => setAttnF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${attnF ? "border-amber-500/60 bg-amber-500/10 text-amber-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Needs attention</button>
         <button type="button" onClick={() => setClosedF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${closedF ? "border-destructive/60 bg-destructive/10 text-destructive" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Closed</button>
         <button type="button" onClick={() => setFlagshipF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${flagshipF ? "border-amber-500/60 bg-amber-500/10 text-amber-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Flagship unset</button>
-        <button type="button" onClick={() => setOldestFirst((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${oldestFirst ? "border-brand-gold/60 bg-brand-gold/10 text-brand-gold" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`} title="Sort by enrichment age, oldest first">Oldest first</button>
+        {/* Country sort lives here rather than on a column header (the middle
+            column shows the photo state, not a country flag). Clicking toggles it. */}
+        <button type="button" onClick={() => setSort("country")} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${sortKey === "country" ? "border-brand-gold/60 bg-brand-gold/10 text-brand-gold" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`} title="Sort by country">Country {sortCaret("country")}</button>
         <span className="text-xs text-text-muted">
           {shown.length} match{shown.length === 1 ? "" : "es"}
           {pageCount > 1 && ` · showing ${pageStart}–${pageEnd} of ${topLevelCount}`}
@@ -1275,11 +1318,11 @@ export function VenueHub({
                   title="Select all on this page"
                 />
               </th>
-              <th className="sticky left-11 z-20 bg-surface-1 px-3 py-3 font-semibold">Venue</th>
-              <th className="px-3 py-3 font-semibold">Status</th>
-              <th className="px-3 py-3 font-semibold">📷</th>
-              <th className="px-3 py-3 font-semibold">IG</th>
-              <th className="px-3 py-3 font-semibold">Enriched</th>
+              <th className="sticky left-11 z-20 bg-surface-1 px-3 py-3 font-semibold"><SortBtn k="name" label="Venue" /></th>
+              <th className="px-3 py-3 font-semibold"><SortBtn k="status" label="Status" /></th>
+              <th className="px-3 py-3 font-semibold"><SortBtn k="photo" label="📷" /></th>
+              <th className="px-3 py-3 font-semibold"><SortBtn k="ig" label="IG" /></th>
+              <th className="px-3 py-3 font-semibold"><SortBtn k="enriched" label="Enriched" /></th>
               <th className="px-3 py-3 text-right font-semibold">Actions</th>
             </tr>
           </thead>
