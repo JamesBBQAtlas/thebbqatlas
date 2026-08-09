@@ -813,6 +813,43 @@ Return ONLY the JSON list of every branch.`;
   return { locations, citations, usage, model };
 }
 
+const SITE_SYSTEM = `You identify a business's OWN official website and canonical name. You are given a brand name and/or an Instagram handle and a city. Do ONE web search and return the brand's own primary website — the domain the business itself operates. REJECT aggregators, directories, review sites and social platforms (yelp.com, tripadvisor, facebook.com, instagram.com, doordash, ubereats, opentable, google maps, wikipedia). The website's domain or content must plausibly match the brand name/handle. Also return the brand's canonical, properly-capitalised name. If you cannot confidently identify the brand's OWN site, return null for website — never guess a domain. Respond ONLY with JSON: {"website":"https://…" or null, "canonical_name":"…" or null}.`;
+
+/**
+ * Chain discovery Step 0 — resolve the official website + canonical brand name
+ * from whatever the seed row has (name / instagram handle / city). This is the
+ * ONE place search is the right tool: it finds the SITE, not the location list
+ * (which the discovery engine then reads from the site's own pages). Writes
+ * nothing; never guesses a domain.
+ */
+export async function resolveChainSite(opts: {
+  name?: string | null;
+  handle?: string | null;
+  city?: string | null;
+  country?: string | null;
+}): Promise<{ website: string | null; canonical_name: string | null; usage: { in_tokens: number; out_tokens: number; searches: number }; model: string }> {
+  const bits = [
+    opts.name ? `Name: ${opts.name}` : null,
+    opts.handle ? `Instagram: @${String(opts.handle).replace(/^@/, "")}` : null,
+    opts.city ? `City: ${opts.city}` : null,
+    opts.country ? `Country: ${opts.country}` : null,
+  ].filter(Boolean).join("\n");
+  const { data, usage, model } = await grokJSON<{ website?: unknown; canonical_name?: unknown }>({
+    system: SITE_SYSTEM,
+    user: `${bits}\n\nReturn ONLY the JSON with the brand's own official website and canonical name.`,
+    maxSearchResults: 5,
+    maxSearches: 3,
+    xSearch: false,
+  });
+  let website = asStr(data.website);
+  if (website && !/^https?:\/\//i.test(website)) website = `https://${website}`;
+  // Guard: reject anything that resolved to a known aggregator/social domain.
+  if (website && /(yelp|tripadvisor|facebook|instagram|doordash|ubereats|opentable|google\.|wikipedia|grubhub|toasttab|linktr)/i.test(website)) {
+    website = null;
+  }
+  return { website, canonical_name: asStr(data.canonical_name), usage, model };
+}
+
 export interface VenueCopy {
   hook: string | null;
   description: string | null;

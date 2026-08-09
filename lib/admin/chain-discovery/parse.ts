@@ -1,0 +1,316 @@
+/**
+ * Chain-discovery parsers (Part 1, §2) — GENERAL, no per-chain logic. Each
+ * function takes raw HTML or already-fetched JSON and returns RawCandidate[].
+ * The engine tries them in order of reliability; whichever yields real street
+ * addresses wins. We parse the REAL DOM/JSON — never a readability/markdown
+ * extraction (which strips the locator markup and returns nothing).
+ */
+import * as cheerio from "cheerio";
+import type { RawCandidate } from "./normalize";
+
+const str = (v: unknown): string | null => {
+  if (typeof v === "string") return v.trim() || null;
+  if (typeof v === "number") return String(v);
+  return null;
+};
+
+// ── 1. schema.org JSON-LD (the cleanest generic signal) ─────────────────────
+const ADDRESS_TYPES = /(Restaurant|FoodEstablishment|LocalBusiness|BarOrPub|CafeOrCoffeeShop|Store|Organization|Place)/i;
+
+function fromPostalAddress(node: Record<string, unknown>, name: string | null, phone: string | null, sourceUrl: string | null): RawCandidate | null {
+  const addr = node.address;
+  if (!addr) return null;
+  if (typeof addr === "string") {
+    return { location_label: name, address: addr, phone, source_url: sourceUrl };
+  }
+  if (typeof addr === "object") {
+    const a = addr as Record<string, unknown>;
+    const country = a.addressCountry;
+    return {
+      location_label: name,
+      street: str(a.streetAddress),
+      city: str(a.addressLocality),
+      region: str(a.addressRegion),
+      postcode: str(a.postalCode),
+      country: typeof country === "object" ? str((country as Record<string, unknown>).name) : str(country),
+      phone: str(node.telephone) ?? phone,
+      source_url: sourceUrl,
+    };
+  }
+  return null;
+}
+
+function walkJsonLd(node: unknown, out: RawCandidate[], sourceUrl: string | null): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const n of node) walkJsonLd(n, out, sourceUrl);
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  if (obj["@graph"]) walkJsonLd(obj["@graph"], out, sourceUrl);
+  const type = obj["@type"];
+  const typeStr = Array.isArray(type) ? type.join(" ") : String(type ?? "");
+  if (obj.address && (ADDRESS_TYPES.test(typeStr) || !type)) {
+    const c = fromPostalAddress(obj, str(obj.name), str(obj.telephone), sourceUrl);
+    if (c) out.push(c);
+  }
+  // Recurse into common container props that may hold sub-locations.
+  for (const key of ["location", "hasPart", "subOrganization", "department", "makesOffer", "containsPlace", "itemListElement"]) {
+    if (obj[key]) walkJsonLd(obj[key], out, sourceUrl);
+  }
+}
+
+export function parseJsonLd(html: string, sourceUrl: string | null = null): RawCandidate[] {
+  const $ = cheerio.load(html);
+  const out: RawCandidate[] = [];
+  $('script[type="application/ld+json"]').each((_, el) => {
+    const raw = $(el).contents().text();
+    if (!raw.trim()) return;
+    try {
+      walkJsonLd(JSON.parse(raw), out, sourceUrl);
+    } catch {
+      /* malformed JSON-LD block — skip it */
+    }
+  });
+  return out;
+}
+
+// ── 2. Flat HTML locator (DOM heuristics) ───────────────────────────────────
+const POSTCODE_ANY = /\b([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|[A-Z]\d[A-Z]\s*\d[A-Z]\d|\d{5}(?:-\d{4})?|\d{4})\b/i;
+const US_CITY_STATE_ZIP = /^(.*?),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)$/;
+const PHONE = /(\+?\d[\d().\-\s]{7,}\d)/;
+
+/** Split a multi-line address block into {street, city, region, postcode}. */
+function splitBlock(text: string): RawCandidate | null {
+  const lines = text.split(/\n|<br\s*\/?>(?=)/i).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const joined = lines.join(", ");
+  if (!POSTCODE_ANY.test(joined)) return null;
+  const phone = joined.match(PHONE)?.[1] ?? null;
+  // US "City, ST 12345" on the last address line.
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const m = lines[i].match(US_CITY_STATE_ZIP);
+    if (m) {
+      const street = lines.slice(0, i).join(", ").replace(PHONE, "").trim() || null;
+      return { street, city: m[1].trim(), region: m[2].toUpperCase(), postcode: m[3], phone, address: joined };
+    }
+  }
+  // Otherwise return the whole thing as a one-line address and let normalise/geocode sort it.
+  return { address: joined.replace(PHONE, "").replace(/,\s*,/g, ",").trim(), phone };
+}
+
+export function parseFlatDom(html: string, sourceUrl: string | null = null): RawCandidate[] {
+  const $ = cheerio.load(html);
+  const out: RawCandidate[] = [];
+  const seen = new Set<string>();
+
+  const push = (c: RawCandidate | null) => {
+    if (!c) return;
+    const key = (c.address ?? `${c.street}|${c.city}`).toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ ...c, source_url: sourceUrl });
+  };
+
+  // (a) microdata PostalAddress blocks.
+  $('[itemtype*="PostalAddress"]').each((_, el) => {
+    const g = (prop: string) => $(el).find(`[itemprop="${prop}"]`).first().text().trim() || null;
+    const street = g("streetAddress");
+    if (street) {
+      push({
+        street,
+        city: g("addressLocality"),
+        region: g("addressRegion"),
+        postcode: g("postalCode"),
+        country: g("addressCountry"),
+      });
+    }
+  });
+
+  // (b) <address> elements.
+  $("address").each((_, el) => push(splitBlock($(el).html() ?? $(el).text())));
+
+  // (c) elements whose class/id hint at a store/location card.
+  if (out.length === 0) {
+    $('[class*="location" i],[class*="store" i],[class*="address" i],[id*="location" i]').each((_, el) => {
+      const html2 = $(el).html() ?? "";
+      // Only leaf-ish blocks (avoid the whole list container).
+      if ($(el).find('[class*="location" i],[class*="store" i]').length > 2) return;
+      push(splitBlock(html2.replace(/<[^>]+>/g, "\n")));
+    });
+  }
+  return out;
+}
+
+// ── 3. Generic store-locator JSON (provider-agnostic) ───────────────────────
+const ADDR_KEYS = ["address", "address1", "streetAddress", "street", "addr1", "line1"];
+const CITY_KEYS = ["city", "addressLocality", "locality", "town"];
+const REGION_KEYS = ["state", "region", "province", "addressRegion", "stateCode"];
+const ZIP_KEYS = ["zip", "postalCode", "postcode", "zipCode", "postal"];
+const COUNTRY_KEYS = ["country", "addressCountry", "countryCode"];
+const PHONE_KEYS = ["phone", "telephone", "phoneNumber"];
+const NAME_KEYS = ["name", "locationName", "storeName", "title", "label"];
+
+const pick = (o: Record<string, unknown>, keys: string[]): string | null => {
+  for (const k of keys) {
+    const hit = Object.keys(o).find((kk) => kk.toLowerCase() === k.toLowerCase());
+    if (hit && (typeof o[hit] === "string" || typeof o[hit] === "number")) return str(o[hit]);
+  }
+  return null;
+};
+
+/** Flatten a location object so nested `address`/`location`/`geo` sub-objects
+ *  are visible to `pick` alongside the top-level scalars (Yext-style payloads
+ *  nest the street under `address:{line1,...}`; others put it flat). */
+function flattenLoc(o: Record<string, unknown>): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const key of ["address", "location", "geo", "geocodedCoordinate"]) {
+    const hit = Object.keys(o).find((kk) => kk.toLowerCase() === key.toLowerCase());
+    const v = hit ? o[hit] : undefined;
+    if (v && typeof v === "object" && !Array.isArray(v)) Object.assign(merged, v);
+  }
+  // Top-level scalars overlay (keep name/phone; never clobber nested street).
+  for (const [k, v] of Object.entries(o)) {
+    if (typeof v === "string" || typeof v === "number") merged[k] = v;
+  }
+  return merged;
+}
+
+/** Recursively find the array of location objects in an arbitrary JSON payload. */
+function findLocationArray(node: unknown, depth = 0): Record<string, unknown>[] {
+  if (depth > 6 || !node || typeof node !== "object") return [];
+  if (Array.isArray(node)) {
+    const looksLikeLocations = node.filter((n) => {
+      if (!n || typeof n !== "object") return false;
+      const f = flattenLoc(n as Record<string, unknown>);
+      return Boolean(pick(f, ADDR_KEYS) || pick(f, CITY_KEYS));
+    });
+    if (looksLikeLocations.length >= 1 && looksLikeLocations.length === node.length) {
+      return node as Record<string, unknown>[];
+    }
+    let best: Record<string, unknown>[] = [];
+    for (const n of node) {
+      const r = findLocationArray(n, depth + 1);
+      if (r.length > best.length) best = r;
+    }
+    return best;
+  }
+  let best: Record<string, unknown>[] = [];
+  for (const v of Object.values(node as Record<string, unknown>)) {
+    const r = findLocationArray(v, depth + 1);
+    if (r.length > best.length) best = r;
+  }
+  return best;
+}
+
+export function parseLocatorJson(payload: unknown, sourceUrl: string | null = null): RawCandidate[] {
+  const arr = findLocationArray(payload);
+  return arr.map((raw) => {
+    const o = flattenLoc(raw);
+    return {
+      location_label: pick(o, NAME_KEYS),
+      street: pick(o, ADDR_KEYS),
+      city: pick(o, CITY_KEYS),
+      region: pick(o, REGION_KEYS),
+      postcode: pick(o, ZIP_KEYS),
+      country: pick(o, COUNTRY_KEYS),
+      phone: pick(o, PHONE_KEYS),
+      source_url: sourceUrl,
+    };
+  });
+}
+
+/** Extract candidates from JSON embedded in the page's own <script> tags —
+ *  `<script type="application/json">`, Next.js `__NEXT_DATA__`, or a
+ *  `window.X = {…}` / `= […]` assignment that carries the location array. */
+export function parseInlineJson(html: string, sourceUrl: string | null = null): RawCandidate[] {
+  const $ = cheerio.load(html);
+  const blobs: string[] = [];
+  $('script[type="application/json"], script#__NEXT_DATA__').each((_, el) => {
+    const t = $(el).contents().text().trim();
+    if (t) blobs.push(t);
+  });
+  $("script:not([type]), script[type='text/javascript']").each((_, el) => {
+    const t = $(el).contents().text();
+    const m = t.match(/[=:]\s*(\[[\s\S]{200,}\]|\{[\s\S]{200,}\})\s*[;,\n]/);
+    if (m) blobs.push(m[1]);
+  });
+  let best: RawCandidate[] = [];
+  for (const b of blobs) {
+    try {
+      const got = parseLocatorJson(JSON.parse(b), sourceUrl);
+      if (got.length > best.length) best = got;
+    } catch {
+      /* not valid JSON — skip */
+    }
+  }
+  return best;
+}
+
+// ── 4. Locator discovery + hierarchical links ───────────────────────────────
+const LOCATOR_HINTS = /(location|store|find|where|visit)/i;
+
+/** Absolute-ise an href against a base URL; null if it leaves the host. */
+function sameHostUrl(href: string, base: string): string | null {
+  try {
+    const u = new URL(href, base);
+    const b = new URL(base);
+    if (u.host !== b.host) return null;
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/** Find candidate locator-page URLs from a page's nav/footer links (§1). */
+export function findLocatorLinks(html: string, baseUrl: string): string[] {
+  const $ = cheerio.load(html);
+  const out = new Set<string>();
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    const label = $(el).text().trim();
+    if (!href) return;
+    if (LOCATOR_HINTS.test(href) || LOCATOR_HINTS.test(label)) {
+      const abs = sameHostUrl(href, baseUrl);
+      if (abs) out.add(abs);
+    }
+  });
+  return [...out];
+}
+
+/**
+ * Given a locator page, return the child links that sit UNDER the locator path
+ * (region/state/city/leaf gateways) — the signal that this is a hierarchical
+ * index rather than a flat list (§2.3). Excludes the page itself.
+ */
+export function findChildLocatorLinks(html: string, locatorUrl: string): string[] {
+  const $ = cheerio.load(html);
+  const out = new Set<string>();
+  let basePath: string;
+  try {
+    basePath = new URL(locatorUrl).pathname.replace(/\/+$/, "");
+  } catch {
+    return [];
+  }
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    const abs = sameHostUrl(href, locatorUrl);
+    if (!abs) return;
+    let path: string;
+    try {
+      path = new URL(abs).pathname.replace(/\/+$/, "");
+    } catch {
+      return;
+    }
+    if (path === basePath) return; // the page itself
+    if (path.startsWith(basePath + "/") && path.length > basePath.length + 1) out.add(abs);
+  });
+  return [...out];
+}
+
+/** True when a page's own markup already contains multiple street addresses —
+ *  i.e. it's a FLAT locator, not an index of gateway links. */
+export function looksFlat(candidates: RawCandidate[]): boolean {
+  const withStreet = candidates.filter((c) => (c.street ?? "").trim() || /\d/.test((c.address ?? "").split(",")[0] ?? ""));
+  return withStreet.length >= 2;
+}

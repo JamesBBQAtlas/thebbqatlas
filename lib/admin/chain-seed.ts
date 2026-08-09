@@ -1,16 +1,23 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { composeAddress, normStreet, normCity, settlementCity } from "@/lib/admin/address";
-import { canonicalCountry } from "@/lib/constants/countries";
+import { canonicalCountry, resolveCountryCode } from "@/lib/constants/countries";
 import { geocodeAddress } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
 import { auditField } from "@/lib/admin/content-audit";
 
-/** A location to seed: a branch label/name, optional street address, and city. */
+/** A location to seed: a branch label/name, optional street address, and city.
+ *  Chain-discovery v2 (Part 1) also passes the branch's own country and the
+ *  source URL it was read from, so the geocode write-guard can compare the
+ *  geocoded country to the declared one and every pin traces back to a page. */
 export interface SeedLocation {
   name: string | null;
   address?: string | null;
   city: string | null;
+  /** The branch's declared country (falls back to the chain-anchored country). */
+  country?: string | null;
+  /** The page this branch was read from (stored as provenance). */
+  source_url?: string | null;
 }
 
 export interface SeedResult {
@@ -154,6 +161,8 @@ export async function seedChainLocations(
     lng: number | null;
     country_code: string | null;
     geoCity: string | null;
+    /** A specific attention reason (e.g. cross-country mis-pin) if not located. */
+    attentionReason: string | null;
   }
   const candidates: Candidate[] = [];
   for (let i = 0; i < locations.length; i++) {
@@ -162,13 +171,26 @@ export async function seedChainLocations(
     let lng: number | null = null;
     let country_code: string | null = null;
     let geoCity: string | null = null;
+    let attentionReason: string | null = null;
     if (i > 0) await sleep(200); // light courtesy throttle
-    const geo = await geocodeAddress({ address: loc.address, city: loc.city, country, name: loc.name });
+    // Geocode with the BRANCH's declared country as context (falls back to the
+    // chain-anchored country), so a place name resolves in the right country.
+    const declaredCountry = canonicalCountry(loc.country ?? country);
+    const geo = await geocodeAddress({ address: loc.address, city: loc.city, country: declaredCountry || country, name: loc.name });
     if (geo && hasCoords(geo.lat, geo.lng)) {
-      lat = geo.lat;
-      lng = geo.lng;
-      country_code = geo.country_code;
-      geoCity = geo.city;
+      // Hard write-guard (§3.3): if the geocoded country ≠ the declared country,
+      // DO NOT store the pin — flag it. This kills the cross-country mis-pin bug
+      // (real overseas branches geocoded into random US states).
+      const declaredCode = declaredCountry ? resolveCountryCode(null, declaredCountry) : null;
+      const geoCode = geo.country_code ? geo.country_code.toUpperCase() : null;
+      if (declaredCode && geoCode && declaredCode !== geoCode) {
+        attentionReason = `Geocoded outside ${declaredCountry} (got ${geoCode}) — verify address / set pin`;
+      } else {
+        lat = geo.lat;
+        lng = geo.lng;
+        country_code = geo.country_code;
+        geoCity = geo.city;
+      }
     }
     // Street key from the branch's OWN address line only (not folded with the
     // city), so a city-only entry reads as "no distinct street".
@@ -185,6 +207,7 @@ export async function seedChainLocations(
       lng,
       country_code,
       geoCity,
+      attentionReason,
     });
   }
 
@@ -290,7 +313,8 @@ export async function seedChainLocations(
       lng: located ? c.lng : 0,
       address: composed,
       city: settle,
-      country: canonicalCountry(country),
+      // Per-branch declared country (falls back to the chain-anchored country).
+      country: canonicalCountry(loc.country ?? country),
       price_level: 2,
       hero_image_url: "",
       hero_source: "none",
@@ -299,11 +323,14 @@ export async function seedChainLocations(
       chain_parent_id: parentId,
     };
     if (located && c.country_code) insertRow.country_code = c.country_code;
+    // Provenance — every pin traces back to the page it was read from (§3.4).
+    if (loc.source_url) insertRow.enrichment_sources = [loc.source_url];
     if (!located) {
       // Fix B — never silently pin a new seed at (0,0). Flag it so the operator
-      // fixes the address / drops a manual pin before it can go live.
+      // fixes the address / drops a manual pin before it can go live. The reason
+      // is specific when the geocode write-guard rejected a cross-country pin.
       insertRow.needs_attention = true;
-      insertRow.attention_reason = "Couldn't locate — check address / set pin manually";
+      insertRow.attention_reason = c.attentionReason ?? "Couldn't locate — check address / set pin manually";
     }
     const { data: inserted, error } = await db
       .from("restaurants")
