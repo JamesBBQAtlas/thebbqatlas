@@ -129,13 +129,23 @@ export function parseFlatDom(html: string, sourceUrl: string | null = null): Raw
   // (b) <address> elements.
   $("address").each((_, el) => push(splitBlock($(el).html() ?? $(el).text())));
 
-  // (c) elements whose class/id hint at a store/location card.
+  // (c) elements whose class/id hint at a store/location card. These are the
+  // messiest source — a "location" card often bundles hours, nav labels, "GET
+  // DIRECTIONS", marketing text around the address. So instead of dumping the
+  // whole block into the address field (the FAIL-3 blob), pull the CLEAN street/
+  // city/state/zip out of the block's visible text by pattern. Fall back to
+  // splitBlock only for a short, address-shaped block with no clean hit.
   if (out.length === 0) {
     $('[class*="location" i],[class*="store" i],[class*="address" i],[id*="location" i]').each((_, el) => {
-      const html2 = $(el).html() ?? "";
       // Only leaf-ish blocks (avoid the whole list container).
       if ($(el).find('[class*="location" i],[class*="store" i]').length > 2) return;
-      push(splitBlock(html2.replace(/<[^>]+>/g, "\n")));
+      const text = ($(el).text() ?? "").replace(/\s+/g, " ").trim();
+      const clean = extractAddressesFromText(text, sourceUrl);
+      if (clean.length) {
+        for (const c of clean) push(c);
+      } else if (text.length <= 120) {
+        push(splitBlock(($(el).html() ?? "").replace(/<[^>]+>/g, "\n")));
+      }
     });
   }
   return out;
@@ -314,6 +324,55 @@ export function visibleText(html: string): string {
 /** Extract addresses straight from an HTML page's visible text (Part 4A). */
 export function parseVisibleText(html: string, sourceUrl: string | null = null): RawCandidate[] {
   return extractAddressesFromText(visibleText(html), sourceUrl);
+}
+
+// Words that mark a candidate's address as a SCRAPED BLOB (hours / nav / marketing
+// dumped in with the street) rather than a clean address line.
+const ADDRESS_NOISE =
+  /\b(hours?|mon(day)?|tue(sday)?|wed(nesday)?|thu(rsday)?|fri(day)?|sat(urday)?|sun(day)?|\d{1,2}\s?(am|pm)\b|get directions|directions|menu|order|live music|catering|call us|closed|open|book|reserve|gift card)\b/i;
+
+/**
+ * Clean the address on every candidate (fix the FAIL-3 blob). A card scraped from
+ * the DOM often carries hours/nav/marketing text around the street — if a
+ * candidate's address looks like a blob (long, or contains hours/nav words), we
+ * re-extract the CLEAN "street, city, ST zip" from its text by pattern. A single
+ * blob that contains TWO addresses is split into two candidates (this is how a
+ * second branch buried in a homepage block gets recovered). Clean structured
+ * candidates pass through untouched. This runs BEFORE the street-address gate and
+ * dedupe, so both see clean data.
+ */
+export function refineCandidates(cands: RawCandidate[]): RawCandidate[] {
+  const out: RawCandidate[] = [];
+  for (const c of cands) {
+    const line = (c.address ?? "").trim();
+    const structuredClean =
+      (c.street ?? "").trim() &&
+      ((c.postcode ?? "").trim() || (c.city ?? "").trim()) &&
+      !ADDRESS_NOISE.test(`${c.street} ${c.city ?? ""}`);
+    const messy = line.length > 90 || ADDRESS_NOISE.test(line);
+    if (structuredClean && !messy) {
+      out.push(c);
+      continue;
+    }
+    const text = [c.location_label, c.street, c.address, c.city, c.region, c.postcode]
+      .filter(Boolean)
+      .join(" ");
+    const clean = extractAddressesFromText(text, c.source_url ?? null);
+    if (clean.length) {
+      for (const cl of clean) {
+        out.push({
+          ...cl,
+          location_label: cl.location_label ?? c.location_label ?? null,
+          phone: c.phone ?? cl.phone ?? null,
+        });
+      }
+    } else {
+      // Nothing cleaner found — keep the original (the street-address gate will
+      // decide whether it's real enough to seed).
+      out.push(c);
+    }
+  }
+  return out;
 }
 
 // ── 4. Locator discovery + hierarchical links ───────────────────────────────

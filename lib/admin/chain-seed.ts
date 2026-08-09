@@ -37,6 +37,27 @@ export interface SeedResult {
   /** New rows inserted flagged as a POSSIBLE duplicate of an existing record
    *  (uncertain same-city/same-brand match) — never a silent twin (Part 4C). */
   possibleDuplicates: number;
+  /** Per-incoming-location decision log, for the parent's discovery_debug so the
+   *  roster "shows its working" (Part 4B/FAIL 5): what happened to each address. */
+  decisions: { address: string; decision: string; reason?: string }[];
+}
+
+/** A distinctive lowercase token from a brand name, for FUZZY matching existing
+ *  records whose name is a variant ("Thatcher Barbecue Company" vs "Thatcher BBQ
+ *  Company"). Drops the generic BBQ/company words and keeps the longest word. */
+export function brandToken(brand: string): string {
+  const STOP = new Set([
+    "bbq", "barbecue", "barbeque", "barbq", "bar", "b", "que", "q", "co", "company",
+    "inc", "llc", "ltd", "the", "and", "grill", "grille", "smokehouse", "smoke",
+    "house", "restaurant", "kitchen", "pit", "pits", "joint", "brothers", "bros",
+  ]);
+  const words = brand
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((w) => !STOP.has(w));
+  return words.sort((a, b) => b.length - a.length)[0] ?? "";
 }
 
 interface ExistingRow {
@@ -131,8 +152,10 @@ export async function seedChainLocations(
   locations: SeedLocation[]
 ): Promise<SeedResult> {
   const found = locations.length;
-  const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0 };
+  const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0, decisions: [] };
   if (!found) return result;
+  const note = (address: string, decision: string, reason?: string) =>
+    result.decisions.push({ address, decision, ...(reason ? { reason } : {}) });
 
   const { data: parentRow } = await db
     .from("restaurants")
@@ -149,17 +172,21 @@ export async function seedChainLocations(
     .select("id, address, city, location_label, lat, lng")
     .eq("chain_parent_id", parentId);
 
-  // Part 4C — also load STANDALONE rows carrying this brand name that are NOT yet
-  // members of any chain (chain_parent_id IS NULL, excluding the parent itself).
-  // These are the "operator manually added a branch" records: a confident match
-  // must LINK them into the chain, never create a second copy (the duplicate
-  // Trophy Club bug). Rows already parented under a DIFFERENT chain are left alone.
-  const { data: brandRows } = await db
-    .from("restaurants")
-    .select("id, address, city, location_label, lat, lng, style, chain_parent_id")
-    .eq("name", brand)
-    .is("chain_parent_id", null)
-    .neq("id", parentId);
+  // Part 4C (FAIL 1 fix) — also load STANDALONE rows that are likely the same
+  // brand, matched FUZZILY by a distinctive brand token, not an exact name. The
+  // duplicate Thatcher bug was an exact-name query missing "Thatcher BBQ Company"
+  // when the parent brand had resolved to "Thatcher Barbecue Company". A confident
+  // address/geo match against one of these LINKS it in rather than duplicating.
+  // (Proximity-based candidates are added after geocoding, below.)
+  const token = brandToken(brand);
+  const { data: brandRows } = token.length >= 3
+    ? await db
+        .from("restaurants")
+        .select("id, address, city, location_label, lat, lng, style, chain_parent_id")
+        .ilike("name", `%${token}%`)
+        .is("chain_parent_id", null)
+        .neq("id", parentId)
+    : { data: [] as Record<string, unknown>[] };
 
   const existing: ExistingRow[] = [
     ...(parentRow ? [{ ...(parentRow as Omit<ExistingRow, "isParent">), isParent: true }] : []),
@@ -241,6 +268,32 @@ export async function seedChainLocations(
     });
   }
 
+  // Part 4C (FAIL 1 fix) — geo-proximity load. Any existing standalone record
+  // sitting within ~400m of a candidate's pin is a link candidate regardless of
+  // its NAME (catches an identical address whose name doesn't share the brand
+  // token). One bounding-box query over all candidate pins, then linked in below.
+  const pins = candidates
+    .filter((c) => hasCoords(c.lat, c.lng))
+    .map((c) => ({ lat: c.lat as number, lng: c.lng as number }));
+  if (pins.length) {
+    const pad = 0.004; // ≈ 400m
+    const minLat = Math.min(...pins.map((p) => p.lat)) - pad;
+    const maxLat = Math.max(...pins.map((p) => p.lat)) + pad;
+    const minLng = Math.min(...pins.map((p) => p.lng)) - pad;
+    const maxLng = Math.max(...pins.map((p) => p.lng)) + pad;
+    const { data: nearRows } = await db
+      .from("restaurants")
+      .select("id, address, city, location_label, lat, lng, style, chain_parent_id")
+      .gte("lat", minLat).lte("lat", maxLat)
+      .gte("lng", minLng).lte("lng", maxLng)
+      .is("chain_parent_id", null)
+      .neq("id", parentId);
+    for (const r of (nearRows ?? []) as (Omit<ExistingRow, "isParent" | "linkable"> & { chain_parent_id: string | null })[]) {
+      if (existing.some((e) => e.id === r.id)) continue;
+      existing.push({ id: r.id, address: r.address, city: r.city, location_label: r.location_label, lat: r.lat, lng: r.lng, style: r.style, isParent: false, linkable: true });
+    }
+  }
+
   const matches = (c: Candidate, e: ExistingRow): boolean => {
     const eStreetKey = normStreet(e.address);
     const eCityKey = cityKeyOf(e.city);
@@ -293,8 +346,8 @@ export async function seedChainLocations(
         return false;
       });
       if (dup) {
-        if (dup.isParent) result.matchedParent += 1;
-        else result.updated.push({ label, city: settlementCity(loc.city) || loc.city });
+        if (dup.isParent) { result.matchedParent += 1; note(loc.address ?? loc.city ?? label, "matched_parent", "city-only placeholder matched the parent"); }
+        else { result.updated.push({ label, city: settlementCity(loc.city) || loc.city }); note(loc.address ?? loc.city ?? label, "merged_placeholder", "city-only placeholder collapsed into an existing member"); }
         continue; // never materialise a duplicate placeholder
       }
     }
@@ -305,6 +358,7 @@ export async function seedChainLocations(
       consumed.add(match.id);
       if (match.isParent) {
         result.matchedParent += 1; // the parent's own location — never a sibling
+        note(loc.address ?? label, "matched_parent", "this location IS the parent's own venue");
         continue;
       }
       if (match.linkable) {
@@ -328,6 +382,7 @@ export async function seedChainLocations(
           { source: "roster", changedBy: null, note: "linked existing branch into chain (dedupe, not duplicated)" });
         match.linkable = false; // it's a member now
         result.linked += 1;
+        note(composedL || (loc.address ?? label), "linked", "matched an existing record — linked into the chain, not duplicated");
         continue;
       }
       // Update the existing sibling in place — fill a fuller address / city, and
@@ -347,6 +402,7 @@ export async function seedChainLocations(
       }
       if (Object.keys(patch).length) await db.from("restaurants").update(patch).eq("id", match.id);
       result.updated.push({ label, city: settle || loc.city });
+      note(composed || (loc.address ?? label), "updated", "matched an existing branch — updated in place");
       continue;
     }
 
@@ -378,8 +434,11 @@ export async function seedChainLocations(
       description: `${brand} — barbecue${settle ? ` in ${settle}` : ""}.`,
       // Inherit the flagship's cuisine (never the "other" default).
       style: branchStyle,
-      lat: located ? c.lat : 0,
-      lng: located ? c.lng : 0,
+      // FAIL 4 — an un-located seed gets a NULL pin (never 0,0 "null island"). The
+      // publish guard + map both treat null and 0,0 alike as "no pin", and it's
+      // flagged needs_attention below.
+      lat: located ? c.lat : null,
+      lng: located ? c.lng : null,
       address: composed,
       city: settle,
       // Per-branch declared country (falls back to the chain-anchored country).
@@ -404,12 +463,19 @@ export async function seedChainLocations(
         insertRow.attention_reason ?? `Possible duplicate of an existing ${brand} record in ${settle || "this city"} — merge or dismiss.`;
     }
     if (!located) {
-      // Fix B — never silently pin a new seed at (0,0). Flag it so the operator
-      // fixes the address / drops a manual pin before it can go live. The reason
-      // is specific when the geocode write-guard rejected a cross-country pin.
+      // Fix B — never silently pin a new seed. Flag it so the operator fixes the
+      // address / drops a manual pin before it can go live. The reason is specific
+      // when the geocode write-guard rejected a cross-country / town-level pin.
       insertRow.needs_attention = true;
       insertRow.attention_reason = c.attentionReason ?? insertRow.attention_reason ?? "Couldn't locate — check address / set pin manually";
     }
+    note(
+      composed || (loc.address ?? label),
+      possibleDupOf ? "inserted_possible_duplicate" : "inserted",
+      possibleDupOf
+        ? "no confident match, but a same-brand record exists in this city — flagged possible duplicate"
+        : located ? "new distinct branch" : "new branch, but no precise pin — flagged for a manual pin"
+    );
     const { data: inserted, error } = await db
       .from("restaurants")
       .insert(insertRow)
@@ -422,8 +488,8 @@ export async function seedChainLocations(
         address: composed,
         city: settle || null,
         location_label: label,
-        lat: located ? c.lat : 0,
-        lng: located ? c.lng : 0,
+        lat: located ? c.lat : null,
+        lng: located ? c.lng : null,
         isParent: false,
       });
       consumed.add(inserted.id as string);

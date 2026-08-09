@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "restaurantId required." }, { status: 400 });
   }
 
-  const cols = "id, name, city, status, style, chain_parent_id, " + SOCIAL_COLS.join(", ");
+  const cols = "id, name, city, status, style, chain_parent_id, dossier, " + SOCIAL_COLS.join(", ");
 
   const { data: chosen, error: loadErr } = await ctx.db
     .from("restaurants")
@@ -94,7 +94,10 @@ export async function POST(request: Request) {
   // adopts it (a chain is one brand = one style).
   const flagshipStyle = chosenRow.style && chosenRow.style !== "other" ? chosenRow.style : null;
 
-  // Chosen becomes the CONFIRMED flagship parent.
+  // Chosen becomes the CONFIRMED flagship parent. Carry is_chain onto its dossier
+  // so the "Discover locations" affordance sits on the NEW flagship/parent, not
+  // the old one (which is now a child) — the minor affordance-alignment note.
+  const chosenDossier = ((chosen as { dossier?: Record<string, unknown> | null }).dossier ?? {}) as Record<string, unknown>;
   await ctx.db
     .from("restaurants")
     .update({
@@ -102,6 +105,7 @@ export async function POST(request: Request) {
       chain_rostered_at: nowIso,
       flagship_unset: false,
       chain_candidate: false,
+      dossier: { ...chosenDossier, is_chain: true },
     })
     .eq("id", chosenRow.id);
 
@@ -112,6 +116,9 @@ export async function POST(request: Request) {
     const patch: Record<string, unknown> = {
       chain_parent_id: chosenRow.id,
       flagship_unset: false,
+      // Demote the old parent (and every sibling) off the chain affordance — the
+      // "Discover locations" button now belongs only to the new flagship parent.
+      chain_candidate: false,
       needs_attention: false,
       attention_reason: null,
     };

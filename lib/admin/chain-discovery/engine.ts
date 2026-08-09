@@ -23,6 +23,7 @@ import {
   parseInlineJson,
   parseFlatDom,
   parseVisibleText,
+  refineCandidates,
   findLocatorLinks,
   findChildLocatorLinks,
   looksFlat,
@@ -226,7 +227,12 @@ export async function discoverChain(opts: {
     notes.push("No structured locator — addresses read from the site's visible text.");
   }
 
-  // Every raw address string we saw, for the loud-on-failure report (Part 4B).
+  // Clean every candidate (strip hours/nav/marketing blobs to a real street
+  // address; split a two-address blob into two) BEFORE anchoring/filtering/dedupe.
+  const refined = refineCandidates(all);
+
+  // Every raw address string we saw, for the loud-on-failure report (Part 4B) —
+  // captured from the RAW candidates so the debug shows exactly what was scraped.
   const rawAddresses = [
     ...new Set(
       all
@@ -236,18 +242,22 @@ export async function discoverChain(opts: {
     ),
   ];
 
-  // Anchor the country from the chain (TLD → addresses). Never default to US.
-  const country = anchorCountry(host, rawAddresses) ?? (opts.country ?? null);
+  // Anchor the country from the chain (TLD → CLEANED addresses). Never default US.
+  const cleanAddrStrings = refined
+    .map((c) => c.address ?? [c.street, c.city, c.region, c.postcode].filter(Boolean).join(", "))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const country = anchorCountry(host, cleanAddrStrings) ?? (opts.country ?? null);
   if (!country) notes.push("Could not anchor a country from the site or addresses — branches flagged for review.");
 
   // Normalise → filter (no invented branches; skip coming-soon/closed) → classify
-  // HQ/shipping OUT of the roster → dedupe.
+  // HQ/shipping OUT of the roster → dedupe. Iterates the CLEANED candidates.
   const seen = new Set<string>();
   const out: NormalLocation[] = [];
   const lowConfidence: (NormalLocation & { reason: string })[] = [];
   let skippedNoStreet = 0;
   let skippedNotOpen = 0;
-  for (const c of all) {
+  for (const c of refined) {
     if (isNotOpen(c)) { skippedNotOpen++; continue; }
     if (!hasStreetAddress(c)) { skippedNoStreet++; continue; }
     const n = normalize(c, country);

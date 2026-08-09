@@ -8,6 +8,7 @@ import { auditField } from "@/lib/admin/content-audit";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
 import { discoverChain } from "@/lib/admin/chain-discovery/engine";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
+import { hasStreetAddress } from "@/lib/admin/chain-discovery/normalize";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { normCity } from "@/lib/admin/address";
 import { canonicalCountry } from "@/lib/constants/countries";
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
 
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
-    .select("id, name, slug, status, country, city, website, instagram_handle, dossier, enrichment_cost, chain_parent_id")
+    .select("id, name, slug, status, country, city, address, lat, lng, website, instagram_handle, dossier, enrichment_cost, chain_parent_id")
     .eq("id", restaurantId)
     .single();
   if (loadErr || !row) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
@@ -107,6 +108,15 @@ export async function POST(request: Request) {
   if (brand && brand !== row.name) parentPatch.name = brand;
   if (row.status !== "approved" && brand && brand !== row.name) {
     parentPatch.slug = await uniqueRestaurantSlug(ctx.db, brand);
+  }
+  // FAIL 4 — an address-less brand/parent must NOT carry a centroid pin (the
+  // "pinned to the geographic centre of the USA" bug). If the parent has no street
+  // address, clear any pin to NULL so it's treated as "no pin", not planted at a
+  // country/city centre. A parent with a real address keeps its pin.
+  const parentHasStreet = hasStreetAddress({ address: (row.address as string | null) ?? null });
+  if (!parentHasStreet) {
+    parentPatch.lat = null;
+    parentPatch.lng = null;
   }
   await ctx.db.from("restaurants").update(parentPatch).eq("id", restaurantId);
 
@@ -221,6 +231,11 @@ export async function POST(request: Request) {
     else suggestedFlagship = { label: fl.location_label, city: fl.city, reason: flagshipPick.reason };
   }
 
+  // Truthful, DISTINCT counts (FAIL 2): a duplicate is now LINKED, not counted as
+  // "new"; the real roster size is new + linked + updated-in-place + the parent.
+  const alreadyPresent = result.updated.length + result.matchedParent;
+  const distinctRostered = result.added.length + result.linked + alreadyPresent;
+
   const nowIso = new Date().toISOString();
   await ctx.db.from("restaurants").update({
     enrichment_cost: round4(priorCost + grokCostTotal),
@@ -240,17 +255,37 @@ export async function POST(request: Request) {
         : suggestedFlagship
           ? { scope: "branch", ...suggestedFlagship }
           : null,
+      // FAIL 5 — persist the working on EVERY run (not just failures): the pages
+      // crawled, every raw address seen, the per-address dedupe decision, the
+      // HQ/shipping addresses held back, and the counts. This is what makes the
+      // roster auditable ("shows its working") from the parent record.
+      discovery_debug: {
+        crawled_urls: discovery.crawledUrls.slice(0, 40),
+        raw_addresses: discovery.rawAddresses.slice(0, 40),
+        decisions: result.decisions.slice(0, 60),
+        low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
+        counts: {
+          distinct: distinctRostered,
+          added: result.added.length,
+          linked: result.linked,
+          updated: result.updated.length,
+          matched_parent: result.matchedParent,
+          possible_duplicates: result.possibleDuplicates,
+          need_pin: result.needsLocation,
+        },
+        notes: discovery.notes,
+        partial: discovery.partial,
+        at: nowIso,
+      },
     },
   }).eq("id", restaurantId);
   await ctx.db.from("restaurants").update({ flagship_unset: !flagshipCrowned }).eq("chain_parent_id", restaurantId);
 
   await auditField(ctx.db, restaurantId, "chain", null,
-    { rostered: true, added: result.added.length, found: result.found, source: discovery.sourceType },
+    { rostered: true, added: result.added.length, linked: result.linked, distinct: distinctRostered, source: discovery.sourceType },
     { source: "roster", changedBy: ctx.userId, note: `roster built via ${discovery.sourceType}` });
 
   revalidateVenues();
-
-  const alreadyPresent = result.updated.length + result.matchedParent;
   const sourceLabel =
     discovery.sourceType === "hierarchical" ? `by crawling ${discovery.pagesFetched} pages`
     : discovery.sourceType === "jsonapi" ? "from the store-locator API"
@@ -260,7 +295,6 @@ export async function POST(request: Request) {
   const locSuffix = result.needsLocation ? ` · ${result.needsLocation} need a pin` : "";
   const partSuffix = discovery.partial ? " · PARTIAL (re-run to continue)" : "";
   const dupSuffix = result.possibleDuplicates ? ` · ${result.possibleDuplicates} possible duplicate${result.possibleDuplicates === 1 ? "" : "s"} flagged` : "";
-  const linkSuffix = result.linked ? ` · ${result.linked} existing linked` : "";
 
   return NextResponse.json({
     ok: true,
@@ -270,11 +304,14 @@ export async function POST(request: Request) {
     flagship_crowned: flagshipCrowned,
     suggested_flagship: suggestedFlagship,
     source_type: discovery.sourceType,
-    source_note: `Found ${result.found} ${sourceLabel}${discovery.country ? ` · ${discovery.country}` : ""}`,
+    source_note: `${distinctRostered} distinct location${distinctRostered === 1 ? "" : "s"} ${sourceLabel}${discovery.country ? ` · ${discovery.country}` : ""}`,
     locator_url: discovery.locatorUrl,
     country: discovery.country,
     partial: discovery.partial,
-    found: result.found,
+    // `found` now reports DISTINCT locations after dedupe (FAIL 2) — not the raw
+    // scraped count, and a duplicate is never counted as "new".
+    found: distinctRostered,
+    scraped: result.found,
     added: result.added.length,
     linked: result.linked,
     possible_duplicates: result.possibleDuplicates,
@@ -282,7 +319,7 @@ export async function POST(request: Request) {
     needs_location: result.needsLocation,
     low_confidence: discovery.lowConfidence.map((l) => l.address),
     notes: discovery.notes,
-    summary: `${result.found} found · ${result.added.length} new · ${alreadyPresent} already present${linkSuffix}${dupSuffix}${locSuffix}${partSuffix}`,
+    summary: `${distinctRostered} distinct · ${result.added.length} new · ${result.linked} linked · ${alreadyPresent} already present${dupSuffix}${locSuffix}${partSuffix}`,
     seeded: result.added,
     cost: grokCostTotal,
   });

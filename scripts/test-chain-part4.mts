@@ -8,11 +8,13 @@
 import {
   extractAddressesFromText,
   findLocatorLinks,
+  refineCandidates,
 } from "../lib/admin/chain-discovery/parse";
 import {
   classifyAddressType,
   identifyFlagship,
 } from "../lib/admin/chain-discovery/classify";
+import { brandToken } from "../lib/admin/chain-seed";
 
 let pass = 0;
 let fail = 0;
@@ -98,6 +100,36 @@ console.log("\n[4D — flagship identification]");
     { location_label: "East (since 2003)", street: "6 E St", city: "Y", address: "6 E St, Y" },
   ]);
   ok("earliest year (2003) wins", byYear?.index === 1);
+}
+
+console.log("\n[FAIL-3 fix — clean a scraped address blob]");
+{
+  const blob =
+    "BBQ in Red River Gorge, Thatcher Barbecue Co., 918 Natural Bridge Rd., Slade, KY 40376, (, Hours, Thursday 11am-8pm, Friday-Saturday 11am-9pm, Sunday 11am-8pm, GET DIRECTIONS, LIVE MUSIC IN RRG, Pit House, 918 Natural Bridge Rd.";
+  const refined = refineCandidates([{ address: blob, source_url: "u" }]);
+  ok("blob → exactly one clean address", refined.length === 1);
+  ok("clean address is street/city/state/zip only",
+    refined[0].address === "918 Natural Bridge Rd., Slade, KY 40376");
+  ok("hours/nav/marketing stripped", !/Hours|DIRECTIONS|LIVE MUSIC/i.test(refined[0].address ?? ""));
+}
+
+console.log("\n[FAIL-2 fix — two branches in one block are split out]");
+{
+  const twoInOne =
+    "Visit us! Red River Gorge: 918 Natural Bridge Rd, Slade, KY 40376. Jackson: 1250 Main St, Jackson, KY 41339. Hours vary.";
+  const refined = refineCandidates([{ address: twoInOne, source_url: "u" }]);
+  ok("recovers BOTH addresses from one block", refined.length === 2);
+  ok("includes the Slade branch", refined.some((c) => /Slade/.test(c.address ?? "")));
+  ok("includes the Jackson branch (the one that was missed)", refined.some((c) => /Jackson/.test(c.address ?? "")));
+}
+
+console.log("\n[FAIL-1 fix — fuzzy brand token for dedupe]");
+{
+  ok("'Thatcher Barbecue Company' → thatcher", brandToken("Thatcher Barbecue Company") === "thatcher");
+  ok("'Thatcher BBQ Company' → thatcher (same token)", brandToken("Thatcher BBQ Company") === "thatcher");
+  ok("the two brand variants share a token", brandToken("Thatcher Barbecue Company") === brandToken("Thatcher BBQ Company"));
+  ok("keeps the distinctive word past generic ones", brandToken("Franklin Barbecue") === "franklin");
+  ok("an all-generic name yields no token (proximity covers it)", brandToken("The Smokehouse BBQ Co") === "");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

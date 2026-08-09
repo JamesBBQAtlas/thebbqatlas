@@ -7,6 +7,7 @@
 import {
   classifyPrecision,
   resolveGeocode,
+  isTooCoarse,
   type GeoResult,
 } from "../lib/geo/geocode";
 
@@ -84,6 +85,25 @@ await (async () => {
   // Nothing resolves at all.
   const { result, coarse } = await resolveGeocode(["a", "b"], async () => null);
   ok("all-miss returns null result and null coarse", result === null && coarse === null);
+})();
+
+console.log("\n[isTooCoarse — never pin a country/region centroid (FAIL 4)]");
+ok("country is too coarse", isTooCoarse("country") === true);
+ok("region is too coarse", isTooCoarse("region") === true);
+ok("postal_code is too coarse", isTooCoarse("postal_code") === true);
+ok("place (town) is NOT too coarse (legacy-acceptable)", isTooCoarse("place") === false);
+ok("address is NOT too coarse", isTooCoarse("address") === false);
+
+await (async () => {
+  // The address-less-parent bug: the only hit is a country centroid — it must be
+  // dropped entirely, never returned even as a legacy coarse pin.
+  const runs: Record<string, GeoResult | null> = {
+    "Thatcher Barbecue Company, United States": hit("country", 39.78, -100.44),
+  };
+  const q = Object.keys(runs);
+  const { result, coarse } = await resolveGeocode(q, async (x) => runs[x] ?? null);
+  ok("US-centroid country hit is dropped (no result)", result === null);
+  ok("US-centroid country hit is NOT kept as coarse", coarse === null);
 })();
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

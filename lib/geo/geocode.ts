@@ -55,6 +55,23 @@ export interface GeoResult {
  */
 const PRECISE_PLACE_TYPES = new Set(["poi", "address", "street"]);
 
+/**
+ * VERY coarse granularities that must NEVER be planted as a venue pin, not even
+ * in the legacy accept-coarse path — a country / region / continent / postcode
+ * centroid is meaningless as a location (this is the "address-less parent pinned
+ * to the geographic centre of the USA" bug, FAIL 4). Town/place/locality-level
+ * remains a legacy-acceptable coarse hit; anything coarser than a town is dropped.
+ */
+const TOO_COARSE_PLACE_TYPES = new Set([
+  "country",
+  "region",
+  "state",
+  "province",
+  "continent",
+  "postal_code",
+  "postcode",
+]);
+
 /** Classify a hit's granularity from its MapTiler `place_type` array. */
 export function classifyPrecision(pt?: string[] | null): {
   place_type: string | null;
@@ -168,6 +185,10 @@ function buildQueries(parts: {
  * hit; if none of the queries produce a street/POI-level result it returns the
  * best coarse (centroid) hit it saw so the caller can decide what to do with it.
  */
+export function isTooCoarse(place_type: string | null): boolean {
+  return place_type != null && TOO_COARSE_PLACE_TYPES.has(place_type);
+}
+
 export async function resolveGeocode(
   queries: string[],
   run: (q: string) => Promise<GeoResult | null>
@@ -176,6 +197,9 @@ export async function resolveGeocode(
   for (const q of queries) {
     const hit = await run(q);
     if (!hit) continue;
+    // A country/region/postcode centroid is never a usable venue pin — drop it
+    // entirely, even for legacy callers (FAIL 4: no more US-centre pins).
+    if (isTooCoarse(hit.place_type)) continue;
     if (hit.precise) return { result: hit, coarse: null };
     if (!firstCoarse) firstCoarse = hit;
   }
