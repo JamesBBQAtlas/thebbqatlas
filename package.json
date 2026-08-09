@@ -11,6 +11,7 @@
     "audit:grants": "node scripts/audit-write-grants.mjs",
     "audit:affiliate": "tsx scripts/audit-affiliate.mts",
     "test:chain": "tsx scripts/test-chain-discovery.mts",
+    "test:sort": "tsx scripts/test-venue-sort.mts",
     "prepare": "husky"
   },
   "dependencies": {
