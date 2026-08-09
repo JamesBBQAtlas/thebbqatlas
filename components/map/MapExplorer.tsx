@@ -72,6 +72,14 @@ const SHARK_SVG =
   '<path fill="#ffffff" d="M2.4 11.6 L3.4 12.5 L2.5 13.2 Z M3.8 11.1 L4.7 12.2 L3.7 12.6 Z M3.7 13.9 L4.4 12.7 L5.1 13.7 Z M5.1 11.1 L5.7 12.2 L4.9 12.5 Z"/>' +
   '<circle cx="9.2" cy="10" r="0.95" fill="#0B1B2E"/>' +
   "</svg>";
+// GrillZilla — our own colossal-lizard glyph: a hunched, spiky-backed beast
+// with a heavy tail and a single ember eye. Entirely original art — no film
+// creature, likeness or silhouette is referenced.
+const GRILLZILLA_SVG =
+  '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+  '<path d="M6 21 L6 15.4 C4.7 14.9 4 13.6 4.2 12.2 L2.6 12.7 L3.8 11 L2.8 9.7 L4.6 9.9 C5 6.9 6.4 4.1 8.6 3.1 C8.2 4.1 8.3 5.1 8.9 5.9 C9.6 5.3 10.6 5.3 11.3 5.9 C10.8 6.5 10.6 7.2 10.8 7.9 L12.4 7.3 L11.6 9.1 L13.6 8.7 L12.6 10.5 L14.8 10.3 L13.4 12.1 C14 12.8 14.3 13.7 14.3 14.6 C16 15.5 17.6 17.1 18.8 19.3 L16 18.7 C16.4 19.6 16.4 20.5 16 21.3 L13.8 19.9 C13 20.5 12 20.9 11 20.9 L11 18.5 L9.4 18.5 L9.4 21 Z"/>' +
+  '<circle cx="8.2" cy="6.3" r="0.85" fill="#e2703a"/>' +
+  "</svg>";
 
 interface EggSecondary {
   link: string; // link text shown on the primary card
@@ -159,6 +167,19 @@ const MAP_EGGS: MapEgg[] = [
     cardLabel: "Amity Island",
     cardBody:
       "Amity Island — better known as Martha's Vineyard, where in 1975 a mechanical shark ruined swimming for an entire generation. No barbecue here: the only thing well-smoked was the mayor's re-election campaign. Still, you're gonna need a bigger plate. We recommend the brisket — on dry land, facing the exit.",
+  },
+  {
+    id: "grillzilla",
+    phrases: ["grillzilla", "grill zilla"],
+    // The Peninsula London, 1 Grosvenor Place, Hyde Park Corner, SW1X 7HJ —
+    // provider-geocoded to the address (not eyeballed). A hidden homage pin,
+    // never in the dataset/sitemap/JSON-LD.
+    coord: { lat: 51.5017398, lng: -0.1518384 },
+    zoom: 16,
+    svg: GRILLZILLA_SVG,
+    cardLabel: "The Peninsula London",
+    cardBody:
+      "GrillZilla. Roused from the Thames by a column of oak smoke and last seen scaling the Peninsula for a better look at the pits below. He doesn't rank barbecue — he eats it, rig and all. Remarkable manners for a monster his size. Back down before he spots your brisket.",
   },
 ];
 

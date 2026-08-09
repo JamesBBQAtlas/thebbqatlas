@@ -198,6 +198,14 @@ export const EGG_REGISTRY: EggEntry[] = [
     status: "live",
   },
   {
+    id: "grillzilla",
+    name: "GrillZilla",
+    trigger: "search `grillzilla` on the map",
+    where: "Map search box",
+    note: "A colossal original monster clambers up a certain Hyde Park Corner hotel; a dry hello, then back to the smoke. The pin is homage only — never in the dataset.",
+    status: "live",
+  },
+  {
     id: "bucees-beaver",
     name: "Buc-ee's beaver trail",
     trigger: "TBD — when Buc-ee's actually lands on the atlas",
