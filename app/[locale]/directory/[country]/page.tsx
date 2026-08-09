@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { MapPin, ArrowRight } from "lucide-react";
 import { Link } from "@/i18n/navigation";
@@ -49,9 +49,9 @@ export default async function CountryHubPage({ params }: Props) {
   setRequestLocale(params.locale);
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
-  // Part 6 — an emptied/stale country hub consolidates to the directory root
-  // rather than dead-ending on a 404.
-  if (!country) redirect("/directory");
+  // Part 6 — an unknown/emptied country hub returns a clean 404 (correct SEO for
+  // a removed page; Google de-indexes it). Keeps real hubs statically cached.
+  if (!country) notFound();
 
   const cities = [...groupByCity(country.venues).values()].sort(
     (a, b) => b.venues.length - a.venues.length

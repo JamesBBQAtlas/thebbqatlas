@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { ArrowRight } from "lucide-react";
 import { Link } from "@/i18n/navigation";
@@ -49,7 +49,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
   const city = country && groupByCity(country.venues).get(params.city);
-  // A missing hub redirects (see below); keep its metadata noindex just in case.
+  // A missing hub 404s (see below); its metadata is noindex either way.
   if (!country || !city) return { title: "Not Found", robots: { index: false } };
   const thin = city.venues.length < HUB_INDEX_MIN_VENUES;
   return {
@@ -67,13 +67,13 @@ export default async function CityHubPage({ params }: Props) {
   const country = groupByCountry(all).get(params.country);
   const city = country && groupByCity(country.venues).get(params.city);
   // Part 6 — a hub that no longer exists (its last venue moved/closed, or a
-  // stale indexed URL like /directory/united-states/dudley) must not dead-end on
-  // a 404. Consolidate it up to its parent instead: unknown city → the country
-  // hub, unknown country → the directory root. A temporary redirect (not
-  // permanent) because hubs are data-driven and can legitimately reappear when a
-  // venue is added there again.
-  if (!country) redirect("/directory");
-  if (!city) redirect(`/directory/${params.country}`);
+  // stale indexed URL like /directory/united-states/dudley) returns a clean 404.
+  // That is the correct SEO signal for a removed page — Google de-indexes it —
+  // and it keeps the real hubs statically cached (a page-level redirect does NOT
+  // fire for an unlisted param under ISR anyway, and redirecting thin removed
+  // hubs to a broad parent risks a soft-404). The duplicate-canonical fix is the
+  // thin-hub noindex above, not a redirect.
+  if (!country || !city) notFound();
 
   const styles = [...new Set(city.venues.map((r) => r.style))] as BbqStyle[];
   const intro = cityIntro(city.name, country.name, city.venues);
