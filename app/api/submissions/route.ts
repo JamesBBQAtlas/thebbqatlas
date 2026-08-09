@@ -16,6 +16,26 @@ const RATE_MAX = 6;
 const clip = (v: unknown, max: number): string =>
   typeof v === "string" ? v.trim().slice(0, max) : "";
 
+// Simple, deliberately-lenient email check — reject obvious nonsense, don't try
+// to out-clever real addresses. Server mirror of the client rule.
+const looksLikeEmail = (v: string): boolean =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
+/**
+ * CAPTCHA seam (Part 5). We deliberately ship NO CAPTCHA today — the honeypot,
+ * time-trap and per-IP rate-limit are enough at this traffic level. This hook is
+ * where a Turnstile/hCaptcha verification drops in later, behind a flag, with no
+ * change to the form: set SUBMISSION_CAPTCHA_ENABLED and implement the verify.
+ * Returns true when the request may proceed.
+ */
+async function passesCaptcha(_body: Record<string, unknown>, _meta: unknown): Promise<boolean> {
+  if (process.env.SUBMISSION_CAPTCHA_ENABLED !== "true") return true; // off by default
+  // Placeholder for a future token check (e.g. Cloudflare Turnstile):
+  //   const token = clip(_body.captcha_token, 2000);
+  //   return verifyTurnstile(token, (_meta as { ip?: string }).ip);
+  return true;
+}
+
 /** Record a dropped/blocked attempt for future Cloudflare rule-building. */
 async function logAbuse(
   db: SupabaseClient,
@@ -110,14 +130,36 @@ export async function POST(request: Request) {
   if (!consent) return NextResponse.json({ error: "Please agree to the submission terms." }, { status: 400 });
 
   // Trustworthy attribution: read the signed-in user server-side (ignore any
-  // client-sent id). Best-effort — anonymous submissions are allowed.
+  // client-sent id). Best-effort — anonymous submissions are allowed. We also
+  // take the account email as the fallback so a signed-in member never has to
+  // retype it.
   let submittedBy: string | null = null;
+  let accountEmail: string | null = null;
   try {
     const authed = await createClient();
     const { data } = await authed.auth.getUser();
     submittedBy = data.user?.id ?? null;
+    accountEmail = data.user?.email ?? null;
   } catch {
     /* anonymous */
+  }
+
+  // Part 5 — email is now MANDATORY (anti-spam, no CAPTCHA yet). Prefer the
+  // typed value; fall back to the signed-in member's account email. Enforced
+  // server-side so the client can never bypass it.
+  const contactEmail = clip(body.contact_email, 200) || accountEmail || "";
+  if (!contactEmail) {
+    return NextResponse.json({ error: "Please add an email so we can follow up on your submission." }, { status: 400 });
+  }
+  if (!looksLikeEmail(contactEmail)) {
+    return NextResponse.json({ error: "That email doesn't look right — please check it." }, { status: 400 });
+  }
+
+  // CAPTCHA seam — a no-op today (see passesCaptcha). Structured so a Turnstile
+  // step can be enabled later behind a flag without touching the form.
+  if (!(await passesCaptcha(body as Record<string, unknown>, meta))) {
+    await logAbuse(db, "captcha", meta, attemptedName, {});
+    return NextResponse.json({ error: "Couldn't verify your submission — please try again." }, { status: 400 });
   }
 
   const payload: Record<string, unknown> = {
@@ -131,7 +173,7 @@ export async function POST(request: Request) {
     lat,
     lng,
     website: clip(body.website, 300) || null,
-    contact_email: clip(body.contact_email, 200) || null,
+    contact_email: contactEmail,
     instagram_handle: clip(body.instagram_handle, 80) || null,
     submitted_by: submittedBy,
     moderation_status: "pending",

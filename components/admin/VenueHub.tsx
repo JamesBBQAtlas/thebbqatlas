@@ -68,6 +68,24 @@ export interface HubVenue {
   manualCopy: boolean;
   lat: number;
   lng: number;
+  // Part 5 — full provenance for admins (privileged view; PII allowed here only).
+  provenance?: VenueProvenance | null;
+}
+
+/** Admin-only provenance for a venue. `submission` carries submitter PII and
+ *  must NEVER be sent to a public/anon surface — it's for the admin console. */
+export interface VenueProvenance {
+  source: "member" | "bulk";
+  addedAt: string | null;
+  updatedActor: string | null;
+  updatedAt: string | null;
+  submission: {
+    email: string | null;
+    ip: string | null;
+    country: string | null;
+    status: string | null;
+    submittedAt: string | null;
+  } | null;
 }
 
 /** A chain flagship's published summary — for a child's "Flagship Set" badge +
@@ -1317,6 +1335,32 @@ export function VenueHub({
                       )}
                       {v.needs_attention && v.attention_reason && (
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
+                      )}
+                      {v.provenance && (
+                        <div className="mt-1 text-[0.6875rem] leading-relaxed text-text-muted">
+                          {v.provenance.source === "member" ? (
+                            <>
+                              <span className="text-text-secondary">Submitted</span>
+                              {v.provenance.submission?.email && (
+                                <> · {v.provenance.submission.email}</>
+                              )}
+                              {v.provenance.submission?.country && (
+                                <> · {v.provenance.submission.country}</>
+                              )}
+                              {v.provenance.submission?.ip && (
+                                <> · IP {v.provenance.submission.ip}</>
+                              )}
+                              {v.provenance.submission?.status && (
+                                <> · {v.provenance.submission.status}</>
+                              )}
+                            </>
+                          ) : (
+                            <span>No submission — bulk import (IG seed / chain discovery)</span>
+                          )}
+                          {v.provenance.updatedActor && v.provenance.updatedAt && (
+                            <> · updated by {v.provenance.updatedActor} {new Date(v.provenance.updatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}</>
+                          )}
+                        </div>
                       )}
                       {/* Step 1 → 2: this venue looks like a chain but has no roster
                           yet — offer to build it. Nothing is crowned. */}

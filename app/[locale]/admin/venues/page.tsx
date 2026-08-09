@@ -46,7 +46,40 @@ export default async function PendingVenuesPage() {
     .eq("status", "pending")
     .order("created_at", { ascending: true });
   const rows = (pending ?? []) as Restaurant[];
-  const hubVenues = rows.map(toHubVenue);
+
+  // Part 5 — attach admin provenance: the originating submission's PII (email/IP/
+  // country/status/date) for member-submitted venues, plus last-updated actor.
+  // This is an ADMIN-only surface, so PII is allowed here (never on public_venues).
+  const subIds = [...new Set(rows.map((r) => r.first_submission_id).filter(Boolean))] as string[];
+  const subById = new Map<string, Record<string, unknown>>();
+  if (subIds.length) {
+    const { data: subs } = await db
+      .from("submissions")
+      .select("id, contact_email, submitter_ip, submitter_country, moderation_status, created_at")
+      .in("id", subIds);
+    for (const s of (subs ?? []) as Record<string, unknown>[]) subById.set(s.id as string, s);
+  }
+  const hubVenues = rows.map((r) => {
+    const sub = r.first_submission_id ? subById.get(r.first_submission_id) : null;
+    return {
+      ...toHubVenue(r),
+      provenance: {
+        source: r.first_submission_id ? ("member" as const) : ("bulk" as const),
+        addedAt: r.first_submitted_at ?? r.created_at ?? null,
+        updatedActor: r.updated_by_actor ?? null,
+        updatedAt: r.updated_at ?? null,
+        submission: sub
+          ? {
+              email: (sub.contact_email as string) ?? null,
+              ip: (sub.submitter_ip as string) ?? null,
+              country: (sub.submitter_country as string) ?? null,
+              status: (sub.moderation_status as string) ?? null,
+              submittedAt: (sub.created_at as string) ?? null,
+            }
+          : null,
+      },
+    };
+  });
 
   // Resolve each chain child's FLAGSHIP — usually already approved and thus not
   // in this pending list. Fetch a published summary so the child's gate + badge +

@@ -113,6 +113,11 @@ export async function POST(request: Request) {
       category: "restaurant",
       needs_attention,
       attention_reason,
+      // Part 5 — attribute the venue to the submission that created it (denormalised
+      // for display). Bulk imports never come through here, so they stay unattributed.
+      first_submission_id: sub.id,
+      first_submitted_by: sub.submitted_by ?? null,
+      first_submitted_at: sub.created_at ?? new Date().toISOString(),
     })
     .select("*")
     .single();

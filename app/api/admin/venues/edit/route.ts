@@ -169,6 +169,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Nothing to save." }, { status: 400 });
   }
 
+  // Part 5 — record who/when last meaningfully edited this venue (admin actor).
+  patch.updated_at = new Date().toISOString();
+  patch.updated_by = ctx.userId;
+  patch.updated_by_actor = "admin";
+
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
   if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 

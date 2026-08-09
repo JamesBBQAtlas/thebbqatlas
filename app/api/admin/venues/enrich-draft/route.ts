@@ -220,6 +220,12 @@ export async function POST(request: Request) {
         if (geo.country_code) patch.country_code = geo.country_code;
       }
     }
+    // Part 5 — a Find-IG write is a live enrichment edit; stamp who/when.
+    if (Object.keys(patch).length) {
+      patch.updated_at = new Date().toISOString();
+      patch.updated_by = ctx.userId;
+      patch.updated_by_actor = "enrichment";
+    }
     const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
     if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
     // Find IG writes socials/handle straight onto the live row — refresh the
@@ -661,6 +667,15 @@ export async function POST(request: Request) {
       patch.pending_changes = pendingCopy;
       pendingReview = true;
     }
+  }
+
+  // Part 5 — for a DRAFT venue the enrichment lands live now, so stamp it as an
+  // enrichment edit. For an approved venue the changes wait in pending_changes
+  // (not live yet), so we do NOT stamp "updated" until they're approved.
+  if (row.status !== "approved") {
+    patch.updated_at = new Date().toISOString();
+    patch.updated_by = ctx.userId;
+    patch.updated_by_actor = "enrichment";
   }
 
   const { error: updErr } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);

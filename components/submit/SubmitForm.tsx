@@ -10,13 +10,17 @@ import { LocationPicker, type LocationData } from "@/components/submit/LocationP
 import { normalizeWebsite, normalizeInstagram } from "@/lib/utils/normalize";
 import { cn } from "@/lib/utils/cn";
 
-export function SubmitForm() {
+// Server mirrors this exact check — keep them in sync (see /api/submissions).
+const looksLikeEmail = (v: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
+export function SubmitForm({ defaultEmail = "" }: { defaultEmail?: string }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [styles, setStyles] = useState<BbqStyle[]>([]);
   const [location, setLocation] = useState<LocationData | null>(null);
   const [website, setWebsite] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
+  // Email is required (anti-spam). Pre-filled for signed-in members.
+  const [contactEmail, setContactEmail] = useState(defaultEmail);
   const [instagram, setInstagram] = useState("");
   const [consent, setConsent] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
@@ -53,6 +57,17 @@ export function SubmitForm() {
     }
     if (!location) {
       setMessage("Please search for an address or drop a pin on the map.");
+      setStatus("error");
+      return;
+    }
+    const email = contactEmail.trim();
+    if (!email) {
+      setMessage("Please add your email so we can follow up.");
+      setStatus("error");
+      return;
+    }
+    if (!looksLikeEmail(email)) {
+      setMessage("That email doesn't look right — please check it.");
       setStatus("error");
       return;
     }
@@ -241,15 +256,19 @@ export function SubmitForm() {
           credited. No need to paste a link here.
         </div>
         <div>
-          <Label htmlFor="email">Your Email</Label>
+          <Label htmlFor="email">Your Email *</Label>
           <Input
             id="email"
             type="email"
             value={contactEmail}
             onChange={(e) => setContactEmail(e.target.value)}
-            placeholder="Optional — for follow-up"
+            required
+            placeholder="you@example.com — for follow-up"
             className="mt-1"
           />
+          <p className="mt-1 text-xs text-white/40">
+            We&apos;ll only use this to follow up on your submission. Never shown publicly.
+          </p>
         </div>
         <div>
           <Label htmlFor="instagram">Instagram Handle</Label>

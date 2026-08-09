@@ -42,7 +42,8 @@ import {
 } from "@/lib/constants/categories";
 import { createAnonClient } from "@/lib/supabase/anon";
 import { getVenueMetrics } from "@/lib/queries/checkins";
-import { getRecentVisitors } from "@/lib/queries/profiles";
+import { getRecentVisitors, getPublicProfileById } from "@/lib/queries/profiles";
+import { VenueAttribution } from "@/components/restaurants/VenueAttribution";
 import { getPublicAvatarSignedUrls, avatarBadge } from "@/lib/account/public-avatar";
 import { VenueVisitors } from "@/components/restaurants/VenueVisitors";
 import { getApprovedMedia } from "@/lib/queries/media";
@@ -149,6 +150,11 @@ export default async function RestaurantPage({ params }: Props) {
       getGearForStyle(restaurant.style),
       getRecentVisitors(restaurant.id, 50),
     ]);
+  // Part 5 — resolve the first submitter's PUBLIC identity only (username), for
+  // the subtle attribution line. Members with no public profile stay anonymous.
+  const submitterProfile = restaurant.first_submitted_by
+    ? await getPublicProfileById(restaurant.first_submitted_by)
+    : null;
   const hours = groupedHours(restaurant.hours);
 
   const code = resolveCountryCode(restaurant.country_code, restaurant.country);
@@ -742,6 +748,12 @@ export default async function RestaurantPage({ params }: Props) {
             <div>
               <ReportCorrection restaurantId={restaurant.id} name={restaurant.name} />
             </div>
+            <VenueAttribution
+              addedAtISO={restaurant.first_submitted_at ?? restaurant.created_at ?? null}
+              submitterUsername={submitterProfile?.username ?? null}
+              hasSubmission={Boolean(restaurant.first_submission_id)}
+              updatedAtISO={restaurant.updated_at ?? null}
+            />
           </div>
         </aside>
       </div>

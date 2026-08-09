@@ -173,6 +173,15 @@ export interface Restaurant {
   featured_video_title?: string | null;
   featured_video_channel?: string | null;
   featured_video_thumb?: string | null;
+  // Part 5 — submitter attribution + update tracking. first_submitted_* are
+  // null for bulk imports (IG seeds / chain discovery), which read as "added by
+  // The BBQ Atlas". updated_by_actor: 'member' | 'owner' | 'admin' | 'enrichment'.
+  first_submission_id?: string | null;
+  first_submitted_by?: string | null;
+  first_submitted_at?: string | null;
+  updated_at?: string | null;
+  updated_by?: string | null;
+  updated_by_actor?: "member" | "owner" | "admin" | "enrichment" | null;
 }
 
 export type HeroSource =

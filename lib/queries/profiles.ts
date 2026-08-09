@@ -38,6 +38,30 @@ export async function getPublicProfileByUsername(
 }
 
 /**
+ * Look up a public profile by account id (Part 5 — submitter attribution). Same
+ * cookie-LESS anon path and (id, username) column grant as the username lookup:
+ * returns the public identity for ANY user, or null. A member with no `username`
+ * has no public identity and is credited generically. Never throws.
+ */
+export async function getPublicProfileById(
+  id: string
+): Promise<PublicProfile | null> {
+  if (!id) return null;
+  try {
+    const db = createAnonClient();
+    const { data } = await db
+      .from("profiles")
+      .select("id, username")
+      .eq("id", id)
+      .maybeSingle();
+    const p = (data as PublicProfile) ?? null;
+    return p && p.username ? p : null; // no username → no public identity
+  } catch {
+    return null;
+  }
+}
+
+/**
  * A user's PUBLIC check-ins (newest first) with venue info. Anon reads these via
  * the `public checkins read` policy (visibility = 'public'). Private check-ins
  * are never returned. Never throws.

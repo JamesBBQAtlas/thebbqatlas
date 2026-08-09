@@ -50,6 +50,9 @@ export async function POST(request: Request) {
         details_confirmed_at: nowIso,
         details_confirmed_email: email || null,
         outreach_status: "info_received",
+        // Part 5 — the venue owner verified their details; record the touch.
+        updated_at: nowIso,
+        updated_by_actor: "owner",
       })
       .eq("id", venue.id);
     await admin.from("outreach_log").insert({
