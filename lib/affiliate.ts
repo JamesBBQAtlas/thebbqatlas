@@ -43,13 +43,19 @@ export function detectPartner(href: string): string {
 
 /**
  * Affiliate tags/refs (overridable via env; safe defaults so links always work).
- * Amazon uses a single OneLink "home" tag: once OneLink is configured in
- * Associates, Amazon auto-routes each shopper to their LOCAL store with the
- * mapped tag (e.g. US → thebbqatlasus-20), so we never hand-build geo logic.
+ *
+ * Amazon: the site ONLY ever emits US `amazon.com` links carrying the US "home"
+ * tag (`thebbqatlasus-20`). International routing is handled entirely Amazon-side
+ * by OneLink — `thebbqatlas.com` is registered as a traffic source on the US
+ * Associates account, so when an international shopper lands on one of our
+ * amazon.com links, Amazon auto-redirects them to their local store with the
+ * per-country tag mapped in the OneLink dashboard. There is NO on-site script or
+ * geo logic here (the old `onejs` widget model is deprecated and not used).
+ *
  * Dalstrong is a single global program keyed on `?ref`.
  */
 export const AMAZON_ONELINK_TAG =
-  process.env.NEXT_PUBLIC_AMAZON_ONELINK_TAG?.trim() || "thebbqatlas-21";
+  process.env.NEXT_PUBLIC_AMAZON_ONELINK_TAG?.trim() || "thebbqatlasus-20";
 export const DALSTRONG_REF =
   process.env.NEXT_PUBLIC_DALSTRONG_REF?.trim() || "bbqatlas";
 export const DALSTRONG_HOME = `https://dalstrong.com/?ref=${DALSTRONG_REF}`;
