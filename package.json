@@ -12,6 +12,8 @@
     "audit:affiliate": "tsx scripts/audit-affiliate.mts",
     "test:chain": "tsx scripts/test-chain-discovery.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
+    "test:geocode": "tsx scripts/test-geocode-precision.mts",
+    "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",
     "prepare": "husky"
   },
   "dependencies": {

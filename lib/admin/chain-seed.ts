@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { composeAddress, normStreet, normCity, settlementCity } from "@/lib/admin/address";
 import { canonicalCountry, resolveCountryCode } from "@/lib/constants/countries";
-import { geocodeAddress } from "@/lib/geo/geocode";
+import { geocodePrecise, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
 import { auditField } from "@/lib/admin/content-audit";
 
@@ -176,21 +176,25 @@ export async function seedChainLocations(
     // Geocode with the BRANCH's declared country as context (falls back to the
     // chain-anchored country), so a place name resolves in the right country.
     const declaredCountry = canonicalCountry(loc.country ?? country);
-    const geo = await geocodeAddress({ address: loc.address, city: loc.city, country: declaredCountry || country, name: loc.name });
-    if (geo && hasCoords(geo.lat, geo.lng)) {
+    // Part 3 — precision-first: a branch address that only resolves to a town
+    // centroid must NOT be pinned there; flag it for manual placement instead.
+    const geo = await geocodePrecise({ address: loc.address, city: loc.city, country: declaredCountry || country, name: loc.name });
+    if (geo.result && hasCoords(geo.result.lat, geo.result.lng)) {
       // Hard write-guard (§3.3): if the geocoded country ≠ the declared country,
       // DO NOT store the pin — flag it. This kills the cross-country mis-pin bug
       // (real overseas branches geocoded into random US states).
       const declaredCode = declaredCountry ? resolveCountryCode(null, declaredCountry) : null;
-      const geoCode = geo.country_code ? geo.country_code.toUpperCase() : null;
+      const geoCode = geo.result.country_code ? geo.result.country_code.toUpperCase() : null;
       if (declaredCode && geoCode && declaredCode !== geoCode) {
         attentionReason = `Geocoded outside ${declaredCountry} (got ${geoCode}) — verify address / set pin`;
       } else {
-        lat = geo.lat;
-        lng = geo.lng;
-        country_code = geo.country_code;
-        geoCity = geo.city;
+        lat = geo.result.lat;
+        lng = geo.result.lng;
+        country_code = geo.result.country_code;
+        geoCity = geo.result.city;
       }
+    } else if (geo.status === "coarse_only") {
+      attentionReason = GEOCODE_COARSE_REASON;
     }
     // Street key from the branch's OWN address line only (not folded with the
     // city), so a city-only entry reads as "no distinct street".

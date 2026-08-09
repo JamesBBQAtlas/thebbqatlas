@@ -18,7 +18,7 @@ import {
 import { hasNonLatinScript } from "@/lib/utils/script";
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
-import { geocodeAddress } from "@/lib/geo/geocode";
+import { geocodePrecise, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
@@ -213,11 +213,13 @@ export async function POST(request: Request) {
     if (!row.youtube_url && socials.youtube_url) patch.youtube_url = socials.youtube_url;
     if (citations.length) patch.enrichment_sources = citations;
     if (row.lat === 0 && row.lng === 0) {
-      const geo = await geocodeAddress({ address: row.address, city: row.city, country: row.country, name: row.name });
-      if (geo) {
-        patch.lat = geo.lat;
-        patch.lng = geo.lng;
-        if (geo.country_code) patch.country_code = geo.country_code;
+      // Part 3 — only plant a pin when we get a street/POI-level fix; a town
+      // centroid is left unset (row stays at 0,0 and keeps its needs_attention).
+      const geo = await geocodePrecise({ address: row.address, city: row.city, country: row.country, name: row.name });
+      if (geo.result) {
+        patch.lat = geo.result.lat;
+        patch.lng = geo.result.lng;
+        if (geo.result.country_code) patch.country_code = geo.result.country_code;
       }
     }
     // Part 5 — a Find-IG write is a live enrichment edit; stamp who/when.
@@ -474,21 +476,31 @@ export async function POST(request: Request) {
   let lat: number | null = null;
   let lng: number | null = null;
   let country_code: string | null = null;
+  // Part 3 — set when the address only resolved to a town/region centroid, so the
+  // pin is deliberately left unset and flagged "verify pin" rather than planted.
+  let coarseGeocode = false;
   if (validCoord(dossier.lat, dossier.lng)) {
     lat = dossier.lat;
     lng = dossier.lng;
   } else {
-    const geo = await geocodeAddress({ address: dossier.address ?? row.address, city, country, name: dossier.name ?? row.name });
-    if (geo && validCoord(geo.lat, geo.lng)) {
-      lat = geo.lat;
-      lng = geo.lng;
-      country_code = geo.country_code;
-      geoCity = geo.city ?? null;
+    // Part 3 — precision-first geocode. Accept ONLY a street/POI-level pin; a
+    // coarse town/region centroid must NOT be planted as the venue's location
+    // (the "7501 MS-57 → centre of Ocean Springs" bug). On a coarse-only hit we
+    // keep the country label for context, leave the pin UNSET, and flag below.
+    const geo = await geocodePrecise({ address: dossier.address ?? row.address, city, country, name: dossier.name ?? row.name });
+    if (geo.result && validCoord(geo.result.lat, geo.result.lng)) {
+      lat = geo.result.lat;
+      lng = geo.result.lng;
+      country_code = geo.result.country_code;
+      geoCity = geo.result.city ?? null;
       // Do NOT overwrite a good submitted/dossier city with the geocoder's — the
       // geocoder can return a fine-grained neighbourhood ("…Coalition / Memorial
       // Park") for a venue that's really in Houston. The geocoder's city is kept
       // as `geoCity` and only used by bestSettlement as a last-resort candidate.
-      country = geo.country ?? country;
+      country = geo.result.country ?? country;
+    } else if (geo.status === "coarse_only") {
+      coarseGeocode = true;
+      country = geo.coarse?.country ?? country;
     }
   }
   // Fix B — did we END UP with a real location? A venue that neither geocoded now
@@ -628,11 +640,13 @@ export async function POST(request: Request) {
       : searchRunaway
         ? `Search budget exceeded (${grokSearches} > ${MAX_TOTAL_SEARCHES}) — stopped and flagged; check enrichment_debug.`
         : noValidLocation
-          ? address
-            ? "Couldn't locate — check address / set pin manually"
-            : effectivelySibling
-              ? "This outpost's own location facts (address) are missing — add them, then re-enrich."
-              : "No address to place this venue on the map — add one, then re-enrich."
+          ? coarseGeocode
+            ? GEOCODE_COARSE_REASON
+            : address
+              ? "Couldn't locate — check address / set pin manually"
+              : effectivelySibling
+                ? "This outpost's own location facts (address) are missing — add them, then re-enrich."
+                : "No address to place this venue on the map — add one, then re-enrich."
           : factConflicts.length
             ? describeConflicts(factConflicts)
             : nonLatin
