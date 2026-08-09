@@ -22,6 +22,7 @@ import { hasNonLatinScript } from "@/lib/utils/script";
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { geocodePrecise, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
+import { COST_PER_CHAIN_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
@@ -369,8 +370,12 @@ export async function POST(request: Request) {
   // from the facts on hand, even if research came back thin. A single-venue
   // enrich must never return empty copy.
   const isSiblingRow = Boolean(row.chain_parent_id);
-  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean; priorCopy?: string | null } = {
+  // Part 4E — any chain-context venue (a branch, a confirmed flagship, or a
+  // rostered/candidate parent) gets the STRONGER writer + higher token budget.
+  const isChainContext = isSiblingRow || isConfirmedFlagship || chainCandidate || alreadyRostered;
+  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean; priorCopy?: string | null; strong?: boolean } = {
     alwaysWrite: true,
+    strong: isChainContext,
   };
   // Part A — carry the facts the operator wrote into the existing copy through to
   // the new copy (whether it lands live or in pending_changes).
@@ -391,10 +396,13 @@ export async function POST(request: Request) {
   }
   const claudeModel = copy.model ?? CLAUDE_WRITER_MODEL;
 
-  // Exact cost from real API usage (never an estimate). Single-venue ceiling.
+  // Exact cost from real API usage (never an estimate). The ceiling is LIFTED for
+  // a chain-context venue (Part 4) — the stronger writer costs more, and that
+  // spend is explicitly authorised for chains.
   const cCost = claudeCost(copy.usage, claudeModel);
   const thisCost = round4(gCost + cCost);
-  const overCeiling = thisCost > CEILING;
+  const ceiling = isChainContext ? COST_PER_CHAIN_VENUE_CEILING : CEILING;
+  const overCeiling = thisCost > ceiling;
 
   // Exact per-call AI ledger (§ PRE-623): the research call (xAI/Grok) and the
   // writer call (Anthropic/Claude) each get one row, keyed to this venue and the
@@ -664,7 +672,7 @@ export async function POST(request: Request) {
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
     ? overCeiling
-      ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${CEILING} ceiling.`
+      ? `Enrichment cost ${thisCost.toFixed(3)} exceeded the $${ceiling} ceiling.`
       : searchRunaway
         ? `Search budget exceeded (${grokSearches} > ${MAX_TOTAL_SEARCHES}) — stopped and flagged; check enrichment_debug.`
         : noValidLocation

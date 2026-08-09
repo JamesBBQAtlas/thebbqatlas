@@ -11,6 +11,7 @@
     "audit:grants": "node scripts/audit-write-grants.mjs",
     "audit:affiliate": "tsx scripts/audit-affiliate.mts",
     "test:chain": "tsx scripts/test-chain-discovery.mts",
+    "test:chain-part4": "tsx scripts/test-chain-part4.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
     "test:geocode": "tsx scripts/test-geocode-precision.mts",
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",

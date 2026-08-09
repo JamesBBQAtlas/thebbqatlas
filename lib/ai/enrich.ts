@@ -1,5 +1,5 @@
 import { grokJSON } from "./grok";
-import { claudeJSON, CLAUDE_ENABLED, CLAUDE_WRITER_MODEL } from "./claude";
+import { claudeJSON, CLAUDE_ENABLED, CLAUDE_WRITER_MODEL, CLAUDE_MODEL } from "./claude";
 import { BBQ_STYLES, STYLE_LABELS } from "@/lib/constants/styles";
 
 export type Engine = "grok" | "claude";
@@ -922,7 +922,19 @@ Output ONLY JSON: {"hook": "...", "description": "..."} — or {"needs_attention
  */
 export async function writeVenueCopy(
   dossier: VenueDossier,
-  opts?: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite?: boolean; priorCopy?: string | null }
+  opts?: {
+    branchOf?: string | null;
+    isFlagship?: boolean;
+    alwaysWrite?: boolean;
+    priorCopy?: string | null;
+    /**
+     * Part 4E — for a detected CHAIN, step up from the cheap Haiku pass to the
+     * stronger writer model with a higher token budget, writing from the deep
+     * research so the brand/branch copy is genuinely good (not a thin three-liner).
+     * The lifted per-venue cost cap for chains (enrich route) covers the spend.
+     */
+    strong?: boolean;
+  }
 ): Promise<VenueCopy> {
   const label = dossier.location_label || dossier.city || "this";
   // For one location of a chain: the brand-level facts are SHARED across every
@@ -952,15 +964,19 @@ ${JSON.stringify(dossier)}
 
 Return ONLY the JSON described in your instructions.`;
 
+  // Part 4E — chains use the stronger writer (Sonnet) with a higher token budget;
+  // single venues stay on the cheap Haiku pass.
+  const writerModel = opts?.strong ? CLAUDE_MODEL : CLAUDE_WRITER_MODEL;
+  const maxWriterTokens = opts?.isFlagship
+    ? opts?.strong ? 1400 : 768
+    : opts?.strong ? 900 : 512;
   const call = CLAUDE_ENABLED
     ? claudeJSON<{ hook?: string; description?: string; needs_attention?: boolean; reason?: string }>({
         system: COPY_SYSTEM,
         user,
         search: false,
-        model: CLAUDE_WRITER_MODEL,
-        // A flagship gets the fuller (~120–180 word) write-up, so give it room;
-        // everyone else stays tight on the cheap 512 cap.
-        maxTokens: opts?.isFlagship ? 768 : 512,
+        model: writerModel,
+        maxTokens: maxWriterTokens,
       })
     : grokJSON<{ hook?: string; description?: string; needs_attention?: boolean; reason?: string }>({
         system: COPY_SYSTEM,

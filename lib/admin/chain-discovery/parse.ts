@@ -246,8 +246,83 @@ export function parseInlineJson(html: string, sourceUrl: string | null = null): 
   return best;
 }
 
+// ── 3b. Address-from-visible-text (Part 4A) ─────────────────────────────────
+// The discovery bug: the engine knew it was a chain, found no page literally
+// named "Locations", and gave up — while both branch addresses sat in plain text
+// on the homepage under a heading like "BBQ Near You!". Discovery must be
+// ADDRESS-DRIVEN, not page-driven: pull every address out of the raw VISIBLE
+// TEXT of whatever pages we read, by pattern, regardless of the page's name.
+
+// A US street line: number + words, then "City, ST 12345". Captured greedily but
+// bounded to one line's worth of characters so we don't span paragraphs.
+const US_ADDRESS =
+  /\b(\d{1,6}[\w.\- ]{2,60}?(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|hwy|highway|pkwy|parkway|ct|court|pl|place|sq|square|ter|terrace|cir|circle|pike|trail|trl|route|rt|row)\b[\w.\- ]{0,30}?),?\s+([A-Za-z][A-Za-z.\- ]{1,28}),\s*([A-Z]{2})\s+(\d{5}(?:-\d{4})?)/gi;
+
+// An international street line: number + words containing a street-type token,
+// then up to two comma segments, ending in a recognizable non-US postcode
+// (UK/CA/etc.). Deliberately conservative — geocode does the real resolving.
+const INTL_ADDRESS =
+  /\b(\d{1,6}[\w.\- ]{2,60}?(?:street|st|road|rd|avenue|ave|lane|ln|way|close|crescent|cres|parade|pde|terrace|drive|dr|walk|row|quay|wharf|square|sq|grove|hill|gardens|mews)\b[\w.,\- ]{0,60}?)\s+([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|[A-Z]\d[A-Z]\s*\d[A-Z]\d)\b/gi;
+
+/**
+ * Extract candidate addresses from a page's raw VISIBLE text (not its markup).
+ * Runs the US and international line patterns over the de-tagged text and returns
+ * one RawCandidate per distinct hit. Provider-agnostic; the caller still runs the
+ * hasStreetAddress gate + geocode, so a false positive costs a geocode, not a
+ * bad pin.
+ */
+export function extractAddressesFromText(text: string, sourceUrl: string | null = null): RawCandidate[] {
+  const out: RawCandidate[] = [];
+  const seen = new Set<string>();
+  const clean = text.replace(/ /g, " ").replace(/[ \t]+/g, " ");
+
+  const push = (c: RawCandidate) => {
+    const key = (c.address ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push({ ...c, source_url: sourceUrl });
+  };
+
+  for (const m of clean.matchAll(US_ADDRESS)) {
+    const street = m[1].replace(/\s+/g, " ").trim().replace(/,+$/, "");
+    const city = m[2].replace(/\s+/g, " ").trim();
+    const region = m[3].toUpperCase();
+    const postcode = m[4];
+    push({
+      street,
+      city,
+      region,
+      postcode,
+      address: `${street}, ${city}, ${region} ${postcode}`,
+    });
+  }
+  for (const m of clean.matchAll(INTL_ADDRESS)) {
+    const street = m[1].replace(/\s+/g, " ").trim().replace(/,+$/, "");
+    const postcode = m[2].replace(/\s+/g, " ").trim();
+    push({ street, postcode, address: `${street} ${postcode}` });
+  }
+  return out;
+}
+
+/** Pull an HTML page's visible text (drop script/style, collapse tags to spaces). */
+export function visibleText(html: string): string {
+  const $ = cheerio.load(html);
+  $("script, style, noscript, svg").remove();
+  return $("body").text() || $.root().text();
+}
+
+/** Extract addresses straight from an HTML page's visible text (Part 4A). */
+export function parseVisibleText(html: string, sourceUrl: string | null = null): RawCandidate[] {
+  return extractAddressesFromText(visibleText(html), sourceUrl);
+}
+
 // ── 4. Locator discovery + hierarchical links ───────────────────────────────
-const LOCATOR_HINTS = /(location|store|find|where|visit)/i;
+// Part 4A — a BROAD synonym list, matched contains/case-insensitive on the link
+// href OR its visible label. Never an exact match on "Locations": a chain may
+// call it "Visit Us", "Find Us", "Our Pits", "Come See Us", "Store Locator",
+// "Near You", "Hours", "Order", etc.
+const LOCATOR_HINTS =
+  /(location|store|find|where|visit|hours|branch|near you|our pits|our spots|our places|come see|order|directions|our restaurants|eat with us|stop by)/i;
 
 /** Absolute-ise an href against a base URL; null if it leaves the host. */
 function sameHostUrl(href: string, base: string): string | null {

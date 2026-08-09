@@ -31,6 +31,12 @@ export interface SeedResult {
   matchedParent: number;
   /** New seeds whose address wouldn't geocode — inserted at 0,0 + needs_attention. */
   needsLocation: number;
+  /** Existing STANDALONE same-brand rows that were LINKED into the chain instead
+   *  of being duplicated (Part 4C — the "operator manually added a branch" case). */
+  linked: number;
+  /** New rows inserted flagged as a POSSIBLE duplicate of an existing record
+   *  (uncertain same-city/same-brand match) — never a silent twin (Part 4C). */
+  possibleDuplicates: number;
 }
 
 interface ExistingRow {
@@ -41,6 +47,11 @@ interface ExistingRow {
   lat: number | null;
   lng: number | null;
   isParent: boolean;
+  /** A standalone same-brand row (not yet a member) — a confident match LINKS it
+   *  into the chain rather than creating a duplicate (Part 4C). */
+  linkable?: boolean;
+  /** Its style, so a linked row can inherit the flagship style if it was "other". */
+  style?: string | null;
 }
 
 /** Two coordinates are the "same place" if within this radius (≈150 m). */
@@ -120,7 +131,7 @@ export async function seedChainLocations(
   locations: SeedLocation[]
 ): Promise<SeedResult> {
   const found = locations.length;
-  const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0 };
+  const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0 };
   if (!found) return result;
 
   const { data: parentRow } = await db
@@ -138,9 +149,24 @@ export async function seedChainLocations(
     .select("id, address, city, location_label, lat, lng")
     .eq("chain_parent_id", parentId);
 
+  // Part 4C — also load STANDALONE rows carrying this brand name that are NOT yet
+  // members of any chain (chain_parent_id IS NULL, excluding the parent itself).
+  // These are the "operator manually added a branch" records: a confident match
+  // must LINK them into the chain, never create a second copy (the duplicate
+  // Trophy Club bug). Rows already parented under a DIFFERENT chain are left alone.
+  const { data: brandRows } = await db
+    .from("restaurants")
+    .select("id, address, city, location_label, lat, lng, style, chain_parent_id")
+    .eq("name", brand)
+    .is("chain_parent_id", null)
+    .neq("id", parentId);
+
   const existing: ExistingRow[] = [
     ...(parentRow ? [{ ...(parentRow as Omit<ExistingRow, "isParent">), isParent: true }] : []),
     ...((siblingRows ?? []) as Omit<ExistingRow, "isParent">[]).map((r) => ({ ...r, isParent: false })),
+    ...((brandRows ?? []) as (Omit<ExistingRow, "isParent" | "linkable"> & { chain_parent_id: string | null })[])
+      .filter((r) => r.id !== parentId)
+      .map((r) => ({ id: r.id, address: r.address, city: r.city, location_label: r.location_label, lat: r.lat, lng: r.lng, style: r.style, isParent: false, linkable: true })),
   ];
   const consumed = new Set<string>(); // existing ids already matched this run
 
@@ -281,6 +307,29 @@ export async function seedChainLocations(
         result.matchedParent += 1; // the parent's own location — never a sibling
         continue;
       }
+      if (match.linkable) {
+        // Part 4C — a confident match to a STANDALONE same-brand row: LINK it into
+        // the chain (set its parent) instead of creating a duplicate. Fill a fuller
+        // address / pin, inherit the flagship style if it was on "other", and audit.
+        const linkPatch: Record<string, unknown> = { chain_parent_id: parentId };
+        const composedL = composeAddress({ street: loc.address, city: loc.city });
+        if (composedL && composedL.length > (match.address ?? "").length) linkPatch.address = composedL;
+        const settleL = settlementCity(loc.city);
+        if (settleL && !settlementCity(match.city)) linkPatch.city = settleL;
+        if (hasCoords(c.lat, c.lng) && !hasCoords(match.lat, match.lng)) {
+          linkPatch.lat = c.lat;
+          linkPatch.lng = c.lng;
+          if (c.country_code) linkPatch.country_code = c.country_code;
+        }
+        if (branchStyle !== "other" && (!match.style || match.style === "other")) linkPatch.style = branchStyle;
+        await db.from("restaurants").update(linkPatch).eq("id", match.id);
+        await auditField(db, match.id, "chain", null,
+          { linked_to: parentId, reason: "matched an existing standalone same-brand branch" },
+          { source: "roster", changedBy: null, note: "linked existing branch into chain (dedupe, not duplicated)" });
+        match.linkable = false; // it's a member now
+        result.linked += 1;
+        continue;
+      }
       // Update the existing sibling in place — fill a fuller address / city, and
       // upgrade a placeholder pin to real coordinates if we just geocoded them.
       const patch: Record<string, unknown> = {};
@@ -299,6 +348,22 @@ export async function seedChainLocations(
       if (Object.keys(patch).length) await db.from("restaurants").update(patch).eq("id", match.id);
       result.updated.push({ label, city: settle || loc.city });
       continue;
+    }
+
+    // Part 4C — before inserting, check for a PROBABLE-BUT-UNCERTAIN duplicate: a
+    // same-brand record already in this city that we did NOT confidently match.
+    // We only treat it as uncertain when the two can't be told apart — the existing
+    // row has no distinct street, OR this candidate didn't get a real pin to compare
+    // — so two clearly-distinct geocoded branches in one city are NOT flagged.
+    let possibleDupOf: string | null = null;
+    if (c.hasStreet && c.cityKey) {
+      const uncertain = existing.find((e) => {
+        if (consumed.has(e.id)) return false;
+        if (cityKeyOf(e.city) !== c.cityKey) return false;
+        const eHasStreet = hasDistinctStreet(normStreet(e.address), cityKeyOf(e.city));
+        return !eHasStreet || !hasCoords(c.lat, c.lng);
+      });
+      if (uncertain) possibleDupOf = uncertain.id;
     }
 
     // Genuinely new location → insert a $0 seed with a real pin when we have one.
@@ -329,12 +394,21 @@ export async function seedChainLocations(
     if (located && c.country_code) insertRow.country_code = c.country_code;
     // Provenance — every pin traces back to the page it was read from (§3.4).
     if (loc.source_url) insertRow.enrichment_sources = [loc.source_url];
+    if (possibleDupOf) {
+      // Part 4C — never silently create a twin. Insert FLAGGED with a link to the
+      // record it may duplicate, so the operator can merge or dismiss in the queue.
+      insertRow.possible_duplicate_of = possibleDupOf;
+      insertRow.duplicate_reason = `Possible duplicate — a same-brand record already exists in ${settle || "this city"}. Merge or dismiss.`;
+      insertRow.needs_attention = true;
+      insertRow.attention_reason =
+        insertRow.attention_reason ?? `Possible duplicate of an existing ${brand} record in ${settle || "this city"} — merge or dismiss.`;
+    }
     if (!located) {
       // Fix B — never silently pin a new seed at (0,0). Flag it so the operator
       // fixes the address / drops a manual pin before it can go live. The reason
       // is specific when the geocode write-guard rejected a cross-country pin.
       insertRow.needs_attention = true;
-      insertRow.attention_reason = c.attentionReason ?? "Couldn't locate — check address / set pin manually";
+      insertRow.attention_reason = c.attentionReason ?? insertRow.attention_reason ?? "Couldn't locate — check address / set pin manually";
     }
     const { data: inserted, error } = await db
       .from("restaurants")
@@ -355,6 +429,7 @@ export async function seedChainLocations(
       consumed.add(inserted.id as string);
       result.added.push({ label, city: settle || loc.city });
       if (!located) result.needsLocation += 1;
+      if (possibleDupOf) result.possibleDuplicates += 1;
       // Audit the inherited style at creation (source=roster).
       if (branchStyle !== "other") {
         await auditField(db, inserted.id as string, "style", null, branchStyle, {

@@ -6,6 +6,16 @@
  */
 export const COST_PER_VENUE_CEILING = 0.04;
 
+/**
+ * Part 4 — the per-venue ceiling is EXPLICITLY LIFTED for a detected chain.
+ * James authorised materially higher spend on chains: a deep whole-site crawl
+ * (no LLM cost) plus a STRONGER copy writer (Sonnet, higher token budget) for the
+ * flagship's brand copy and each branch. This is an order of magnitude above the
+ * single-venue cap, not a few cents — a chain venue only trips "over ceiling"
+ * above this. Still bounded, so a runaway is still caught and flagged.
+ */
+export const COST_PER_CHAIN_VENUE_CEILING = 0.5;
+
 /** Estimated USD per action per venue. */
 export const ACTION_COST: Record<string, number> = {
   enrich: 0.024, // grok-4-fast dossier (~$0.02) + Haiku copy (~$0.004)

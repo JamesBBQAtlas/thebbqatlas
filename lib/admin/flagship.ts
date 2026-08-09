@@ -94,7 +94,8 @@ export async function populateFlagship(
   const { flagshipId, status, dossier, grokModel } = opts;
   let copy: Awaited<ReturnType<typeof writeVenueCopy>> | null = null;
   try {
-    copy = await writeVenueCopy(dossier, { isFlagship: true });
+    // Part 4E — the flagship's brand copy is chain copy: use the stronger writer.
+    copy = await writeVenueCopy(dossier, { isFlagship: true, strong: true });
   } catch {
     copy = null;
   }
