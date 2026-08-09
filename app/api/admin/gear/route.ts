@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
+import { revalidateGear } from "@/lib/cache/gear";
 import type { GearCategory } from "@/lib/types/database";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +45,7 @@ export async function POST(request: Request) {
       .update({ is_active: body.action === "restore", updated_at: now })
       .eq("id", body.id);
     if (error) return NextResponse.json({ error: "db_error" }, { status: 500 });
+    revalidateGear(); // reflect on /gear + venue pages without a redeploy
     return NextResponse.json({ ok: true });
   }
 
@@ -51,6 +53,7 @@ export async function POST(request: Request) {
     if (!body.id) return NextResponse.json({ error: "missing_id" }, { status: 400 });
     const { error } = await db.from("gear_products").delete().eq("id", body.id);
     if (error) return NextResponse.json({ error: "db_error" }, { status: 500 });
+    revalidateGear();
     return NextResponse.json({ ok: true });
   }
 
@@ -81,6 +84,7 @@ export async function POST(request: Request) {
       ? await db.from("gear_products").update(row).eq("id", String(p.id))
       : await db.from("gear_products").insert(row);
     if (error) return NextResponse.json({ error: "db_error" }, { status: 500 });
+    revalidateGear();
     return NextResponse.json({ ok: true });
   }
 

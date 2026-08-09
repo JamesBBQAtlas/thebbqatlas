@@ -104,7 +104,7 @@ Rules:
 - "description" is 2–4 warm, factual sentences in The BBQ Atlas's celebratory-but-honest voice. No hype, no invented awards.
 - "permanently_closed": true only if you find clear evidence the business has closed for good; else false or null.
 - "confidence" is your honest 0–1 estimate that this record is correct and about the right business.
-- Multi-location chains: set "is_multi_location" true if this business has more than one physical venue. Put the overall brand name in "brand_name" (e.g. "Third Wave BBQ") and this specific branch's short label in "location_label" (e.g. "Albert Park"). Base address/hours/phone on the SPECIFIC location given, or the flagship if unspecified, and list the other known locations in reviewer_notes. If it's a single independent venue, set is_multi_location false and brand_name/location_label null.
+- Multi-location chains: set "is_multi_location" true if this business has more than one physical venue. Put the overall brand name in "brand_name" (e.g. "Smoky Ridge BBQ") and this specific branch's short label in "location_label" (e.g. "Riverside"). Base address/hours/phone on the SPECIFIC location given, or the flagship if unspecified, and list the other known locations in reviewer_notes. If it's a single independent venue, set is_multi_location false and brand_name/location_label null.
 - "reviewer_notes": briefly flag anything uncertain, ambiguous, the other locations of a chain, or that a human should double-check.
 
 Respond ONLY with a JSON object with exactly these keys: name, description, website, phone, address, city, country, style, offerings, price_level, hours, permanently_closed, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, brand_name, location_label, is_multi_location, confidence, reviewer_notes.`;
@@ -1193,7 +1193,7 @@ Be efficient and concise — your JSON answer must be complete and well-formed, 
 
 Rules:
 - "is_chain": true only if there is genuinely more than one physical venue.
-- For EACH location, give: name (usually the brand + area), location_label (short branch label like "Albert Park"), address, city, country, phone, hours (keyed mon..sun or null), and instagram_url ONLY if that specific branch runs its own Instagram distinct from the brand's (else null → it inherits the brand's). Only include locations you can actually corroborate. Never invent an address.
+- For EACH location, give: name (usually the brand + area), location_label (short branch label like "Riverside"), address, city, country, phone, hours (keyed mon..sun or null), and instagram_url ONLY if that specific branch runs its own Instagram distinct from the brand's (else null → it inherits the brand's). Only include locations you can actually corroborate. Never invent an address.
 - Brand-level fields (description, website, style, socials) describe the whole brand. "style" MUST be one slug from: ${STYLE_LIST} or null.
 - "confidence" 0–1 that the location list is correct and complete.
 - "reviewer_notes": flag any location you're unsure about or that needs checking.

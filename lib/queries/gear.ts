@@ -1,22 +1,32 @@
+import { unstable_cache } from "next/cache";
 import { createAnonClient } from "@/lib/supabase/anon";
 import type { GearProduct, GearCategory } from "@/lib/types/database";
 
+/** Cache tag for every gear read (the /gear page AND venue-page recommendations).
+ *  Revalidated by revalidateGear() on any admin gear edit so a DB change (e.g. a
+ *  re-pointed affiliate_url) shows WITHOUT a redeploy — Part 2 fix. */
+export const GEAR_TAG = "gear-products";
+
 /** All ACTIVE catalogue products, ordered for display. Public (anon) read. */
-export async function getGearProducts(): Promise<GearProduct[]> {
-  try {
-    const supabase = createAnonClient();
-    const { data } = await supabase
-      .from("gear_products")
-      .select("*")
-      .eq("is_active", true)
-      .order("category", { ascending: true })
-      .order("sort_order", { ascending: true });
-    if (data?.length) return data as GearProduct[];
-  } catch {
-    // Table may not exist yet (pre-migration) — degrade to empty.
-  }
-  return [];
-}
+export const getGearProducts = unstable_cache(
+  async (): Promise<GearProduct[]> => {
+    try {
+      const supabase = createAnonClient();
+      const { data } = await supabase
+        .from("gear_products")
+        .select("*")
+        .eq("is_active", true)
+        .order("category", { ascending: true })
+        .order("sort_order", { ascending: true });
+      if (data?.length) return data as GearProduct[];
+    } catch {
+      // Table may not exist yet (pre-migration) — degrade to empty.
+    }
+    return [];
+  },
+  ["gear-products"],
+  { tags: [GEAR_TAG], revalidate: 3600 }
+);
 
 export function groupGearByCategory(
   products: GearProduct[]

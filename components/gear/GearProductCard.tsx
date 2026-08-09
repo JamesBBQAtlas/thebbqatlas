@@ -41,6 +41,10 @@ export function GearProductCard({
     subtag,
     AMAZON_ONELINK_TAG
   );
+  // Hard rule: if this product's link can't earn (foreign store / foreign tag),
+  // do NOT render the card at all rather than ship a $0 buy control. The CI
+  // tripwire fails the build before this, and the admin QA view lists the row.
+  if (!finalHref) return null;
   const resolvedPartner = product.partner ?? detectPartner(product.affiliate_url);
 
   return (

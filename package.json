@@ -9,6 +9,8 @@
     "lint": "next lint",
     "enrich": "node scripts/enrich-venues.mjs",
     "audit:grants": "node scripts/audit-write-grants.mjs",
+    "audit:affiliate": "tsx scripts/audit-affiliate.mts",
+    "test:chain": "tsx scripts/test-chain-discovery.mts",
     "prepare": "husky"
   },
   "dependencies": {
@@ -47,6 +49,7 @@
     "playwright": "^1.61.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.11",
     "typescript": "^5.7.2"
   }
 }

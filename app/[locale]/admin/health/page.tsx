@@ -6,6 +6,7 @@ import { getGuides } from "@/lib/queries/guides";
 import { getNews } from "@/lib/queries/news";
 import { groupByCountry, groupByCity } from "@/lib/seo/hubs";
 import { BBQ_STYLES } from "@/lib/constants/styles";
+import { affiliateUrlEarns } from "@/lib/affiliate";
 import type { Restaurant } from "@/lib/types/database";
 
 export const metadata = { title: "SEO Health" };
@@ -75,6 +76,21 @@ export default async function HealthPage() {
     getNews(),
   ]);
   const total = venues.length;
+
+  // Affiliate hard-rule QA (Part 1.4): any SHIPPING Amazon link that can't earn
+  // (foreign store / foreign tag) — the same predicate the render path + CI use.
+  const [{ data: gearRows }, { data: bookRows }] = await Promise.all([
+    supabase.from("gear_products").select("name, affiliate_url, is_active").eq("is_active", true),
+    supabase.from("media_picks").select("name, url, is_published").eq("kind", "book").eq("is_published", true),
+  ]);
+  const affiliateFails: { label: string; url: string; where: string }[] = [
+    ...((gearRows ?? []) as { name: string; affiliate_url: string }[])
+      .filter((g) => /amazon\./i.test(g.affiliate_url) && !affiliateUrlEarns(g.affiliate_url))
+      .map((g) => ({ label: g.name, url: g.affiliate_url, where: "gear" })),
+    ...((bookRows ?? []) as { name: string; url: string }[])
+      .filter((b) => b.url && /amazon\./i.test(b.url) && !affiliateUrlEarns(b.url))
+      .map((b) => ({ label: b.name, url: b.url, where: "book" })),
+  ];
 
   const noGeo = venues.filter(
     (r) => !Number.isFinite(r.lat) || !Number.isFinite(r.lng) || (r.lat === 0 && r.lng === 0)
@@ -146,6 +162,34 @@ export default async function HealthPage() {
           </p>
         </div>
       </div>
+
+      {/* Affiliate hard-rule (James's #1): any shipping Amazon link that can't earn. */}
+      <section className={`mb-6 rounded-xl border p-5 ${affiliateFails.length ? "border-destructive/50 bg-destructive/5" : "border-brand-gold/30 bg-surface-0"}`}>
+        <h2 className="font-heading text-lg font-bold text-text-primary">
+          Affiliate earning rule{" "}
+          {affiliateFails.length ? (
+            <span className="text-destructive">— {affiliateFails.length} link{affiliateFails.length === 1 ? "" : "s"} earning $0</span>
+          ) : (
+            <span className="text-brand-gold">— all links earn ✓</span>
+          )}
+        </h2>
+        {affiliateFails.length > 0 && (
+          <>
+            <p className="mt-1 text-sm text-text-muted">
+              These are live on a foreign store or foreign tag, so they earn nothing under the US tag. Re-point to a US <code>amazon.com</code> link, or unpublish. (The push tripwire blocks a deploy while any remain.)
+            </p>
+            <ul className="mt-3 space-y-1.5">
+              {affiliateFails.map((f, i) => (
+                <li key={i} className="text-sm">
+                  <span className="mr-2 rounded bg-surface-1 px-1.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-wide text-text-muted">{f.where}</span>
+                  <span className="text-text-primary">{f.label}</span>
+                  <span className="ml-2 break-all text-xs text-text-muted">{f.url}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </section>
 
       <div className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <Tile label="Indexable pages" value={indexablePages} tone="good" />

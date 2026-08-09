@@ -40,6 +40,9 @@ export function AffiliateLink({
   const subtag = buildSubtag({ restaurantSlug, pagePath: pathname, product: product ?? label });
   const amazonTag = AMAZON_ONELINK_TAG;
   const finalHref = decorateAffiliateUrl(href, subtag, amazonTag);
+  // Hard rule: a non-earning Amazon link returns null here — never render a $0
+  // buy control (dev/build throws upstream so it's caught before it ships).
+  if (!finalHref) return null;
   const resolvedPartner = partner ?? detectPartner(href);
 
   return (

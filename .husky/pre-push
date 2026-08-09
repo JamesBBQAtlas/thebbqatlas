@@ -4,3 +4,8 @@
 # DB-audit half runs only if Supabase creds are in the local env and is
 # best-effort. This stops a bad push before it ever leaves the machine.
 npm run audit:grants
+# Affiliate hard-rule tripwire (James's #1): blocks a push that would ship a
+# non-earning Amazon link — a raw amazon href outside the choke point, or a
+# stored gear/book row on a foreign store / foreign tag. The DB half runs when
+# Supabase creds are in the local env; the logic + component scan always run.
+npm run audit:affiliate
