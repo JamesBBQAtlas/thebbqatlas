@@ -8,6 +8,7 @@ import { auditFromPatch, auditField } from "@/lib/admin/content-audit";
 import { BBQ_STYLES } from "@/lib/constants/styles";
 import { looksLikeSeedStub } from "@/lib/admin/seed-copy";
 import { ITEM_CATEGORIES } from "@/lib/ai/enrich";
+import { parseStoredFaq } from "@/lib/seo/venue-faq";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -83,6 +84,14 @@ export async function POST(request: Request) {
   if (has("style")) {
     const s = str(body.style);
     if (s && (BBQ_STYLES as readonly string[]).includes(s)) patch.style = s;
+  }
+  // Part G — operator-edited FAQ. A hand-edited FAQ is protected (manual_faq) so a
+  // later enrich can't overwrite it. Stored entries are marked source 'admin'.
+  if (has("faq")) {
+    const entries = parseStoredFaq(body.faq).map((e) => ({ q: e.q, a: e.a, source: "admin" as const }));
+    patch.faq = entries;
+    patch.manual_faq = true;
+    patch.manual_faq_at = new Date().toISOString();
   }
   // Part 5 — the operator setting the ITEM TYPE by hand is a confirmed value:
   // protect it (manual_category) so a later AI re-enrich never reclassifies it.

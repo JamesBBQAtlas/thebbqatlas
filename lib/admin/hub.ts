@@ -1,5 +1,6 @@
 import type { Restaurant } from "@/lib/types/database";
 import { STYLE_LABELS, BBQ_STYLES, type BbqStyle } from "@/lib/constants/styles";
+import { parseStoredFaq } from "@/lib/seo/venue-faq";
 import { resolveHero, heroSourceLabel, isRealPhoto } from "@/lib/constants/hero";
 import type { HubVenue } from "@/components/admin/VenueHub";
 
@@ -47,6 +48,9 @@ export function toHubVenue(r: Restaurant): HubVenue {
       description: r.description ?? null,
       style: r.style,
       category: (r.category as string | null) ?? null,
+      // Part G — operator-editable FAQ entries (auto-generated FAQ is computed at
+      // render, not stored here).
+      faq: parseStoredFaq((r as { faq?: unknown }).faq),
       address: r.address ?? null,
       phone: r.phone ?? null,
       website: r.website ?? null,

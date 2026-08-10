@@ -1897,6 +1897,19 @@ export function EditorPanel({
   const [hours, setHours] = useState<Record<string, string> | null>(
     f.hours && typeof f.hours === "object" ? (f.hours as Record<string, string>) : null
   );
+  // Part G — operator-editable FAQ (add/edit/remove/reorder). Saving marks the
+  // FAQ manual so a later enrich won't overwrite it.
+  const [faq, setFaq] = useState<{ q: string; a: string }[]>(
+    Array.isArray(f.faq) ? (f.faq as { q: string; a: string }[]).map((e) => ({ q: e.q ?? "", a: e.a ?? "" })) : []
+  );
+  const moveFaq = (i: number, dir: -1 | 1) =>
+    setFaq((prev) => {
+      const next = [...prev];
+      const j = i + dir;
+      if (j < 0 || j >= next.length) return prev;
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
   const [attachTo, setAttachTo] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -1928,6 +1941,7 @@ export function EditorPanel({
       price_level: price,
       offerings: offerings.split(",").map((o) => o.trim()).filter(Boolean),
       hours,
+      faq: faq.map((e) => ({ q: e.q.trim(), a: e.a.trim() })).filter((e) => e.q && e.a),
       regeocode,
     };
     if (!regeocode) {
@@ -2012,6 +2026,50 @@ export function EditorPanel({
       <div className="space-y-2">
         <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Opening hours</p>
         <HoursEditor value={hours} onChange={setHours} />
+      </div>
+
+      {/* Part G — per-venue FAQ editor. These entries merge ABOVE the auto-generated
+          FAQ on the venue page (and into the FAQPage JSON-LD). Saving marks the FAQ
+          hand-edited, so a later enrich won't overwrite it. */}
+      <div className="space-y-2">
+        <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">FAQ (shown above the auto-generated questions)</p>
+        {faq.length === 0 && (
+          <p className="text-xs text-text-muted">No custom FAQ yet — the venue page auto-generates style/location questions. Add your own below.</p>
+        )}
+        <div className="space-y-3">
+          {faq.map((e, i) => (
+            <div key={i} className="rounded-lg border border-border-subtle bg-surface-0 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[0.6875rem] font-semibold uppercase tracking-[0.05em] text-text-muted">Q{i + 1}</span>
+                <div className="flex items-center gap-1">
+                  <button type="button" onClick={() => moveFaq(i, -1)} disabled={i === 0} className="rounded border border-border-default px-2 py-0.5 text-xs text-text-secondary disabled:opacity-30" title="Move up">↑</button>
+                  <button type="button" onClick={() => moveFaq(i, 1)} disabled={i === faq.length - 1} className="rounded border border-border-default px-2 py-0.5 text-xs text-text-secondary disabled:opacity-30" title="Move down">↓</button>
+                  <button type="button" onClick={() => setFaq((p) => p.filter((_, k) => k !== i))} className="rounded border border-border-default px-2 py-0.5 text-xs text-destructive hover:border-destructive" title="Remove">✕</button>
+                </div>
+              </div>
+              <input
+                value={e.q}
+                onChange={(ev) => setFaq((p) => p.map((x, k) => (k === i ? { ...x, q: ev.target.value } : x)))}
+                className={`${fieldInput} mb-2`}
+                placeholder="Question (e.g. Do you take bookings?)"
+              />
+              <textarea
+                value={e.a}
+                onChange={(ev) => setFaq((p) => p.map((x, k) => (k === i ? { ...x, a: ev.target.value } : x)))}
+                rows={2}
+                className={`${fieldInput} resize-y`}
+                placeholder="Answer"
+              />
+            </div>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setFaq((p) => [...p, { q: "", a: "" }])}
+          className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"
+        >
+          + Add FAQ entry
+        </button>
       </div>
 
       {/* Featured video (Phase 6.7 B1) — validated via the YouTube Data API */}

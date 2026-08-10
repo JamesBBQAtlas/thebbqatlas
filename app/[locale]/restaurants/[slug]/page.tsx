@@ -32,6 +32,7 @@ import { VenueViewBeacon } from "@/components/restaurants/VenueViewBeacon";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd, eventJsonLd, faqPageJsonLd } from "@/lib/seo/jsonld";
 import { venueFaqs } from "@/lib/seo/hub-content";
+import { mergeVenueFaqs, parseStoredFaq } from "@/lib/seo/venue-faq";
 import { HubFaq } from "@/components/seo/HubFaq";
 import { StyleChip } from "@/components/restaurants/StyleChip";
 import { SITE, absoluteUrl } from "@/lib/seo/site";
@@ -222,7 +223,7 @@ export default async function RestaurantPage({ params }: Props) {
   const nearby = nearbyRows.map((r) => ({ r, km: r.distance_km }));
 
   // Data-driven venue FAQ (Fable H-4) — style + location, visible + JSON-LD.
-  const venueFaqList = venueFaqs({
+  const autoFaqList = venueFaqs({
     name: restaurant.name,
     styleLabel:
       restaurant.style && restaurant.style !== "other" ? STYLE_LABELS[restaurant.style] : null,
@@ -230,6 +231,13 @@ export default async function RestaurantPage({ params }: Props) {
     country: restaurant.country,
     address: restaurant.address,
   });
+  // Part G — merge operator-edited / approved venue-provided FAQ (stored on the
+  // row) with the auto-generated list; the venue's own answers lead. Both the
+  // visible accordion and the FAQPage JSON-LD use this single merged list.
+  const venueFaqList = mergeVenueFaqs(
+    parseStoredFaq((restaurant as { faq?: unknown }).faq),
+    autoFaqList
+  );
 
   // Sign uploaded photos, then flatten to plain rows for the client roster.
   const visitorAvatars = await getPublicAvatarSignedUrls(
