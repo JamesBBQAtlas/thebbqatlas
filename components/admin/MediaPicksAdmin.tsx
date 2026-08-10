@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2, Plus, ImageDown, Youtube, Pencil, X, Sparkles } from "lucide-react";
-import { findDuplicateByUrl, detectMediaKind } from "@/lib/media/wrl-url";
+import { Loader2, Trash2, Plus, ImageDown, Youtube, Pencil, X, Sparkles, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
+import { findDuplicateByUrl, detectMediaKind, moveItem } from "@/lib/media/wrl-url";
 
 export interface AdminMediaPick {
   id: string;
@@ -96,7 +96,6 @@ function Row({ pick, onEdit }: { pick: AdminMediaPick; onEdit: (p: AdminMediaPic
     draft.creator !== pick.creator ||
     draft.url !== pick.url ||
     draft.blurb !== pick.blurb ||
-    draft.sort_order !== pick.sort_order ||
     draft.image_url !== pick.image_url ||
     draft.gear_link !== pick.gear_link ||
     linksText !== initialLinks;
@@ -143,7 +142,7 @@ function Row({ pick, onEdit }: { pick: AdminMediaPick; onEdit: (p: AdminMediaPic
           Open ↗
         </a>
       </div>
-      <div className="grid gap-2 sm:grid-cols-[1fr_1fr_5rem]">
+      <div className="grid gap-2 sm:grid-cols-2">
         <input
           className={inputCls}
           value={draft.name}
@@ -155,13 +154,6 @@ function Row({ pick, onEdit }: { pick: AdminMediaPick; onEdit: (p: AdminMediaPic
           value={draft.creator ?? ""}
           onChange={(e) => setDraft({ ...draft, creator: e.target.value })}
           placeholder="Creator (optional)"
-        />
-        <input
-          className={inputCls}
-          type="number"
-          value={draft.sort_order}
-          onChange={(e) => setDraft({ ...draft, sort_order: parseInt(e.target.value, 10) || 0 })}
-          placeholder="Order"
         />
       </div>
       <input
@@ -210,7 +202,6 @@ function Row({ pick, onEdit }: { pick: AdminMediaPick; onEdit: (p: AdminMediaPic
               image_url: draft.image_url,
               gear_link: draft.gear_link,
               links: linksText,
-              sort_order: draft.sort_order,
             })
           }
           className="rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40"
@@ -688,6 +679,159 @@ function KpiHeader({ kpi }: { kpi: Kpi }) {
   );
 }
 
+/**
+ * Part B (B3) — one kind's list with curated-order editing. `sort_order` is the
+ * order visitors see, so it's made easy AND safe to set: a drag handle (with a
+ * live drop indicator + optimistic save that reverts on failure), keyboard
+ * ↑/↓ on the focused handle (with screen-reader announcements), explicit
+ * move-up / move-down, and a position-number input to jump an item to a slot.
+ * Reorder acts on the FULL kind list, so it's disabled while a search/filter is
+ * narrowing the view (the order would be ambiguous) — clear filters to reorder.
+ */
+function SectionList({
+  kind,
+  allRows,
+  match,
+  filtersActive,
+  onEdit,
+}: {
+  kind: AdminMediaPick["kind"];
+  allRows: AdminMediaPick[];
+  match: (r: AdminMediaPick) => boolean;
+  filtersActive: boolean;
+  onEdit: (p: AdminMediaPick) => void;
+}) {
+  const router = useRouter();
+  const kindRows = useMemo(
+    () => allRows.filter((r) => r.kind === kind).sort((a, b) => a.sort_order - b.sort_order),
+    [allRows, kind]
+  );
+  const [order, setOrder] = useState<AdminMediaPick[]>(kindRows);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [orderErr, setOrderErr] = useState("");
+  const [announce, setAnnounce] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  // Resync when the server data changes (after router.refresh()).
+  const sig = kindRows.map((r) => `${r.id}:${r.sort_order}`).join(",");
+  useEffect(() => {
+    setOrder(kindRows);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sig]);
+
+  // Reorder only makes sense on the full list (sort_order is global for the kind).
+  const canReorder = !filtersActive;
+  const visible = canReorder ? order : order.filter(match);
+
+  async function persist(next: AdminMediaPick[]) {
+    const prev = order;
+    setOrder(next); // optimistic
+    setSavingOrder(true);
+    setOrderErr("");
+    try {
+      const res = await fetch("/api/admin/media-picks/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: next.map((p) => p.id) }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setOrder(prev); // animate back to the last-known order
+        setOrderErr((d.error as string) || "Couldn't save the new order.");
+      } else {
+        router.refresh();
+      }
+    } catch {
+      setOrder(prev);
+      setOrderErr("Network error saving order.");
+    } finally {
+      setSavingOrder(false);
+    }
+  }
+
+  function move(from: number, to: number) {
+    if (!canReorder) return;
+    const dest = Math.max(0, Math.min(order.length - 1, to));
+    if (dest === from || from < 0) return;
+    const next = moveItem(order, from, dest);
+    setAnnounce(`${order[from].name} moved to position ${dest + 1} of ${order.length}.`);
+    persist(next);
+  }
+
+  if (visible.length === 0) {
+    return <p className="py-4 text-sm text-text-muted">{filtersActive ? "No matches." : "Nothing here yet."}</p>;
+  }
+
+  return (
+    <>
+      <div aria-live="polite" className="sr-only">{announce}</div>
+      {!canReorder && order.length > 1 && (
+        <p className="mb-2 text-xs text-text-muted">Clear search / filters to drag-reorder this list.</p>
+      )}
+      {orderErr && <p className="mb-2 text-xs text-destructive">{orderErr} — reverted to the saved order.</p>}
+      <div className="space-y-3">
+        {visible.map((pick) => {
+          const idx = order.findIndex((p) => p.id === pick.id);
+          const dropping = canReorder && dragIndex !== null && overIndex === idx && dragIndex !== idx;
+          return (
+            <div
+              key={pick.id}
+              className={"flex gap-2 rounded-lg transition-[box-shadow] " + (dropping ? "ring-2 ring-brand-gold/60" : "")}
+              onDragOver={canReorder ? (e) => { e.preventDefault(); setOverIndex(idx); } : undefined}
+              onDrop={canReorder ? (e) => { e.preventDefault(); if (dragIndex !== null) move(dragIndex, idx); setDragIndex(null); setOverIndex(null); } : undefined}
+            >
+              {canReorder && (
+                <div className="flex shrink-0 flex-col items-center gap-1 pt-2">
+                  <button
+                    type="button"
+                    draggable
+                    onDragStart={() => setDragIndex(idx)}
+                    onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowUp") { e.preventDefault(); move(idx, idx - 1); }
+                      else if (e.key === "ArrowDown") { e.preventDefault(); move(idx, idx + 1); }
+                    }}
+                    title="Drag to reorder — or focus and use ↑ / ↓"
+                    aria-label={`Reorder ${pick.name}. Position ${idx + 1} of ${order.length}. Press arrow up or down to move.`}
+                    className="cursor-grab rounded p-1 text-text-muted hover:text-brand-gold active:cursor-grabbing"
+                  >
+                    <GripVertical className="h-4 w-4" />
+                  </button>
+                  <button type="button" onClick={() => move(idx, idx - 1)} disabled={idx === 0} className="rounded p-0.5 text-text-muted hover:text-brand-gold disabled:opacity-30" aria-label="Move up">
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  </button>
+                  <input
+                    type="number"
+                    min={1}
+                    max={order.length}
+                    defaultValue={idx + 1}
+                    key={`pos-${pick.id}-${idx}`}
+                    onBlur={(e) => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v)) move(idx, v - 1); }}
+                    onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                    className="w-10 rounded border border-border-default bg-surface-1 px-1 py-0.5 text-center text-xs tabular-nums text-text-primary focus:border-brand-gold/60 focus:outline-none"
+                    title="Type a position and press Enter to jump there"
+                    aria-label={`Position of ${pick.name}`}
+                  />
+                  <button type="button" onClick={() => move(idx, idx + 1)} disabled={idx === order.length - 1} className="rounded p-0.5 text-text-muted hover:text-brand-gold disabled:opacity-30" aria-label="Move down">
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+              <div className="min-w-0 flex-1">
+                <Row pick={pick} onEdit={onEdit} />
+              </div>
+            </div>
+          );
+        })}
+        {savingOrder && (
+          <p className="text-xs text-text-muted"><Loader2 className="mr-1 inline h-3 w-3 animate-spin" />Saving order…</p>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function MediaPicksAdmin({ rows, kpi }: { rows: AdminMediaPick[]; kpi: Kpi }) {
   const router = useRouter();
   // Part B — three tabbed sections (Watch / Read / Listen), one at a time, so you
@@ -712,6 +856,7 @@ export function MediaPicksAdmin({ rows, kpi }: { rows: AdminMediaPick[]; kpi: Kp
     if (healthFilter === "unchecked" && (r.link_status ?? "unchecked") !== "unchecked") return false;
     return true;
   };
+  const filtersActive = query !== "" || pubFilter !== "all" || healthFilter !== "all";
   const brokenCount = rows.filter((r) => r.link_status === "broken").length;
   const sectionCount = (sec: Section) => rows.filter((r) => SECTION_KINDS[sec].includes(r.kind)).length;
   const sectionBroken = (sec: Section) =>
@@ -809,15 +954,13 @@ export function MediaPicksAdmin({ rows, kpi }: { rows: AdminMediaPick[]; kpi: Kp
 
       <div className="space-y-10">
         {shownKinds.map((kind) => {
-          const items = rows
-            .filter((r) => r.kind === kind && match(r))
-            .sort((a, b) => a.sort_order - b.sort_order);
+          const shownCount = rows.filter((r) => r.kind === kind && match(r)).length;
           return (
             <section key={kind} id={`wrl-${kind}`}>
               <div className="mb-3 flex items-center justify-between border-b border-border-subtle pb-2">
                 <h2 className="text-lg font-bold text-text-primary">
                   {KIND_LABEL[kind]}{" "}
-                  <span className="text-sm font-normal text-text-muted">({items.length})</span>
+                  <span className="text-sm font-normal text-text-muted">({shownCount})</span>
                 </h2>
                 <div className="flex flex-col items-end gap-2">
                   {kind === "book" && <ResolveCoversButton />}
@@ -830,15 +973,13 @@ export function MediaPicksAdmin({ rows, kpi }: { rows: AdminMediaPick[]; kpi: Kp
                   </button>
                 </div>
               </div>
-              <div className="space-y-3">
-                {items.length === 0 ? (
-                  <p className="py-4 text-sm text-text-muted">
-                    {query ? "No matches." : "Nothing here yet."}
-                  </p>
-                ) : (
-                  items.map((pick) => <Row key={pick.id} pick={pick} onEdit={(p) => setModal({ mode: "edit", pick: p })} />)
-                )}
-              </div>
+              <SectionList
+                kind={kind}
+                allRows={rows}
+                match={match}
+                filtersActive={filtersActive}
+                onEdit={(p) => setModal({ mode: "edit", pick: p })}
+              />
             </section>
           );
         })}
