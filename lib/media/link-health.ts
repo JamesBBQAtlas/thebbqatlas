@@ -1,7 +1,8 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { affiliateUrlEarns } from "@/lib/affiliate";
-import { classifyHttp, type LinkStatus } from "@/lib/media/link-health-util";
+import { classifyHttp, classifyChannelHealth, type LinkStatus } from "@/lib/media/link-health-util";
+import { extractYouTubeVideoId, extractYouTubeHandle, extractYouTubeChannelId } from "@/lib/media/wrl-url";
 
 export { classifyHttp, type LinkStatus };
 
@@ -57,22 +58,55 @@ const AMAZON_DEAD = /(Looking for something\?|we couldn't find that page|Page No
 /** YouTube "channel gone" body markers as a fallback to the oEmbed check. */
 const YT_DEAD = /(This channel does not exist|has been terminated|account associated with this video has been terminated|isn't available)/i;
 
-async function checkYouTube(url: string): Promise<LinkHealth> {
-  // Primary signal: the oEmbed endpoint 404s for a gone/nonexistent channel even
-  // when the channel page itself returns 200 with a "does not exist" page.
+/**
+ * A single VIDEO — oEmbed is the right tool (it's what oEmbed supports). A gone
+ * video 404s; a live one 200s. Transient/5xx → unchecked, never broken.
+ */
+async function checkYouTubeVideo(url: string): Promise<LinkHealth> {
   const oembed = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
   const res = await timedFetch(oembed, { method: "GET", timeoutMs: 10_000 });
   if (res === null) return { status: "unchecked", code: null, note: "network error — will retry" };
   if (res.status === 200) return { status: "ok", code: 200, note: null };
   if (res.status === 404 || res.status === 401)
-    return { status: "broken", code: res.status, note: "channel unavailable (oEmbed 404)" };
+    return { status: "broken", code: res.status, note: "video unavailable (oEmbed 404)" };
   if (res.status >= 500) return { status: "unchecked", code: res.status, note: "YouTube 5xx — will retry" };
-  // Fallback: fetch the page and look for the "does not exist / terminated" copy.
+  // Fallback: fetch the watch page and look for the "unavailable" copy.
   const page = await timedFetch(url, { method: "GET", timeoutMs: 10_000 });
   if (page === null) return { status: "unchecked", code: null, note: "network error — will retry" };
   const body = await page.text().catch(() => "");
-  if (YT_DEAD.test(body)) return { status: "broken", code: page.status, note: "channel unavailable" };
+  if (YT_DEAD.test(body)) return { status: "broken", code: page.status, note: "video unavailable" };
   return { status: classifyHttp(page.status), code: page.status, note: null };
+}
+
+/**
+ * A CHANNEL — oEmbed does NOT support channels (a live channel always 404s
+ * there), which is exactly what false-flagged the whole Watch section. Validate
+ * via the YouTube Data API `channels.list` (part=id, forHandle= / id=) with the
+ * existing YOUTUBE_API_KEY: 200 + a matching item ⇒ OK, empty items ⇒ broken,
+ * any API/network error ⇒ unchecked (never broken). With no key, fall back to a
+ * plain page GET treated as OK on 2xx/3xx unless the "channel gone" copy shows.
+ */
+async function checkYouTubeChannel(url: string): Promise<LinkHealth> {
+  const key = process.env.YOUTUBE_API_KEY;
+  const channelId = extractYouTubeChannelId(url);
+  const handle = extractYouTubeHandle(url);
+  if (key && (channelId || handle)) {
+    const selector = channelId ? `id=${encodeURIComponent(channelId)}` : `forHandle=${encodeURIComponent(handle!)}`;
+    const res = await timedFetch(
+      `https://www.googleapis.com/youtube/v3/channels?part=id&${selector}&key=${key}`,
+      { method: "GET", timeoutMs: 10_000 }
+    );
+    if (res === null) return classifyChannelHealth({ kind: "network" });
+    if (!res.ok) return classifyChannelHealth({ kind: "api_error", code: res.status });
+    const data = (await res.json().catch(() => null)) as { items?: unknown[] } | null;
+    if (!data) return classifyChannelHealth({ kind: "api_error", code: res.status });
+    return classifyChannelHealth({ kind: "items", count: Array.isArray(data.items) ? data.items.length : 0 });
+  }
+  // No API key (or an unparseable URL) — page fallback.
+  const page = await timedFetch(url, { method: "GET", timeoutMs: 10_000 });
+  if (page === null) return classifyChannelHealth({ kind: "network" });
+  const body = await page.text().catch(() => "");
+  return classifyChannelHealth({ kind: "page", status: page.status, dead: YT_DEAD.test(body) });
 }
 
 async function checkAmazon(url: string): Promise<LinkHealth> {
@@ -105,7 +139,15 @@ export async function checkMediaLink(pick: CheckablePick): Promise<LinkHealth> {
   const isAmazon = (u: string | null | undefined) => Boolean(u && /(^|\.)amazon\./i.test(u));
   try {
     if (pick.kind === "youtube" || pick.kind === "video") {
-      return await checkYouTube(pick.url);
+      // Dispatch by what the URL actually IS, not just the stored kind, so a
+      // mis-filed row (a video saved as 'youtube', or vice-versa) still checks
+      // correctly. A channel has an @handle or /channel/UC…; a video has an id.
+      const looksVideo =
+        Boolean(extractYouTubeVideoId(pick.url)) &&
+        !extractYouTubeHandle(pick.url) &&
+        !extractYouTubeChannelId(pick.url);
+      const isChannel = pick.kind === "youtube" && !looksVideo;
+      return isChannel ? await checkYouTubeChannel(pick.url) : await checkYouTubeVideo(pick.url);
     }
     if (pick.kind === "book") {
       // The affiliate/buy link is what visitors click; check that. A dead book
