@@ -105,6 +105,69 @@ export function handleFrom(url: string | null | undefined): string | null {
   return m ? m[1] : null;
 }
 
+/** Channel id from a /channel/UC… URL. */
+export function channelIdFrom(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const m = String(url).match(/\/channel\/(UC[A-Za-z0-9_-]{20,})/);
+  return m ? m[1] : null;
+}
+
+export interface YouTubeChannelMeta {
+  channelId: string | null;
+  title: string;
+  handle: string | null;
+  thumb: string | null;
+}
+
+/**
+ * Resolve a channel's display metadata (name + handle + avatar + id) for the WRL
+ * "Add a YouTube channel" flow (Part B, B4). Accepts an @handle or /channel/UC…
+ * URL. Returns null with no key / no resolvable selector so the operator just
+ * types the name by hand. Server-side only.
+ */
+export async function resolveYouTubeChannelMeta(
+  url: string
+): Promise<YouTubeChannelMeta | null> {
+  const key = process.env.YOUTUBE_API_KEY;
+  const channelId0 = channelIdFrom(url);
+  const handle = handleFrom(url);
+  const selector = channelId0
+    ? `id=${encodeURIComponent(channelId0)}`
+    : handle
+      ? `forHandle=${encodeURIComponent(handle)}`
+      : null;
+  if (!key || !selector) return null;
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/channels?part=snippet&${selector}&key=${key}`,
+      { next: { revalidate: 86400 } }
+    );
+    if (!res.ok) return null;
+    const ch = (
+      (await res.json()) as {
+        items?: {
+          id?: string;
+          snippet?: {
+            title?: string;
+            customUrl?: string;
+            thumbnails?: Record<string, { url?: string }>;
+          };
+        }[];
+      }
+    ).items?.[0];
+    if (!ch) return null;
+    const custom = ch.snippet?.customUrl ?? null; // e.g. "@mad_scientist_bbq"
+    return {
+      channelId: ch.id ?? channelId0 ?? null,
+      title: ch.snippet?.title ?? "",
+      handle: (custom ? custom.replace(/^@/, "") : handle) ?? null,
+      thumb: bestThumb(ch.snippet?.thumbnails, ["high", "medium", "default"]),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Channel avatar + subscriber count (+ latest upload) via the YouTube Data API.
  * Reads YOUTUBE_API_KEY from env (set in Vercel); returns null with no key so the

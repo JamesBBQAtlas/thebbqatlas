@@ -17,6 +17,7 @@
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",
     "test:dedupe": "tsx scripts/test-submission-dedupe.mts",
     "test:link-health": "tsx scripts/test-link-health.mts",
+    "test:wrl": "tsx scripts/test-wrl-url.mts",
     "prepare": "husky"
   },
   "dependencies": {

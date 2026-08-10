@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2, Plus, ImageDown, Youtube } from "lucide-react";
+import { Loader2, Trash2, Plus, ImageDown, Youtube, Pencil, X, Sparkles } from "lucide-react";
+import { findDuplicateByUrl, detectMediaKind } from "@/lib/media/wrl-url";
 
 export interface AdminMediaPick {
   id: string;
@@ -82,7 +84,7 @@ function LinkHealthBadge({ status, note }: { status?: string | null; note?: stri
   );
 }
 
-function Row({ pick }: { pick: AdminMediaPick }) {
+function Row({ pick, onEdit }: { pick: AdminMediaPick; onEdit: (p: AdminMediaPick) => void }) {
   const router = useRouter();
   const [draft, setDraft] = useState(pick);
   const initialLinks = JSON.stringify(pick.links ?? {}, null, 0);
@@ -240,10 +242,19 @@ function Row({ pick }: { pick: AdminMediaPick }) {
         <button
           type="button"
           disabled={busy}
+          onClick={() => onEdit(pick)}
+          className="ml-auto inline-flex items-center gap-1 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"
+          title="Open the full editor (with URL auto-fetch)"
+        >
+          <Pencil className="h-3.5 w-3.5" /> Edit
+        </button>
+        <button
+          type="button"
+          disabled={busy}
           onClick={() => {
             if (confirm(`Delete "${pick.name}"?`)) run("DELETE", { id: pick.id });
           }}
-          className="ml-auto inline-flex items-center gap-1 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-muted hover:border-destructive/60 hover:text-destructive"
+          className="inline-flex items-center gap-1 rounded-md border border-border-default px-2.5 py-1.5 text-xs font-semibold text-text-muted hover:border-destructive/60 hover:text-destructive"
         >
           <Trash2 className="h-3.5 w-3.5" /> Delete
         </button>
@@ -254,262 +265,274 @@ function Row({ pick }: { pick: AdminMediaPick }) {
   );
 }
 
-function AddForm({ kind }: { kind: AdminMediaPick["kind"] }) {
-  const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ name: "", creator: "", url: "", blurb: "" });
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+/** Which WRL kinds each section can add (Watch offers channels OR episodes). */
+const SECTION_ADD_KINDS: Record<Section, AdminMediaPick["kind"][]> = {
+  watch: ["youtube", "video"],
+  read: ["book"],
+  listen: ["podcast"],
+};
+const KIND_ADD_LABEL: Record<AdminMediaPick["kind"], string> = {
+  youtube: "YouTube channel",
+  video: "Episode (single video)",
+  book: "Book",
+  podcast: "Podcast",
+};
+const KIND_URL_HINT: Record<AdminMediaPick["kind"], string> = {
+  youtube: "Paste the channel URL (youtube.com/@handle or /channel/UC…)",
+  video: "Paste a YouTube video URL (watch / youtu.be / shorts)",
+  book: "Paste the Amazon product page URL",
+  podcast: "Paste the Apple Podcasts (or Spotify) show URL",
+};
 
-  async function create() {
-    setBusy(true);
-    setError("");
-    const { ok, error } = await api("POST", {
-      kind,
-      name: draft.name,
-      creator: draft.creator || undefined,
-      url: draft.url,
-      blurb: draft.blurb,
-      is_published: true,
-    });
-    setBusy(false);
-    if (!ok) return setError(error || "Failed.");
-    setDraft({ name: "", creator: "", url: "", blurb: "" });
-    setOpen(false);
-    router.refresh();
-  }
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"
-      >
-        <Plus className="h-3.5 w-3.5" /> Add entry
-      </button>
-    );
-  }
-  return (
-    <div className="rounded-lg border border-brand-gold/40 bg-surface-0 p-4">
-      <div className="grid gap-2 sm:grid-cols-2">
-        <input
-          className={inputCls}
-          value={draft.name}
-          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          placeholder="Name"
-        />
-        <input
-          className={inputCls}
-          value={draft.creator}
-          onChange={(e) => setDraft({ ...draft, creator: e.target.value })}
-          placeholder="Creator (optional)"
-        />
-      </div>
-      <input
-        className={inputCls + " mt-2"}
-        value={draft.url}
-        onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-        placeholder="URL (Amazon product page for books)"
-      />
-      <textarea
-        className={inputCls + " mt-2 resize-none"}
-        rows={2}
-        value={draft.blurb}
-        onChange={(e) => setDraft({ ...draft, blurb: e.target.value })}
-        placeholder="Blurb"
-      />
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={create}
-          className="rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40"
-        >
-          Create
-        </button>
-        <button
-          type="button"
-          onClick={() => setOpen(false)}
-          className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted"
-        >
-          Cancel
-        </button>
-        {busy && <Loader2 className="h-4 w-4 animate-spin text-brand-gold" />}
-      </div>
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-    </div>
-  );
-}
-
-interface ResolvedVideo {
-  videoId: string;
-  title: string;
-  channelTitle: string;
-  thumb: string | null;
-  duration: string | null;
-  row: {
-    kind: string;
-    name: string;
-    creator: string;
-    url: string;
-    image_url: string | null;
-    links: Record<string, string>;
-  };
-}
+export type ModalState =
+  | { mode: "add"; kind: AdminMediaPick["kind"] }
+  | { mode: "edit"; pick: AdminMediaPick };
 
 /**
- * "Episodes We Love" add form (Phase 6.5). Paste a YouTube video URL → the server
- * validates + resolves title/channel/thumbnail/duration via the YouTube Data API
- * → auto-fill → add a "why we love it" blurb → save. Fully self-serve, no code.
+ * Part B (B4) — the add/edit modal. One panel for both adding a new pick and
+ * editing an existing one, with **URL auto-fetch**: paste a link, hit "Fetch",
+ * and the server fills name/creator/avatar (channel) / cover (book) / artwork
+ * (podcast) / title+thumb (episode). The blurb is always hand-written. A live
+ * **duplicate guard** warns before you add a URL that's already in the library.
+ * Books keep their raw Amazon URL (the affiliate tag is applied only at render).
  */
-function AddVideoForm() {
+function MediaPickModal({
+  state,
+  allRows,
+  onClose,
+}: {
+  state: ModalState;
+  allRows: AdminMediaPick[];
+  onClose: () => void;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [url, setUrl] = useState("");
-  const [blurb, setBlurb] = useState("");
-  const [resolved, setResolved] = useState<ResolvedVideo | null>(null);
+  const isEdit = state.mode === "edit";
+  const seed = isEdit ? state.pick : null;
+
+  const [kind, setKind] = useState<AdminMediaPick["kind"]>(isEdit ? seed!.kind : state.kind);
+  const [url, setUrl] = useState(seed?.url ?? "");
+  const [name, setName] = useState(seed?.name ?? "");
+  const [creator, setCreator] = useState(seed?.creator ?? "");
+  const [blurb, setBlurb] = useState(seed?.blurb ?? "");
+  const [imageUrl, setImageUrl] = useState(seed?.image_url ?? "");
+  const [gearLink, setGearLink] = useState(seed?.gear_link ?? "");
+  const [linksText, setLinksText] = useState(JSON.stringify(seed?.links ?? {}, null, 0));
+  const [published, setPublished] = useState(seed?.is_published ?? true);
+  const [fetching, setFetching] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
 
-  function reset() {
-    setUrl("");
-    setBlurb("");
-    setResolved(null);
-    setError("");
-    setOpen(false);
-  }
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    firstFieldRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
-  async function resolve() {
-    setBusy(true);
+  // Live duplicate guard — skip the row being edited.
+  const dup = url.trim() ? findDuplicateByUrl(url, allRows, seed?.id) : null;
+  // The three sections keep their own kinds; Watch can switch youtube↔video.
+  const addKinds = isEdit ? [kind] : SECTION_ADD_KINDS[
+    (Object.keys(SECTION_ADD_KINDS) as Section[]).find((s) => SECTION_ADD_KINDS[s].includes(kind)) ?? "watch"
+  ];
+
+  async function fetchMeta() {
+    if (!url.trim()) return;
+    setFetching(true);
     setError("");
-    setResolved(null);
+    setWarnings([]);
     try {
-      const res = await fetch("/api/admin/media-picks/resolve-video", {
+      const res = await fetch("/api/admin/media-picks/resolve-meta", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url: url.trim(), kind }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) setError((data.error as string) || "Couldn't resolve that video.");
-      else setResolved(data as ResolvedVideo);
+      if (!res.ok) {
+        setError((data.error as string) || "Couldn't read that URL.");
+        return;
+      }
+      const row = (data.row ?? {}) as Partial<AdminMediaPick> & { links?: Record<string, string> };
+      if (row.kind && !isEdit) setKind(row.kind as AdminMediaPick["kind"]);
+      if (row.url) setUrl(row.url);
+      // Fill empties; don't stomp anything the operator already typed.
+      if (row.name) setName((v) => v || String(row.name));
+      if (row.creator) setCreator((v) => v || String(row.creator));
+      if (row.image_url) setImageUrl(String(row.image_url));
+      if (row.links && Object.keys(row.links).length) setLinksText(JSON.stringify(row.links, null, 0));
+      setWarnings(Array.isArray(data.warnings) ? (data.warnings as string[]) : []);
     } catch {
       setError("Network error.");
     } finally {
-      setBusy(false);
+      setFetching(false);
     }
   }
 
-  async function create() {
-    if (!resolved) return;
+  const canSave = Boolean(name.trim() && url.trim() && blurb.trim()) && !busy;
+
+  async function save() {
     setBusy(true);
     setError("");
-    const { ok, error } = await api("POST", {
-      ...resolved.row,
-      blurb: blurb || `A ${resolved.channelTitle} video worth your time.`,
-      links: JSON.stringify(resolved.row.links),
-      is_published: true,
-    });
+    const payload: Record<string, unknown> = {
+      kind,
+      name: name.trim(),
+      creator: creator.trim() || undefined,
+      url: url.trim(),
+      blurb: blurb.trim(),
+      image_url: imageUrl.trim() || undefined,
+      gear_link: gearLink.trim() || undefined,
+      links: linksText.trim() || "{}",
+      is_published: published,
+    };
+    let res: { ok: boolean; error?: string };
+    if (isEdit) {
+      payload.id = seed!.id;
+      res = await api("PATCH", payload);
+    } else {
+      res = await api("POST", payload);
+    }
     setBusy(false);
-    if (!ok) return setError(error || "Failed.");
-    reset();
+    if (!res.ok) return setError(res.error || "Failed to save.");
+    onClose();
     router.refresh();
   }
 
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"
-      >
-        <Plus className="h-3.5 w-3.5" /> Add a video
-      </button>
-    );
-  }
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/70 p-4 sm:p-8"
+      role="dialog"
+      aria-modal="true"
+      aria-label={isEdit ? "Edit library item" : "Add to the library"}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-xl rounded-xl border border-border-default bg-surface-0 p-5 shadow-2xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-bold text-text-primary">
+            {isEdit ? "Edit item" : "Add to the library"}
+          </h3>
+          <button type="button" onClick={onClose} className="rounded-md p-1 text-text-muted hover:text-text-primary" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
 
-  return (
-    <div className="rounded-lg border border-brand-gold/40 bg-surface-0 p-4">
-      <div className="flex gap-2">
-        <input
-          className={inputCls}
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="Paste a YouTube video URL"
-        />
-        <button
-          type="button"
-          disabled={busy || !url.trim()}
-          onClick={resolve}
-          className="shrink-0 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
-        >
-          {busy && !resolved ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Resolve"}
-        </button>
-      </div>
-
-      {resolved && (
-        <div className="mt-3 space-y-2">
-          <div className="flex gap-3">
-            {resolved.thumb ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={resolved.thumb}
-                alt=""
-                className="h-16 w-28 shrink-0 rounded object-cover"
-                referrerPolicy="no-referrer"
-              />
-            ) : (
-              <div className="flex h-16 w-28 shrink-0 items-center justify-center rounded bg-surface-1">
-                <Youtube className="h-5 w-5 text-brand-gold/50" />
-              </div>
-            )}
-            <div className="min-w-0 text-xs">
-              <p className="font-semibold text-text-primary">{resolved.title}</p>
-              <p className="text-text-muted">
-                {resolved.channelTitle}
-                {resolved.duration ? ` · ${resolved.duration}` : ""}
-              </p>
-            </div>
+        {/* Kind picker (add only) */}
+        {!isEdit && addKinds.length > 1 && (
+          <div className="mb-3 inline-flex gap-1 rounded-lg border border-border-subtle bg-surface-1 p-1">
+            {addKinds.map((k) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setKind(k)}
+                className={
+                  "rounded-md px-2.5 py-1 text-xs font-semibold " +
+                  (kind === k ? "bg-brand-gold text-text-inverse" : "text-text-secondary hover:text-text-primary")
+                }
+              >
+                {KIND_ADD_LABEL[k]}
+              </button>
+            ))}
           </div>
-          <textarea
-            className={inputCls + " resize-none"}
-            rows={2}
-            value={blurb}
-            onChange={(e) => setBlurb(e.target.value)}
-            placeholder="Why we love it (optional — site voice)"
+        )}
+
+        {/* URL + auto-fetch */}
+        <label className="block text-xs font-semibold text-text-muted">Link</label>
+        <div className="mt-1 flex gap-2">
+          <input
+            ref={firstFieldRef}
+            className={inputCls}
+            value={url}
+            onChange={(e) => { setUrl(e.target.value); if (!isEdit) { const k = detectMediaKind(e.target.value); if (k && SECTION_ADD_KINDS[(Object.keys(SECTION_ADD_KINDS) as Section[]).find((s) => SECTION_ADD_KINDS[s].includes(kind)) ?? "watch"].includes(k)) setKind(k); } }}
+            placeholder={KIND_URL_HINT[kind]}
           />
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={create}
-              className="rounded-md bg-brand-gold px-3 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40"
-            >
-              Add episode
-            </button>
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted"
-            >
-              Cancel
-            </button>
-            {busy && <Loader2 className="h-4 w-4 animate-spin text-brand-gold" />}
+          <button
+            type="button"
+            disabled={fetching || !url.trim()}
+            onClick={fetchMeta}
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40"
+            title="Auto-fill name, creator and image from this URL"
+          >
+            {fetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+            Fetch
+          </button>
+        </div>
+
+        {/* Duplicate guard */}
+        {dup && (
+          <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-400">
+            Already in the library as “{dup.name}” ({KIND_ADD_LABEL[dup.kind]}). Adding it again will create a duplicate.
+          </p>
+        )}
+
+        {/* Preview + fields */}
+        <div className="mt-3 flex gap-3">
+          {imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={imageUrl} alt="" className="h-16 w-16 shrink-0 rounded object-cover" referrerPolicy="no-referrer" />
+          ) : (
+            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded bg-surface-2 text-text-muted">
+              {kind === "youtube" || kind === "video" ? <Youtube className="h-5 w-5" /> : <ImageDown className="h-5 w-5" />}
+            </span>
+          )}
+          <div className="grid flex-1 gap-2">
+            <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name / title" />
+            <input className={inputCls} value={creator} onChange={(e) => setCreator(e.target.value)} placeholder={kind === "book" ? "Author" : kind === "podcast" ? "Publisher" : "Creator / channel"} />
           </div>
         </div>
-      )}
 
-      {!resolved && (
-        <button
-          type="button"
-          onClick={reset}
-          className="mt-2 text-xs font-semibold text-text-muted hover:text-text-secondary"
-        >
-          Cancel
-        </button>
-      )}
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-    </div>
+        <textarea
+          className={inputCls + " mt-2 resize-none"}
+          rows={2}
+          value={blurb}
+          onChange={(e) => setBlurb(e.target.value)}
+          placeholder="Blurb — written in-house, in the site voice (required)"
+        />
+
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs font-semibold text-text-muted hover:text-text-secondary">More fields</summary>
+          <div className="mt-2 space-y-2">
+            <input className={inputCls} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="Image URL (auto-filled by Fetch)" />
+            <input className={inputCls} value={gearLink} onChange={(e) => setGearLink(e.target.value)} placeholder="Gear link (optional → /gear)" />
+            <textarea
+              className={inputCls + " resize-none font-mono text-xs"}
+              rows={2}
+              value={linksText}
+              onChange={(e) => setLinksText(e.target.value)}
+              placeholder={`Platform links JSON — e.g. {"apple":"…","spotify":"…"}`}
+            />
+          </div>
+        </details>
+
+        <label className="mt-3 flex items-center gap-2 text-xs text-text-secondary">
+          <input type="checkbox" checked={published} onChange={(e) => setPublished(e.target.checked)} className="h-3.5 w-3.5" />
+          Published (unchecked = draft, hidden from the public page)
+        </label>
+
+        {warnings.length > 0 && (
+          <ul className="mt-2 space-y-0.5 text-xs text-amber-400">
+            {warnings.map((w, i) => <li key={i}>• {w}</li>)}
+          </ul>
+        )}
+        {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            type="button"
+            disabled={!canSave}
+            onClick={save}
+            className="rounded-md bg-brand-gold px-3.5 py-1.5 text-xs font-bold uppercase tracking-[0.06em] text-text-inverse hover:bg-brand-gold/90 disabled:opacity-40"
+          >
+            {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : isEdit ? "Save changes" : "Add to library"}
+          </button>
+          <button type="button" onClick={onClose} className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-text-muted">
+            Cancel
+          </button>
+          {!canSave && !busy && <span className="text-xs text-text-muted">Name, link and blurb are required.</span>}
+        </div>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -675,6 +698,8 @@ export function MediaPicksAdmin({ rows, kpi }: { rows: AdminMediaPick[]; kpi: Kp
   const [healthFilter, setHealthFilter] = useState<"all" | "ok" | "broken" | "unchecked">("all");
   const [reviewing, setReviewing] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
+  // Part B (B4) — the shared add/edit modal (null = closed).
+  const [modal, setModal] = useState<ModalState | null>(null);
   const query = q.trim().toLowerCase();
 
   const shownKinds = SECTION_KINDS[section];
@@ -796,7 +821,13 @@ export function MediaPicksAdmin({ rows, kpi }: { rows: AdminMediaPick[]; kpi: Kp
                 </h2>
                 <div className="flex flex-col items-end gap-2">
                   {kind === "book" && <ResolveCoversButton />}
-                  {kind === "video" ? <AddVideoForm /> : <AddForm kind={kind} />}
+                  <button
+                    type="button"
+                    onClick={() => setModal({ mode: "add", kind })}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> Add {KIND_ADD_LABEL[kind]}
+                  </button>
                 </div>
               </div>
               <div className="space-y-3">
@@ -805,13 +836,15 @@ export function MediaPicksAdmin({ rows, kpi }: { rows: AdminMediaPick[]; kpi: Kp
                     {query ? "No matches." : "Nothing here yet."}
                   </p>
                 ) : (
-                  items.map((pick) => <Row key={pick.id} pick={pick} />)
+                  items.map((pick) => <Row key={pick.id} pick={pick} onEdit={(p) => setModal({ mode: "edit", pick: p })} />)
                 )}
               </div>
             </section>
           );
         })}
       </div>
+
+      {modal && <MediaPickModal state={modal} allRows={rows} onClose={() => setModal(null)} />}
     </div>
   );
 }

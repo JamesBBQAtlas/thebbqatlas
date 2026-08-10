@@ -147,3 +147,49 @@ export async function resolveBookCover(
 ): Promise<string | null> {
   return (await fromItunes(title, author)) ?? (await fromGoogle(amazonUrl, title, author));
 }
+
+export interface BookMeta {
+  title: string;
+  author: string | null;
+  cover: string | null;
+}
+
+/**
+ * Resolve a book's title/author/cover from just an Amazon URL, for the WRL "Add
+ * a book" flow (Part B, B4). Looks the ISBN up on Google Books; falls back to
+ * iTunes for a cover if Google has no image. Returns null when there's no ISBN
+ * in the URL or nothing resolves — the operator then types title/author by hand.
+ * We deliberately DON'T decorate or store the affiliate tag here: the raw Amazon
+ * product URL is stored, and the earn-tag is applied only at render by
+ * AffiliateLink (keeps the "no link ships unless it earns" rule intact).
+ * Server-side only.
+ */
+export async function resolveBookByUrl(amazonUrl: string): Promise<BookMeta | null> {
+  const isbn = isbnFromAmazon(amazonUrl);
+  if (!isbn) return null;
+  const key = process.env.GOOGLE_BOOKS_API_KEY;
+  try {
+    const res = await fetch(
+      `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}&country=US${
+        key ? `&key=${key}` : ""
+      }`,
+      { next: { revalidate: 604800 } }
+    );
+    if (!res.ok) return null;
+    const vi = (
+      (await res.json()) as {
+        items?: { volumeInfo?: { title?: string; authors?: string[]; imageLinks?: Record<string, string> } }[];
+      }
+    ).items?.[0]?.volumeInfo;
+    if (!vi?.title) return null;
+    const author = vi.authors && vi.authors.length ? vi.authors.join(", ") : null;
+    const img = vi.imageLinks?.thumbnail ?? vi.imageLinks?.smallThumbnail ?? null;
+    const cover =
+      (img
+        ? img.replace(/^http:\/\//, "https://").replace(/&edge=curl/, "").replace(/&zoom=\d/, "")
+        : null) ?? (await fromItunes(vi.title, author));
+    return { title: vi.title, author, cover };
+  } catch {
+    return null;
+  }
+}
