@@ -313,9 +313,15 @@ export async function POST(request: Request) {
       if (!review) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
+      // Part E — record who/when/why on the decision.
       await admin
         .from("reviews")
-        .update({ status: action === "approve" ? "approved" : "rejected" })
+        .update({
+          status: action === "approve" ? "approved" : "rejected",
+          moderated_by: ctx.userId,
+          moderated_at: new Date().toISOString(),
+          moderation_note: notes ?? null,
+        })
         .eq("id", id);
       if (review.restaurant_id) {
         await recomputeReviewStats(admin, review.restaurant_id);
@@ -326,7 +332,12 @@ export async function POST(request: Request) {
     if (type === "photo") {
       await admin
         .from("review_photos")
-        .update({ status: action === "approve" ? "approved" : "rejected" })
+        .update({
+          status: action === "approve" ? "approved" : "rejected",
+          moderated_by: ctx.userId,
+          moderated_at: new Date().toISOString(),
+          moderation_note: notes ?? null,
+        })
         .eq("id", id);
       return NextResponse.json({ ok: true });
     }

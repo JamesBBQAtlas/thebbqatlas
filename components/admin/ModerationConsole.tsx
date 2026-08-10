@@ -75,6 +75,18 @@ function fmtDate(iso: string) {
 }
 
 /** Approve / Reject buttons shared across every queue item. */
+// Part E — reject reason codes for the audit trail. Approve stays one click; a
+// reject asks for a reason before it fires, and the label is stored as the
+// moderation note (admin_notes) so we can see WHY something was rejected.
+const REJECT_REASONS: { code: string; label: string }[] = [
+  { code: "spam", label: "Spam" },
+  { code: "low_quality", label: "Low quality" },
+  { code: "wrong_venue", label: "Wrong venue" },
+  { code: "inappropriate", label: "Inappropriate" },
+  { code: "duplicate", label: "Duplicate" },
+  { code: "other", label: "Other" },
+];
+
 function Actions({
   busy,
   onApprove,
@@ -83,9 +95,49 @@ function Actions({
 }: {
   busy: boolean;
   onApprove: () => void;
-  onReject: () => void;
+  onReject: (reason: string) => void;
   approveLabel?: string;
 }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState(REJECT_REASONS[0].label);
+
+  if (rejecting) {
+    return (
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <select
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          aria-label="Reason for rejecting"
+          className="rounded-md border border-border-default bg-surface-0 px-2 py-2 text-xs text-text-primary focus:outline-none"
+        >
+          {REJECT_REASONS.map((r) => (
+            <option key={r.code} value={r.label}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            onReject(reason);
+            setRejecting(false);
+          }}
+          className="inline-flex items-center gap-1.5 rounded-md bg-destructive px-3 py-2 text-xs font-bold uppercase tracking-[0.06em] text-text-inverse transition-colors hover:bg-destructive/90 disabled:opacity-40"
+        >
+          <X className="h-3.5 w-3.5" /> Confirm
+        </button>
+        <button
+          type="button"
+          onClick={() => setRejecting(false)}
+          className="rounded-md border border-border-default px-3 py-2 text-xs font-semibold text-text-muted hover:text-text-secondary"
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex shrink-0 gap-2">
       <button
@@ -98,7 +150,7 @@ function Actions({
       </button>
       <button
         type="button"
-        onClick={onReject}
+        onClick={() => setRejecting(true)}
         disabled={busy}
         className="inline-flex items-center gap-1.5 rounded-md border border-border-default px-3.5 py-2 text-xs font-semibold uppercase tracking-[0.06em] text-text-secondary transition-colors hover:border-destructive hover:text-destructive disabled:opacity-40"
       >
@@ -377,7 +429,7 @@ export function ModerationConsole({
                   <Actions
                     busy={busy === c.id}
                     onApprove={() => act("submission", c.id, "approve", "corrections")}
-                    onReject={() => act("submission", c.id, "reject", "corrections")}
+                    onReject={(reason) => act("submission", c.id, "reject", "corrections", `Rejected — ${reason}`)}
                   />
                 </div>
               </div>
@@ -436,7 +488,7 @@ export function ModerationConsole({
                   <Actions
                     busy={busy === c.id}
                     onApprove={() => act("claim", c.id, "approve", "claims")}
-                    onReject={() => act("claim", c.id, "reject", "claims")}
+                    onReject={(reason) => act("claim", c.id, "reject", "claims", `Rejected — ${reason}`)}
                   />
                 </div>
               </div>
@@ -470,11 +522,12 @@ export function ModerationConsole({
                           {r.restaurantName ?? "Restaurant"}
                         </span>
                       )}
-                      <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-semibold text-brand-gold">
-                        {r.rating}/5
+                      {/* No numeric scores — we don't rank barbecue (Part E). */}
+                      <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-semibold text-text-secondary">
+                        Review
                       </span>
                       <span className="text-xs text-text-muted">
-                        by {r.reviewer} · {fmtDate(r.created_at)}
+                        by {r.reviewer} · {fmtDate(r.created_at)} · from the venue page
                       </span>
                     </div>
                     <p className="mt-3 max-w-2xl text-sm leading-relaxed text-text-secondary">
@@ -484,7 +537,7 @@ export function ModerationConsole({
                   <Actions
                     busy={busy === r.id}
                     onApprove={() => act("review", r.id, "approve", "reviews")}
-                    onReject={() => act("review", r.id, "reject", "reviews")}
+                    onReject={(reason) => act("review", r.id, "reject", "reviews", `Rejected — ${reason}`)}
                   />
                 </div>
               </div>
@@ -511,15 +564,25 @@ export function ModerationConsole({
                 />
                 <div className="flex items-center justify-between gap-3 p-4">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-text-primary">
-                      {p.restaurantName ?? "Restaurant"}
-                    </p>
-                    <p className="text-xs text-text-muted">{fmtDate(p.created_at)}</p>
+                    {/* Part E — venue link (context one click away) + source + when. */}
+                    {p.restaurantSlug ? (
+                      <Link
+                        href={`/restaurants/${p.restaurantSlug}`}
+                        className="block truncate text-sm font-semibold text-text-primary hover:text-brand-gold"
+                      >
+                        {p.restaurantName ?? "Restaurant"}
+                      </Link>
+                    ) : (
+                      <p className="truncate text-sm font-semibold text-text-primary">
+                        {p.restaurantName ?? "Restaurant"}
+                      </p>
+                    )}
+                    <p className="text-xs text-text-muted">Community upload · {fmtDate(p.created_at)}</p>
                   </div>
                   <Actions
                     busy={busy === p.id}
                     onApprove={() => act("photo", p.id, "approve", "photos")}
-                    onReject={() => act("photo", p.id, "reject", "photos")}
+                    onReject={(reason) => act("photo", p.id, "reject", "photos", `Rejected — ${reason}`)}
                   />
                 </div>
               </div>
