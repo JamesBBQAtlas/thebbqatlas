@@ -8,7 +8,10 @@ import {
   classifyPrecision,
   resolveGeocode,
   isTooCoarse,
+  decideStructuredGeo,
+  extractUKPostcode,
   type GeoResult,
+  type PostcodeAnchor,
 } from "../lib/geo/geocode";
 
 let pass = 0;
@@ -105,6 +108,56 @@ await (async () => {
   ok("US-centroid country hit is dropped (no result)", result === null);
   ok("US-centroid country hit is NOT kept as coarse", coarse === null);
 })();
+
+console.log("\n[geocode-fix — decideStructuredGeo: country-constrained, postcode-anchored, confidence-gated]");
+{
+  // A precise hit VALIDATED against its postcode anchor → confident, use it.
+  const camden: GeoResult = { lat: 51.5401, lng: -0.1374, country_code: "GB", city: "Camden", country: "United Kingdom", place_type: "address", precise: true };
+  const anchor: PostcodeAnchor = { lat: 51.5397, lng: -0.138, city: "Camden", source: "postcodes.io" };
+  const good = decideStructuredGeo({ address: "88 Royal College Street", postcode: "NW1 0TH", country: "United Kingdom" }, anchor, camden, "GB");
+  ok("validated in-postcode hit → confident", good.status === "confident" && good.result?.city === "Camden");
+  ok("confident pin carries high confidence + source", good.confidence >= 0.9 && good.source === "maptiler");
+
+  // THE RACK CITY CASE: a precise hit ~21km from the postcode anchor is REJECTED,
+  // and we fall back to the postcode anchor (Camden), never Carshalton.
+  const carshalton: GeoResult = { lat: 51.352, lng: -0.156, country_code: "GB", city: "Carshalton", country: "United Kingdom", place_type: "address", precise: true };
+  const rackCity = decideStructuredGeo({ address: "88 Royal College Street", postcode: "NW1 0TH", country: "United Kingdom" }, anchor, carshalton, "GB");
+  ok("Rack City: far-from-anchor precise hit is NOT trusted", rackCity.result?.city !== "Carshalton");
+  ok("Rack City: falls back to the postcode anchor (Camden area)", rackCity.source === "postcodes.io" && rackCity.status === "approximate");
+  ok("Rack City: anchor pin sits at the postcode, ~Camden not Carshalton", Math.abs((rackCity.result?.lat ?? 0) - 51.54) < 0.05);
+
+  // Wrong-country precise hit is rejected even without an anchor.
+  const usHit: GeoResult = { lat: 40.0, lng: -80.0, country_code: "US", city: "Somewhere", country: "United States", place_type: "address", precise: true };
+  const wrongCountry = decideStructuredGeo({ address: "1 High St", city: "London", country: "United Kingdom" }, null, usHit, "GB");
+  ok("precise hit in the wrong country is rejected", wrongCountry.status !== "confident");
+
+  // Precise hit, no postcode anchor, right country → accepted (0.9, no anchor).
+  const noAnchor = decideStructuredGeo({ address: "1 High St", city: "Austin", country: "United States" }, null, usHit, "US");
+  ok("precise in-country hit with no anchor → confident @0.9", noAnchor.status === "confident" && noAnchor.confidence === 0.9);
+
+  // Incomplete: no street AND no postcode/city → flagged incomplete, NO pin.
+  const incomplete = decideStructuredGeo({ city: null, country: "United Kingdom" }, null, null, "GB");
+  ok("incomplete address → flagged, no pin", incomplete.status === "flagged" && incomplete.result === null);
+  ok("incomplete uses the 'add a street/postcode' reason", /incomplete address/.test(incomplete.reason ?? ""));
+
+  // Has a street + city but nothing resolved and no anchor → flagged low-confidence.
+  const weak = decideStructuredGeo({ address: "999 Nowhere Rd", city: "Smalltown", country: "United States" }, null, null, "US");
+  ok("street present but nothing resolved → flagged low-confidence", weak.status === "flagged" && /low-confidence/.test(weak.reason ?? ""));
+
+  // A postcode anchor with NO usable geocoder hit still places an approximate pin.
+  const anchorOnly = decideStructuredGeo({ address: "12 Somewhere St", postcode: "NW1 0TH", country: "United Kingdom" }, anchor, null, "GB");
+  ok("anchor-only → approximate pin placed (right area)", anchorOnly.status === "approximate" && anchorOnly.result !== null);
+
+  // A too-coarse (postcode-centroid) MapTiler hit is never trusted as precise.
+  const coarseHit: GeoResult = { lat: 51.5, lng: -0.12, country_code: "GB", city: "London", country: "United Kingdom", place_type: "postcode", precise: false };
+  const coarse = decideStructuredGeo({ address: "1 High St", postcode: "NW1 0TH", country: "United Kingdom" }, anchor, coarseHit, "GB");
+  ok("coarse maptiler hit → falls to anchor, not the coarse hit", coarse.source === "postcodes.io");
+}
+
+console.log("\n[geocode-fix — extractUKPostcode]");
+ok("pulls NW1 0TH from a full address", extractUKPostcode("88 Royal College Street, London, NW1 0TH") === "NW1 0TH");
+ok("pulls SE1 3SU (no space variant)", extractUKPostcode("8-9 Snowsfields, SE13SU") === "SE1 3SU" || extractUKPostcode("8-9 Snowsfields, SE1 3SU") === "SE1 3SU");
+ok("returns null when there's no UK postcode", extractUKPostcode("123 Main St, Austin, TX 78704") === null);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);

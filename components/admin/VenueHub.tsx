@@ -27,6 +27,9 @@ import {
   RefreshCw,
   Archive,
   Youtube,
+  Lock,
+  ShieldCheck,
+  MapPinOff,
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { compareVenues, SORT_KEYS, type SortKey, type SortDir } from "@/lib/admin/venue-sort";
@@ -39,6 +42,35 @@ import {
 import { estimateCost, fmtUsd, BATCH_CONFIRM_THRESHOLD, COST_PER_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 import { PinMap } from "@/components/admin/PinMap";
 import { HoursEditor } from "@/components/admin/HoursEditor";
+
+/**
+ * geocode-fix — classify a venue's pin so the operator sees at a glance which
+ * pins are trustworthy. Confirmed = hand-locked or a validated address/POI pin;
+ * Approximate = a postcode-area / low-confidence pin to verify; Missing = no pin.
+ */
+type PinConfidence = "confirmed" | "approximate" | "missing";
+function pinConfidence(v: {
+  lat?: number | null;
+  lng?: number | null;
+  geoLocked?: boolean;
+  geoPrecision?: string | null;
+  geoConfidence?: number | null;
+}): PinConfidence {
+  const la = v.lat, ln = v.lng;
+  const hasPin =
+    typeof la === "number" && typeof ln === "number" &&
+    Number.isFinite(la) && Number.isFinite(ln) && !(la === 0 && ln === 0);
+  if (!hasPin) return "missing";
+  if (v.geoLocked) return "confirmed";
+  const precise = ["poi", "address", "street", "manual"].includes(String(v.geoPrecision ?? ""));
+  const conf = typeof v.geoConfidence === "number" ? v.geoConfidence : null;
+  // A validated precise pin (or, for legacy rows with no stored quality, an
+  // existing pin we can't fault) reads Confirmed; a postcode/place-level or
+  // low-confidence pin reads Approximate.
+  if (precise && (conf === null || conf >= 0.9)) return "confirmed";
+  if (v.geoPrecision == null && conf == null) return "confirmed"; // legacy pin, unknown provenance
+  return "approximate";
+}
 
 export interface HubVenue {
   id: string;
@@ -77,6 +109,11 @@ export interface HubVenue {
   manualCopy: boolean;
   lat: number;
   lng: number;
+  // geocode-fix — pin quality for the Confirmed / Approximate / Missing indicator.
+  geoPrecision?: string | null;
+  geoConfidence?: number | null;
+  geoLocked?: boolean;
+  geoSource?: string | null;
   // Part 5 — full provenance for admins (privileged view; PII allowed here only).
   provenance?: VenueProvenance | null;
 }
@@ -2087,9 +2124,35 @@ export function EditorPanel({
           <Field label="Country"><input value={country} onChange={(e) => setCountry(e.target.value)} className={fieldInput} placeholder="United Kingdom" /></Field>
         </div>
         <PinMap lat={lat} lng={lng} onChange={(la, ln) => { setLat(la); setLng(ln); }} />
-        <p className="text-xs text-text-muted">
-          Tap the map or drag the pin to place it — lat/lng fill in automatically ({lat.toFixed(5)}, {lng.toFixed(5)}). No need to type coordinates.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-text-muted">
+            Tap the map or drag the pin to place it — lat/lng fill in automatically ({lat.toFixed(5)}, {lng.toFixed(5)}). No need to type coordinates.
+          </p>
+          {(() => {
+            const conf = pinConfidence({ lat, lng, geoLocked: venue.geoLocked, geoPrecision: venue.geoPrecision, geoConfidence: venue.geoConfidence });
+            if (conf === "confirmed") {
+              const locked = Boolean(venue.geoLocked);
+              return (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-400" title={locked ? "Pin locked — hand-placed; re-geocoding will not move it. Use “Save & re-geocode from address” to unlock and re-place." : "Confident pin — validated address/POI level."}>
+                  {locked ? <Lock className="h-3 w-3" /> : <ShieldCheck className="h-3 w-3" />}
+                  {locked ? "Pin locked" : "Pin confirmed"}
+                </span>
+              );
+            }
+            if (conf === "approximate") {
+              return (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-400" title="Approximate pin — postcode-area or low-confidence. Verify the exact spot, then Save to lock it.">
+                  <AlertTriangle className="h-3 w-3" />Pin approximate — verify
+                </span>
+              );
+            }
+            return (
+              <span className="inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive" title="No pin set — place it on the map, then Save.">
+                <MapPinOff className="h-3 w-3" />Pin missing
+              </span>
+            );
+          })()}
+        </div>
       </div>
 
       {/* Save */}

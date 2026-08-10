@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
-import { geocodeAddress } from "@/lib/geo/geocode";
+import { geocodeStructured } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { settlementCity } from "@/lib/admin/address";
 import { revalidateVenues } from "@/lib/cache/venues";
@@ -137,41 +137,71 @@ export async function POST(request: Request) {
     patch.city = settlementCity(rawCity) || rawCity;
     patch.country = country;
 
+    // Postcode entered folded into the address string ("…, London, NW1 0TH") —
+    // pull the trailing token so geocodeStructured can anchor on it.
+    const trailingPostcode = address.split(",").pop()?.trim() || null;
     const hasManualPin = validCoord(body.lat, body.lng);
     let locatedOk = false;
     if (hasManualPin && !body.regeocode) {
+      // Fix 4 — a hand-placed pin is sacred. Store it and LOCK it so no later
+      // enrich / update-details / ops-refresh re-geocode can move it. Mirrors
+      // manual_copy. The operator clears the lock via "re-geocode from address".
       patch.lat = body.lat;
       patch.lng = body.lng;
+      patch.geo_locked = true;
+      patch.geo_source = "manual";
+      patch.geo_precision = "manual";
+      patch.geo_confidence = 1;
       locatedOk = true;
     } else {
-      // Re-geocode from the address (MapTiler, name-fallback); fall back to the
-      // postcode alone, then to a manual pin. Never silently save (0,0) (Fix B).
-      let geo = await geocodeAddress({ address, city: rawCity, country, name: row.name as string });
-      if (!geo || !validCoord(geo.lat, geo.lng)) {
-        const postcode = address.split(",").pop()?.trim();
-        if (postcode && postcode !== address) {
-          geo = await geocodeAddress({ address: postcode, city: rawCity, country, name: row.name as string });
-        }
-      }
-      if (geo && validCoord(geo.lat, geo.lng)) {
-        patch.lat = geo.lat;
-        patch.lng = geo.lng;
-        if (geo.country_code) patch.country_code = geo.country_code;
+      // Re-geocode from the address — structured, country-constrained, postcode-
+      // anchored (geocode-fix). An explicit re-geocode is a deliberate operator
+      // action, so it CLEARS any manual lock and lets a fresh pin land. Never
+      // silently save (0,0): a low-confidence miss falls back to a manual pin or
+      // flags rather than guessing.
+      const geo = await geocodeStructured({
+        address,
+        city: rawCity,
+        postcode: trailingPostcode,
+        country,
+        name: row.name as string,
+      });
+      if (geo.result && validCoord(geo.result.lat, geo.result.lng)) {
+        patch.lat = geo.result.lat;
+        patch.lng = geo.result.lng;
+        if (geo.result.country_code) patch.country_code = geo.result.country_code;
+        patch.geo_locked = false; // deliberate re-geocode releases the lock
+        patch.geo_precision = geo.precision;
+        patch.geo_confidence = geo.confidence;
+        patch.geo_source = geo.source;
         locatedOk = true;
+        // A postcode-area pin is placed but not exact — flag it for verification.
+        if (geo.status === "approximate") {
+          patch.needs_attention = true;
+          patch.attention_reason = geo.reason ?? "geocode: postcode-area pin — verify the exact spot";
+        }
       } else if (hasManualPin) {
+        // Re-geocode missed but the operator also supplied a pin — take & lock it.
         patch.lat = body.lat;
         patch.lng = body.lng;
+        patch.geo_locked = true;
+        patch.geo_source = "manual";
+        patch.geo_precision = "manual";
+        patch.geo_confidence = 1;
         locatedOk = true;
       } else if (!validCoord(row.lat, row.lng)) {
         // Couldn't locate and no pin to fall back on — flag rather than 0,0.
         patch.needs_attention = true;
-        patch.attention_reason = "Couldn't locate — check address / set pin manually";
+        patch.attention_reason = geo.reason ?? "Couldn't locate — check address / set pin manually";
       }
     }
     // Fix 3 — a corrected address / hand-placed pin that resolved clears a
     // lingering "couldn't locate" flag automatically (don't touch other flags).
+    // But do NOT clear a flag we just set this save (e.g. an approximate pin that
+    // itself needs verifying).
+    const justFlagged = patch.needs_attention === true;
     const locateReason = /couldn.?t locate|set pin manually|place this venue|location facts/i;
-    if (locatedOk && row.needs_attention && locateReason.test(String(row.attention_reason ?? ""))) {
+    if (!justFlagged && locatedOk && row.needs_attention && locateReason.test(String(row.attention_reason ?? ""))) {
       patch.needs_attention = false;
       patch.attention_reason = null;
     }

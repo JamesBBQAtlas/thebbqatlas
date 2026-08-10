@@ -107,13 +107,17 @@ interface MtFeature {
 const enText = (c: MtContext | MtFeature): string | null =>
   (c.text_en as string) || (c.text as string) || null;
 
-/** Run one MapTiler geocoding query; null on any miss / invalid point / (0,0). */
-async function queryMapTiler(q: string): Promise<GeoResult | null> {
+/** Run one MapTiler geocoding query; null on any miss / invalid point / (0,0).
+ *  A `countryCode` (ISO-2) constrains the search to that country — a country
+ *  filter alone kills most cross-town / cross-country mismatches (geocode-fix). */
+async function queryMapTiler(q: string, countryCode?: string | null): Promise<GeoResult | null> {
   if (!MAPTILER_KEY || !q.trim()) return null;
   try {
+    const cc = (countryCode ?? "").trim().toLowerCase();
     const url =
       `${MAPTILER_GEOCODE}/${encodeURIComponent(q.trim())}.json` +
-      `?key=${MAPTILER_KEY}&limit=1&language=en`;
+      `?key=${MAPTILER_KEY}&limit=1&language=en` +
+      (cc && /^[a-z]{2}$/.test(cc) ? `&country=${cc}` : "");
     const res = await fetch(url);
     if (!res.ok) return null;
     const data = (await res.json()) as { features?: MtFeature[] };
@@ -264,3 +268,186 @@ export async function geocodePrecise(parts: {
 /** Reason string for a non-precise geocode outcome, for `attention_reason`. */
 export const GEOCODE_COARSE_REASON = "geocode: town-level only — verify pin";
 export const GEOCODE_NONE_REASON = "no street address resolved";
+export const GEOCODE_INCOMPLETE_REASON = "incomplete address — add a street/postcode";
+export const GEOCODE_LOWCONF_REASON = "geocode low-confidence — verify pin";
+/** A postcode-area pin was placed (right area, not the exact door) — verify it. */
+export const GEOCODE_APPROX_REASON = "geocode: postcode-area pin — verify the exact spot";
+
+// ── geocode-fix: postcode-first anchoring + confidence gate ──────────────────
+import { resolveCountryCode } from "@/lib/constants/countries";
+import { haversineKm } from "@/lib/utils/geo";
+
+const UK_POSTCODE = /^[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}$/i;
+/** Same shape, but findable ANYWHERE in a freeform address string. */
+const UK_POSTCODE_INLINE = /\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i;
+
+/** Pull a UK postcode out of a freeform address line, or null. */
+export function extractUKPostcode(address: string | null | undefined): string | null {
+  const m = (address ?? "").match(UK_POSTCODE_INLINE);
+  return m ? m[0].toUpperCase().replace(/\s+/g, " ").trim() : null;
+}
+
+export interface PostcodeAnchor {
+  lat: number;
+  lng: number;
+  city: string | null;
+  source: string;
+}
+
+/**
+ * Resolve a postcode to a PRECISE anchor point. The UK routes to postcodes.io —
+ * free, official ONS data, near-exact — which alone makes the "NW1 0TH →
+ * Carshalton" class of error impossible. Other countries return null here and
+ * the caller relies on the country-constrained geocoder. A small seam so more
+ * national postcode sources can be added later without touching callers.
+ */
+export async function postcodeAnchor(
+  countryCode: string | null,
+  postcode: string | null | undefined
+): Promise<PostcodeAnchor | null> {
+  const pc = (postcode ?? "").trim();
+  if (!pc) return null;
+  const cc = (countryCode ?? "").toUpperCase();
+  const looksUK = UK_POSTCODE.test(pc);
+  if ((cc === "GB" || cc === "UK" || (!cc && looksUK)) && looksUK) {
+    try {
+      const res = await fetch(
+        `https://api.postcodes.io/postcodes/${encodeURIComponent(pc.replace(/\s+/g, ""))}`
+      );
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        result?: { latitude?: number; longitude?: number; admin_district?: string; parish?: string; admin_ward?: string };
+      };
+      const r = data.result;
+      if (r && Number.isFinite(r.latitude) && Number.isFinite(r.longitude)) {
+        return {
+          lat: r.latitude as number,
+          lng: r.longitude as number,
+          city: r.admin_district ?? r.parish ?? r.admin_ward ?? null,
+          source: "postcodes.io",
+        };
+      }
+    } catch {
+      /* fall through to the geocoder */
+    }
+  }
+  return null;
+}
+
+export type GeoPrecision = "poi" | "address" | "street" | "postcode" | "place" | "region" | "country" | "none";
+export type GeoStatus = "confident" | "approximate" | "flagged";
+
+export interface StructuredGeo {
+  /** The pin to store, or null when we must NOT place a speculative pin. */
+  result: GeoResult | null;
+  precision: GeoPrecision;
+  confidence: number; // 0..1
+  source: string | null; // "postcodes.io" | "maptiler"
+  status: GeoStatus;
+  reason: string | null; // set when flagged
+}
+
+/** A full-address hit must fall within this of the postcode anchor to be trusted. */
+const ANCHOR_VALIDATE_KM = 8;
+
+export interface StructuredParts {
+  address?: string | null;
+  city?: string | null;
+  region?: string | null;
+  postcode?: string | null;
+  country?: string | null;
+  name?: string | null;
+}
+
+/**
+ * PURE decision core (no network) — given the resolved postcode `anchor`, the
+ * country-constrained geocoder `hit`, and the ISO country, decide the pin to
+ * store and how confident we are. Kept separate from `geocodeStructured` so the
+ * whole confidence gate is unit-testable without touching MapTiler / postcodes.io.
+ *
+ * The gate, in order:
+ *   (1) accept the full-address hit ONLY if it's precise, in the stated country,
+ *       AND within `ANCHOR_VALIDATE_KM` of the postcode anchor (the Rack City
+ *       guard — a precise hit in the wrong town is rejected, never trusted);
+ *   (2) else the postcode anchor itself is a correct-area pin (postcode-level);
+ *   (3) else place NO pin and flag with a specific reason (incomplete vs weak).
+ */
+export function decideStructuredGeo(
+  parts: StructuredParts,
+  anchor: PostcodeAnchor | null,
+  hit: GeoResult | null,
+  iso: string | null
+): StructuredGeo {
+  const hasStreet = Boolean((parts.address ?? "").trim());
+
+  if (hit && hit.precise && !isTooCoarse(hit.place_type)) {
+    const inCountry = !iso || !hit.country_code || hit.country_code.toUpperCase() === iso;
+    const nearAnchor = !anchor || haversineKm(hit.lat, hit.lng, anchor.lat, anchor.lng) <= ANCHOR_VALIDATE_KM;
+    if (inCountry && nearAnchor) {
+      return {
+        result: hit,
+        precision: (hit.place_type as GeoPrecision) ?? "address",
+        // A hit validated against its own postcode is our strongest signal.
+        confidence: anchor ? 0.95 : 0.9,
+        source: "maptiler",
+        status: "confident",
+        reason: null,
+      };
+    }
+    // Precise but the wrong town/country (the Rack City case) — never trust it.
+  }
+
+  // The postcode anchor is a correct-area pin (postcode-level precision).
+  if (anchor) {
+    return {
+      result: {
+        lat: anchor.lat,
+        lng: anchor.lng,
+        country_code: iso,
+        city: anchor.city,
+        country: parts.country ?? null,
+        place_type: "postcode",
+        precise: false,
+      },
+      precision: "postcode",
+      confidence: 0.75,
+      source: anchor.source,
+      status: "approximate",
+      reason: null,
+    };
+  }
+
+  // Nothing confident. Do NOT place a speculative pin — flag with a reason.
+  const incomplete = !hasStreet || (!parts.postcode && !parts.city);
+  return {
+    result: null,
+    precision: "none",
+    confidence: 0,
+    source: null,
+    status: "flagged",
+    reason: incomplete ? GEOCODE_INCOMPLETE_REASON : GEOCODE_LOWCONF_REASON,
+  };
+}
+
+/**
+ * geocode-fix — the well-formed, country-constrained, postcode-anchored,
+ * confidence-gated geocode. (1) resolve the postcode as the primary anchor;
+ * (2) run the full structured address country-constrained; (3) accept the
+ * full-address pin ONLY if it's precise, in the right country, AND within the
+ * postcode area — otherwise fall back to the postcode anchor; (4) if nothing
+ * confident resolves, place NO pin and return a flagged status with a specific
+ * reason. Never accepts MapTiler features[0] blindly; never guesses a centroid.
+ *
+ * The network I/O lives here; the decision lives in `decideStructuredGeo`.
+ */
+export async function geocodeStructured(parts: StructuredParts): Promise<StructuredGeo> {
+  const iso = resolveCountryCode(null, parts.country ?? null);
+  const anchor = await postcodeAnchor(iso, parts.postcode);
+
+  const q = [parts.address, parts.city, parts.region, parts.postcode, parts.country]
+    .filter((s) => s && String(s).trim())
+    .join(", ");
+  const hit = q ? await queryMapTiler(q, iso) : null;
+
+  return decideStructuredGeo(parts, anchor, hit, iso);
+}

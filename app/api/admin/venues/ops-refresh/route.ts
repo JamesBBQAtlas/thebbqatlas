@@ -4,7 +4,7 @@ import { GROK_ENABLED, GROK_MODEL } from "@/lib/ai/grok";
 import { researchOps, priceBandToLevel, mapSocials, describeConflicts, type VenueLead, type FactConflict } from "@/lib/ai/enrich";
 import { grokCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage } from "@/lib/ai/usage-log";
-import { geocodeAddress } from "@/lib/geo/geocode";
+import { geocodeStructured } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, name, status, website, instagram_url, instagram_handle, phone, hours, price_level, address, city, country, lat, lng, permanently_closed, x_url, facebook_url, tiktok_url, youtube_url, enrichment_cost, needs_attention, attention_reason, pending_changes"
+      "id, name, status, website, instagram_url, instagram_handle, phone, hours, price_level, address, city, country, lat, lng, geo_locked, permanently_closed, x_url, facebook_url, tiktok_url, youtube_url, enrichment_cost, needs_attention, attention_reason, pending_changes"
     )
     .eq("id", restaurantId)
     .single();
@@ -217,19 +217,25 @@ export async function POST(request: Request) {
       // Coordinates: use verified dossier coords, else geocode the new address.
       const validCoord = (a: number | null, b: number | null) =>
         typeof a === "number" && typeof b === "number" && Number.isFinite(a) && Number.isFinite(b) && !(a === 0 && b === 0);
-      if (validCoord(facts.lat, facts.lng)) {
+      // Fix 4 — a geo_locked pin was hand-placed by an operator. Even when research
+      // says the venue moved, we do NOT auto-stage a new pin over a locked one; we
+      // stage the new address and tell the operator to clear the lock deliberately.
+      if (row.geo_locked) {
+        notes.push("Research indicates this venue has MOVED, but its pin is LOCKED — clear the lock and re-geocode from the address to move the pin.");
+      } else if (validCoord(facts.lat, facts.lng)) {
         staged.lat = facts.lat;
         staged.lng = facts.lng;
+        notes.push("Research indicates this venue has MOVED — approve to apply the new address & pin.");
       } else {
-        const geo = await geocodeAddress({ address: facts.address, city: facts.city ?? row.city, country: row.country, name: row.name });
-        if (geo && validCoord(geo.lat, geo.lng)) {
-          staged.lat = geo.lat;
-          staged.lng = geo.lng;
-          if (geo.country_code) staged.country_code = geo.country_code;
-          if (geo.country) staged.country = canonicalCountry(geo.country);
+        const geo = await geocodeStructured({ address: facts.address, city: facts.city ?? row.city, region: facts.region_state, postcode: facts.postcode, country: row.country, name: row.name });
+        if (geo.result && validCoord(geo.result.lat, geo.result.lng)) {
+          staged.lat = geo.result.lat;
+          staged.lng = geo.result.lng;
+          if (geo.result.country_code) staged.country_code = geo.result.country_code;
+          if (geo.result.country) staged.country = canonicalCountry(geo.result.country);
         }
+        notes.push("Research indicates this venue has MOVED — approve to apply the new address & pin.");
       }
-      notes.push("Research indicates this venue has MOVED — approve to apply the new address & pin.");
     }
   }
 
@@ -245,12 +251,14 @@ export async function POST(request: Request) {
   if (row.needs_attention && locateReason.test(String(row.attention_reason ?? "")) && !moveFlag) {
     if (validRowCoord) {
       clearedLocate = true; // pin was fixed elsewhere; the flag just never cleared
-    } else if (row.address) {
-      const geo = await geocodeAddress({ address: row.address, city: row.city, country: row.country, name: row.name });
-      if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lng) && !(geo.lat === 0 && geo.lng === 0)) {
-        setField("lat", "lat", row.lat ?? null, geo.lat);
-        patch.lng = geo.lng;
-        if (geo.country_code) patch.country_code = geo.country_code;
+    } else if (row.address && !row.geo_locked) {
+      // Fix 4 — never re-geocode a locked pin (a locked row should already carry a
+      // valid hand-placed pin, so it takes the branch above; this guards the edge).
+      const geo = await geocodeStructured({ address: row.address, city: row.city, country: row.country, name: row.name });
+      if (geo.result && Number.isFinite(geo.result.lat) && Number.isFinite(geo.result.lng) && !(geo.result.lat === 0 && geo.result.lng === 0)) {
+        setField("lat", "lat", row.lat ?? null, geo.result.lat);
+        patch.lng = geo.result.lng;
+        if (geo.result.country_code) patch.country_code = geo.result.country_code;
         clearedLocate = true;
       }
     }

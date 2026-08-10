@@ -21,7 +21,7 @@ import {
 import { hasNonLatinScript } from "@/lib/utils/script";
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
-import { geocodePrecise, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
+import { geocodeStructured, GEOCODE_COARSE_REASON, GEOCODE_APPROX_REASON } from "@/lib/geo/geocode";
 import { COST_PER_CHAIN_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
     .select(
-      "id, slug, name, description, hook, style, category, manual_category, location_label, instagram_url, instagram_handle, website, phone, address, city, country, lat, lng, hours, price_level, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, hero_image_url, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
+      "id, slug, name, description, hook, style, category, manual_category, location_label, instagram_url, instagram_handle, website, phone, address, city, country, lat, lng, geo_locked, hours, price_level, x_url, facebook_url, tiktok_url, youtube_url, instagram_posts, hero_image_url, status, enrichment_cost, chain_parent_id, chain_rostered_at, flagship_unset, manual_copy"
     )
     .eq("id", restaurantId)
     .single();
@@ -237,14 +237,19 @@ export async function POST(request: Request) {
     if (!row.tiktok_url && socials.tiktok_url) patch.tiktok_url = socials.tiktok_url;
     if (!row.youtube_url && socials.youtube_url) patch.youtube_url = socials.youtube_url;
     if (citations.length) patch.enrichment_sources = citations;
-    if (row.lat === 0 && row.lng === 0) {
-      // Part 3 — only plant a pin when we get a street/POI-level fix; a town
-      // centroid is left unset (row stays at 0,0 and keeps its needs_attention).
-      const geo = await geocodePrecise({ address: row.address, city: row.city, country: row.country, name: row.name });
+    if (!row.geo_locked && row.lat === 0 && row.lng === 0) {
+      // Part 3 / geocode-fix — only plant a pin when the country-constrained,
+      // confidence-gated geocode returns a confident (or postcode-area) fix; a
+      // low-confidence miss is left unset (row stays at 0,0 and keeps its flag).
+      // A geo_locked row is never re-geocoded here.
+      const geo = await geocodeStructured({ address: row.address, city: row.city, country: row.country, name: row.name });
       if (geo.result) {
         patch.lat = geo.result.lat;
         patch.lng = geo.result.lng;
         if (geo.result.country_code) patch.country_code = geo.result.country_code;
+        patch.geo_precision = geo.precision;
+        patch.geo_confidence = geo.confidence;
+        patch.geo_source = geo.source;
       }
     }
     // Part 5 — a Find-IG write is a live enrichment edit; stamp who/when.
@@ -511,15 +516,40 @@ export async function POST(request: Request) {
   // Part 3 — set when the address only resolved to a town/region centroid, so the
   // pin is deliberately left unset and flagged "verify pin" rather than planted.
   let coarseGeocode = false;
-  if (validCoord(dossier.lat, dossier.lng)) {
+  // geocode-fix — pin quality captured from geocodeStructured, stored on the row.
+  let geoPrecision: string | null = null;
+  let geoConfidence: number | null = null;
+  let geoSource: string | null = null;
+  // A postcode-area pin WAS placed but isn't the exact door — placed + flagged.
+  let approximatePin = false;
+  // The specific "why we couldn't place it" reason (incomplete vs low-confidence).
+  let geoFlagReason: string | null = null;
+  // Fix 4 — the operator hand-set/confirmed this pin. A re-enrich must NEVER move
+  // it (mirrors manual_copy). We keep the locked coordinates untouched.
+  let pinLocked = false;
+  if (row.geo_locked && validCoord(row.lat as number, row.lng as number)) {
+    pinLocked = true;
+    lat = row.lat as number;
+    lng = row.lng as number;
+  } else if (validCoord(dossier.lat, dossier.lng)) {
     lat = dossier.lat;
     lng = dossier.lng;
   } else {
-    // Part 3 — precision-first geocode. Accept ONLY a street/POI-level pin; a
-    // coarse town/region centroid must NOT be planted as the venue's location
-    // (the "7501 MS-57 → centre of Ocean Springs" bug). On a coarse-only hit we
-    // keep the country label for context, leave the pin UNSET, and flag below.
-    const geo = await geocodePrecise({ address: dossier.address ?? row.address, city, country, name: dossier.name ?? row.name });
+    // geocode-fix — structured, country-constrained, postcode-anchored geocode.
+    // A confident (validated address/POI) pin is used; a postcode-area pin is
+    // placed but flagged for verification; anything weaker leaves the pin UNSET
+    // and flags with a specific reason (never a silent town/centroid guess).
+    const geo = await geocodeStructured({
+      address: dossier.address ?? row.address,
+      city,
+      region: dossier.region_state,
+      postcode: dossier.postcode,
+      country,
+      name: dossier.name ?? row.name,
+    });
+    geoPrecision = geo.precision;
+    geoConfidence = geo.confidence;
+    geoSource = geo.source;
     if (geo.result && validCoord(geo.result.lat, geo.result.lng)) {
       lat = geo.result.lat;
       lng = geo.result.lng;
@@ -530,9 +560,13 @@ export async function POST(request: Request) {
       // Park") for a venue that's really in Houston. The geocoder's city is kept
       // as `geoCity` and only used by bestSettlement as a last-resort candidate.
       country = geo.result.country ?? country;
-    } else if (geo.status === "coarse_only") {
+      // "approximate" = a postcode anchor: right area, verify the exact spot.
+      approximatePin = geo.status === "approximate";
+    } else {
+      // Flagged — nothing confident resolved. Leave the pin UNSET; surface the
+      // geocoder's specific reason (incomplete address vs low-confidence).
       coarseGeocode = true;
-      country = geo.coarse?.country ?? country;
+      geoFlagReason = geo.reason;
     }
   }
   // Fix B — did we END UP with a real location? A venue that neither geocoded now
@@ -576,10 +610,20 @@ export async function POST(request: Request) {
   if (socials.youtube_url) proposed.youtube_url = socials.youtube_url;
   if (dossier.hours) proposed.hours = dossier.hours;
   if (price) proposed.price_level = price;
-  if (lat !== null && lng !== null) {
+  // A geo_locked pin is left exactly as the operator set it — never re-proposed
+  // (so no spurious "moved the pin" audit entry either).
+  if (!pinLocked && lat !== null && lng !== null) {
     proposed.lat = lat;
     proposed.lng = lng;
     if (country_code) proposed.country_code = country_code;
+  }
+  // geocode-fix — record how good this pin is (precision / confidence / source)
+  // so admin shows Confirmed vs Approximate vs Missing. Only when we actually
+  // geocoded this pass (a locked or dossier-supplied pin leaves these untouched).
+  if (!pinLocked && geoSource !== null) {
+    proposed.geo_precision = geoPrecision;
+    proposed.geo_confidence = geoConfidence;
+    proposed.geo_source = geoSource;
   }
   // Store the TOWN — settlement-normalised, and NEVER a POI/landmark (a POI in
   // the city field is a failure: fall back to the town parsed from the address).
@@ -677,14 +721,17 @@ export async function POST(request: Request) {
     hasNonLatinScript(address as string) ? "address" : null,
   ].filter(Boolean) as string[];
   const nonLatin = nonLatinFields.length > 0;
-  // Note: `coarseGeocode` is not a standalone trigger — a coarse-only re-geocode
+  // Note: `coarseGeocode` is not a standalone trigger — a low-confidence re-geocode
   // only matters when we end up with NO valid pin (that's `noValidLocation`,
   // which drives the "verify pin" reason below); if the row already had a good
-  // pin we didn't overwrite it, so there's nothing to flag.
+  // pin we didn't overwrite it, so there's nothing to flag. `approximatePin` DID
+  // place a postcode-area pin — right area, but the operator should verify the
+  // exact spot, so it flags too (Fix 3 — be made aware of every non-exact pin).
   const attention =
     overCeiling ||
     searchRunaway ||
     noValidLocation ||
+    approximatePin ||
     nonVenueCategory ||
     categoryUnclear ||
     factConflicts.length > 0 ||
@@ -698,12 +745,14 @@ export async function POST(request: Request) {
         ? `Search budget exceeded (${grokSearches} > ${MAX_TOTAL_SEARCHES}) — stopped and flagged; check enrichment_debug.`
         : noValidLocation
           ? coarseGeocode
-            ? GEOCODE_COARSE_REASON
+            ? geoFlagReason ?? GEOCODE_COARSE_REASON
             : address
               ? "Couldn't locate — check address / set pin manually"
               : effectivelySibling
                 ? "This outpost's own location facts (address) are missing — add them, then re-enrich."
                 : "No address to place this venue on the map — add one, then re-enrich."
+          : approximatePin
+            ? GEOCODE_APPROX_REASON
           : nonVenueCategory
             ? `Item type = ${ITEM_CATEGORY_LABELS[effectiveCategory as ItemCategory]} — not a dine-in venue; parked for a later wave.`
           : categoryUnclear

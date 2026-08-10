@@ -94,5 +94,14 @@ export function toHubVenue(r: Restaurant): HubVenue {
     manualCopy: Boolean((r as { manual_copy?: boolean }).manual_copy),
     lat: r.lat,
     lng: r.lng,
+    // geocode-fix — pin quality, so admin shows Confirmed / Approximate / Missing
+    // and a locked (hand-placed) pin is visibly protected from re-geocoding.
+    geoPrecision: ((r as { geo_precision?: string | null }).geo_precision) ?? null,
+    geoConfidence:
+      typeof (r as { geo_confidence?: number | null }).geo_confidence === "number"
+        ? ((r as { geo_confidence?: number | null }).geo_confidence as number)
+        : null,
+    geoLocked: Boolean((r as { geo_locked?: boolean }).geo_locked),
+    geoSource: ((r as { geo_source?: string | null }).geo_source) ?? null,
   };
 }
