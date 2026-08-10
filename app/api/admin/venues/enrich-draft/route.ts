@@ -695,6 +695,9 @@ export async function POST(request: Request) {
                 ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
                 : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."
     : null;
+  // Part A — a non-blocking info note (e.g. "light on backstory") rides alongside,
+  // never as a red flag. Only shown when the venue is NOT otherwise flagged.
+  metadata.info_note = !attention ? copy.info_note ?? null : null;
 
   // For an approved (live) venue, hold changes as pending — but only if there's
   // actually something worth approving. A too-thin result that changes nothing

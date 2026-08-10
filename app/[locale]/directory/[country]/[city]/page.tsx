@@ -17,7 +17,8 @@ import { groupByCountry, groupByCity } from "@/lib/seo/hubs";
 import { cityIntro, cityFaqs, cityMetaDescription } from "@/lib/seo/hub-content";
 import { HubFaq } from "@/components/seo/HubFaq";
 import { SearchImpressionBeacon } from "@/components/seo/SearchImpressionBeacon";
-import { STYLE_LABELS, type BbqStyle } from "@/lib/constants/styles";
+import { type BbqStyle } from "@/lib/constants/styles";
+import { StyleChip } from "@/components/restaurants/StyleChip";
 import { routing } from "@/i18n/routing";
 
 interface Props {
@@ -131,13 +132,11 @@ export default async function CityHubPage({ params }: Props) {
       {styles.length > 0 && (
         <div className="mt-6 flex flex-wrap gap-2">
           {styles.map((s) => (
-            <Link
+            <StyleChip
               key={s}
-              href={`/styles/${s}`}
-              className="rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.06em] text-brand-sienna-light transition-colors hover:border-brand-sienna"
-            >
-              {STYLE_LABELS[s]}
-            </Link>
+              style={s}
+              className="rounded-full border border-brand-sienna/40 bg-brand-sienna/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.06em] text-brand-sienna-light transition-colors hover:border-brand-sienna focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-gold"
+            />
           ))}
         </div>
       )}

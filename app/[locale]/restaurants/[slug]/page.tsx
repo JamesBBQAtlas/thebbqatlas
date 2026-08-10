@@ -33,6 +33,7 @@ import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd, eventJsonLd, faqPageJsonLd } from "@/lib/seo/jsonld";
 import { venueFaqs } from "@/lib/seo/hub-content";
 import { HubFaq } from "@/components/seo/HubFaq";
+import { StyleChip } from "@/components/restaurants/StyleChip";
 import { SITE, absoluteUrl } from "@/lib/seo/site";
 import {
   CATEGORY_LABELS,
@@ -816,8 +817,8 @@ export default async function RestaurantPage({ params }: Props) {
                       className="text-sm"
                     />
                   </p>
-                  <span className="mt-3 inline-block rounded-full border border-brand-sienna/30 bg-brand-sienna/5 px-2.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-brand-sienna">
-                    {STYLE_LABELS[r.style]}
+                  <span className="mt-3 inline-block">
+                    <StyleChip style={r.style} />
                   </span>
                 </div>
                 <span className="shrink-0 whitespace-nowrap rounded-md bg-surface-2 px-2 py-1 text-xs font-semibold text-brand-gold">

@@ -1134,6 +1134,7 @@ export function VenueHub({
           <option value="all">Any status</option>
           <option value="approved">Published</option>
           <option value="pending">Drafts</option>
+          <option value="parked">Parked</option>
           <option value="rejected">Rejected</option>
         </select>
         <select value={country} onChange={(e) => setCountry(e.target.value)} className="rounded-md border border-border-default bg-surface-0 px-2 py-2 text-sm text-text-primary focus:outline-none">

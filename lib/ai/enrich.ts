@@ -889,6 +889,12 @@ export interface VenueCopy {
   description: string | null;
   needs_attention: boolean;
   attention_reason: string | null;
+  /**
+   * Part A — a NON-blocking informational note (e.g. "light on backstory"). This
+   * is guidance, never a red `needs_attention` flag: a publishable venue with a
+   * thin backstory gets this note, not a blocker.
+   */
+  info_note: string | null;
   usage: { in_tokens: number; out_tokens: number };
   model: string;
 }
@@ -1007,20 +1013,30 @@ Return ONLY the JSON described in your instructions.`;
     !dossier.established &&
     (dossier.specialities?.length ?? 0) === 0 &&
     (dossier.awards_press?.length ?? 0) === 0;
-  const needs_attention = opts?.alwaysWrite
-    ? (!description && !hook) || data.needs_attention === true || noRealFacts
-    : flaggedThin || (dossierThin && !description);
+  // Part A — tie the flag to the writer's REAL outcome. If copy was produced, the
+  // venue is publishable, so we DON'T raise a "cannot write / dossier too thin"
+  // warning — a long `unknowns` list is not, by itself, an actionable problem
+  // (that false alarm contradicted itself right after writing good copy). The
+  // writer only flags `needs_attention` when it genuinely produced NOTHING.
+  // Actionable problems (no pin, bad data, duplicate, wrong item type) are raised
+  // separately by the enrich route. A thin-but-published venue instead carries a
+  // calm, non-blocking `info_note`.
+  const producedCopy = Boolean(description || hook);
+  const needs_attention = !producedCopy;
+  const info_note =
+    producedCopy && (noRealFacts || dossierThin)
+      ? "Light on backstory — add a founding date, pitmaster, wood/method or specialities if you have them."
+      : null;
 
   return {
     hook,
     description,
     needs_attention,
+    // Calm guidance, never "ERROR / cannot write" — and only when nothing was written.
     attention_reason: needs_attention
-      ? asStr(data.reason) ??
-        (noRealFacts
-          ? "Insufficient information to write with authority — review before publishing."
-          : "Dossier too thin to write an honest page.")
+      ? "Couldn't write a page from the facts on hand yet — add a couple of details (what it is, style, a source) and re-run."
       : null,
+    info_note,
     usage: usage ?? { in_tokens: 0, out_tokens: 0 },
     model,
   };

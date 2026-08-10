@@ -3,6 +3,7 @@ import { MapPin } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import type { Restaurant } from "@/lib/types/database";
 import { STYLE_LABELS, STYLE_PIN_COLORS } from "@/lib/constants/styles";
+import { StyleChip } from "@/components/restaurants/StyleChip";
 import {
   CATEGORY_LABELS,
   isTimeBased,
@@ -77,9 +78,8 @@ export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
           {r.description}
         </p>
         <div className="mt-4 flex flex-wrap gap-1.5">
-          <span className="rounded-full border border-brand-sienna bg-brand-sienna/10 px-2.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-brand-sienna">
-            {STYLE_LABELS[r.style]}
-          </span>
+          {/* Part H — explains the style in place instead of bouncing away. */}
+          <StyleChip style={r.style} />
           {firstMeat && (
             <span className="rounded-full border border-border-default px-2.5 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-text-muted">
               {firstMeat.label}
