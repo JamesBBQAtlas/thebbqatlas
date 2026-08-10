@@ -4,6 +4,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { restaurantSlug } from "@/lib/utils/slug";
 import { resolveCountryCode } from "@/lib/constants/countries";
 import { safeVenueImage } from "@/lib/restaurants/image";
+import { checkDuplicate } from "@/lib/venues/dedupe-server";
 import { sendModerationOutcome } from "@/lib/email/senders";
 import { emailFirstName } from "@/lib/email/recipient";
 import { auditField, auditCreated } from "@/lib/admin/content-audit";
@@ -203,12 +204,43 @@ export async function POST(request: Request) {
             });
           }
         } else {
+          // Part D — DEDUPE before a raw approve (the Shilla class). If this "new
+          // venue" matches an existing one, don't create a twin — flag it and stop.
+          if (!override) {
+            const matches = await checkDuplicate(admin, {
+              name: submission.name,
+              address: submission.address,
+              city: submission.city,
+              lat: submission.lat,
+              lng: submission.lng,
+            });
+            const strong = matches.find((m) => m.confidence === "high");
+            if (strong) {
+              await admin
+                .from("submissions")
+                .update({
+                  possible_duplicate_of: strong.id,
+                  duplicate_reason: `Looks like an existing venue: ${strong.name} (${strong.reason}).`,
+                })
+                .eq("id", submission.id);
+              return NextResponse.json(
+                {
+                  error: `Looks like an existing venue — "${strong.name}"${strong.city ? ` in ${strong.city}` : ""} (${strong.reason}). Attach as a review/photo or merge, or approve with override to create anyway.`,
+                  needs_override: true,
+                  duplicate: true,
+                },
+                { status: 422 }
+              );
+            }
+          }
           const { data: created } = await admin
             .from("restaurants")
             .insert({
               slug: restaurantSlug(submission.name, submission.city),
               name: submission.name,
-              description: submission.description,
+              // Part D — never let a submitter's freeform note become the summary;
+              // seed a neutral stub and let enrichment write the real copy.
+              description: `${submission.name} — barbecue${submission.city ? ` in ${submission.city}` : ""}.`,
               style: submission.style,
               lat: submission.lat,
               lng: submission.lng,

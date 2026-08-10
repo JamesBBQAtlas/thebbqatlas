@@ -316,13 +316,24 @@ export function SubmitForm({ defaultEmail = "" }: { defaultEmail?: string }) {
                     >
                       View
                     </a>
+                    {" · "}
+                    <a
+                      href={`/restaurants/${m.slug}#reviews`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold text-brand-gold underline"
+                    >
+                      Leave a review
+                    </a>
                   </>
                 )}
               </li>
             ))}
           </ul>
           <p className="mt-2 text-amber-200/70">
-            If yours is a different place, go ahead and submit — a moderator will double-check.
+            Reviewing or correcting one of these? Please do it on the venue&apos;s own page (above) — that
+            keeps your note with the right place. Only submit here if yours is a genuinely different venue; a
+            moderator will double-check either way.
           </p>
         </div>
       )}

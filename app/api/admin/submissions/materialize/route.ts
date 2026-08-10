@@ -5,6 +5,7 @@ import { canonicalCountry } from "@/lib/constants/countries";
 import { settlementCity, composeAddress } from "@/lib/admin/address";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { BBQ_STYLES } from "@/lib/constants/styles";
+import { checkDuplicate } from "@/lib/venues/dedupe-server";
 import { auditCreated } from "@/lib/admin/content-audit";
 import { toHubVenue } from "@/lib/admin/hub";
 import type { Restaurant } from "@/lib/types/database";
@@ -86,6 +87,34 @@ export async function POST(request: Request) {
     }
   }
 
+  // Part D — DEDUPE before creating (the Shilla duplicate class). If this "new
+  // venue" is really an existing one, do NOT materialise a twin: flag the
+  // submission possible_duplicate_of and hand the moderator the match so they
+  // attach it as a review/photo or merge instead. `force:true` overrides after review.
+  if (!body.force) {
+    const matches = await checkDuplicate(ctx.db, { name, address, city, lat, lng });
+    const strong = matches.find((m) => m.confidence === "high");
+    if (strong) {
+      await ctx.db
+        .from("submissions")
+        .update({
+          possible_duplicate_of: strong.id,
+          duplicate_reason: `Looks like an existing venue: ${strong.name} (${strong.reason}).`,
+        })
+        .eq("id", submissionId);
+      return NextResponse.json(
+        {
+          ok: false,
+          duplicate: true,
+          match: strong,
+          matches,
+          message: `Looks like an existing venue — "${strong.name}"${strong.city ? ` in ${strong.city}` : ""} (${strong.reason}). Attach this as a review/photo or merge it, rather than creating a duplicate. Re-run with force to create anyway.`,
+        },
+        { status: 200 }
+      );
+    }
+  }
+
   const slug = await uniqueRestaurantSlug(ctx.db, name);
   const igHandle = sub.instagram_handle
     ? String(sub.instagram_handle).replace(/^@/, "").replace(/\/+$/, "").toLowerCase()
@@ -95,7 +124,11 @@ export async function POST(request: Request) {
     .insert({
       slug,
       name,
-      description: String(sub.description ?? "").trim(),
+      // Part D — the venue SUMMARY is enrichment's job; a submitter's freeform note
+      // must NEVER become the canonical description (that's how a review masqueraded
+      // as Shilla's summary). Seed a neutral stub; the note stays on the submission
+      // for the moderator, and enrichment writes the real house-voice copy.
+      description: `${name} — barbecue${city ? ` in ${city}` : ""}.`,
       style,
       lat,
       lng,

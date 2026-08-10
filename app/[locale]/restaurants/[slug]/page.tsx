@@ -458,7 +458,9 @@ export default async function RestaurantPage({ params }: Props) {
           <VenueVisitors total={metrics.visited} visitors={visitorRows} />
 
           {/* Written, moderated reviews (no stars) */}
-          <VenueReviews restaurantId={restaurant.id} venueName={restaurant.name} />
+          <div id="reviews" className="scroll-mt-24">
+            <VenueReviews restaurantId={restaurant.id} venueName={restaurant.name} />
+          </div>
 
 
           {dishes.length > 0 && (

@@ -158,6 +158,27 @@ export async function POST(request: Request) {
       lines.push(`\nOPERATOR'S CURRENT DESCRIPTION (extract every concrete fact from this prose and carry it forward):\n"""${desc}"""`);
       builtOn.push("current description");
     }
+    // Part D5 — approved community reviews as ENRICHMENT INPUT (real detail +
+    // sentiment). NEVER pasted verbatim into the summary — the writer synthesises
+    // any genuine, corroborated facts in house voice.
+    const { data: revs } = await ctx.db
+      .from("reviews")
+      .select("body")
+      .eq("restaurant_id", restaurantId)
+      .eq("status", "approved")
+      .order("created_at", { ascending: false })
+      .limit(8);
+    const reviewTexts = ((revs ?? []) as { body: string | null }[])
+      .map((r) => (r.body ?? "").trim())
+      .filter(Boolean);
+    if (reviewTexts.length) {
+      lines.push(
+        `\nAPPROVED COMMUNITY REVIEWS — use ONLY as input for real detail and sentiment. NEVER quote or paste verbatim into the copy; synthesise any genuine, corroborated facts (signature dishes, atmosphere, service) in house voice, and ignore anything unverifiable or defamatory:\n${reviewTexts
+          .map((t, i) => `${i + 1}. "${t}"`)
+          .join("\n")}`
+      );
+      builtOn.push(`${reviewTexts.length} review${reviewTexts.length === 1 ? "" : "s"}`);
+    }
     if (lines.length) knownFactsBlock = lines.join("\n");
   }
 
