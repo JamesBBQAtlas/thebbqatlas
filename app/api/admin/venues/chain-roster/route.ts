@@ -40,7 +40,7 @@ export async function POST(request: Request) {
 
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
-    .select("id, name, slug, status, country, city, address, lat, lng, website, instagram_handle, dossier, enrichment_cost, chain_parent_id")
+    .select("id, name, slug, status, country, city, address, lat, lng, website, instagram_handle, dossier, enrichment_cost, chain_parent_id, needs_attention, attention_reason")
     .eq("id", restaurantId)
     .single();
   if (loadErr || !row) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
@@ -241,9 +241,19 @@ export async function POST(request: Request) {
   const distinctRostered = result.added.length + result.linked + alreadyPresent;
 
   const nowIso = new Date().toISOString();
+  // Item 4 — a SUCCESSFUL discovery run (addresses extracted / branches linked)
+  // must clear a STALE extraction/geocode flag left by an earlier 0-result run,
+  // so the Ribs Lane parent no longer reads "extracted 0 addresses" after a run
+  // that now extracts them. Only clear a discovery-class reason — never a
+  // different attention flag the operator cares about.
+  const staleDiscoveryFlag = /chain discovery extracted|extracted 0 addresses|0 addresses from|crawled page|couldn.?t locate|verify pin|no street address/i;
+  const clearStale =
+    Boolean((row as { needs_attention?: boolean }).needs_attention) &&
+    staleDiscoveryFlag.test(String((row as { attention_reason?: string | null }).attention_reason ?? ""));
   await ctx.db.from("restaurants").update({
     enrichment_cost: round4(priorCost + grokCostTotal),
     chain_rostered_at: nowIso,
+    ...(clearStale ? { needs_attention: false, attention_reason: null } : {}),
     // Crown the parent as flagship only when a signal identifies it; a single
     // location is trivially its own flagship, so it's never left "flagship unset".
     flagship_unset: singleLocation ? false : !flagshipCrowned,

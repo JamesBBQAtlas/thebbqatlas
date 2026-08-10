@@ -3,7 +3,7 @@ import { requireAdmin } from "@/lib/auth/admin";
 import { checkDuplicate } from "@/lib/venues/dedupe-server";
 import { seedChainLocations, type SeedLocation } from "@/lib/admin/chain-seed";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
-import { geocodePrecise, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
+import { geocodeStructured } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { uniqueRestaurantSlug, resolveOrCreateBrand } from "@/lib/admin/venues";
 import { BBQ_STYLES } from "@/lib/constants/styles";
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
       tiktok_url: result.tiktok_url ?? null,
       youtube_url: result.youtube_url ?? null,
     });
-    const geo = await geocodePrecise({ address: flag.address, city: flag.city, country: declaredCountry || country, name: brand });
+    const geo = await geocodeStructured({ address: flag.address, city: flag.city, country: declaredCountry || country, name: brand });
     const located = Boolean(geo.result);
     const style = result.style && (BBQ_STYLES as readonly string[]).includes(result.style) ? result.style : "other";
     const slug = await uniqueRestaurantSlug(ctx.db, `${brand} ${flag.city ?? "flagship"}`);
@@ -131,6 +131,10 @@ export async function POST(request: Request) {
         city: flag.city ?? null,
         country: declaredCountry || country,
         country_code: located ? geo.result!.country_code : null,
+        // geocode-fix — persist pin quality (Confirmed/Approx/Missing in admin).
+        geo_precision: geo.precision,
+        geo_confidence: geo.confidence,
+        geo_source: geo.source,
         website: result.website ?? null,
         instagram_url: result.instagram_url ?? null,
         x_url: result.x_url ?? null,
@@ -149,9 +153,7 @@ export async function POST(request: Request) {
         chain_rostered_at: new Date().toISOString(),
         needs_attention: !located,
         attention_reason: !located
-          ? geo.status === "coarse_only"
-            ? GEOCODE_COARSE_REASON
-            : "Couldn't locate — check address / set pin manually"
+          ? geo.reason ?? "Couldn't locate — check address / set pin manually"
           : null,
         dossier: { is_chain: true, discovery_source_type: "bulk", flagship_reason: fp?.reason ?? "first location listed" },
       })
@@ -174,11 +176,30 @@ export async function POST(request: Request) {
   const seedResult = await seedChainLocations(ctx.db, parentId, brand, country, seedLocs);
 
   // ── 4. discovery_debug + is_chain on the parent (same trail as single path) ──
-  const { data: parentNow } = await ctx.db.from("restaurants").select("dossier").eq("id", parentId).single();
+  const { data: parentNow } = await ctx.db
+    .from("restaurants")
+    .select("dossier, needs_attention, attention_reason")
+    .eq("id", parentId)
+    .single();
   const dossier = ((parentNow?.dossier as Record<string, unknown> | null) ?? {}) as Record<string, unknown>;
+  // Item 4 — leave the SAME audit trail on a reconcile as on a fresh crawl: the
+  // source pages it saw (crawled_urls) and the raw addresses — never an empty
+  // trail just because the run short-circuited to reconcile.
+  const crawledUrls = Array.from(
+    new Set(
+      [result.website, ...locations.map((l) => l.instagram_url)].filter((u): u is string => Boolean(u))
+    )
+  ).slice(0, 40);
+  // Item 4 — a successful reconcile/roster clears the parent's STALE extraction
+  // flag from an earlier 0-result run (don't touch a different attention reason).
+  const staleDiscoveryFlag = /chain discovery extracted|extracted 0 addresses|0 addresses from|crawled page|couldn.?t locate|verify pin|no street address/i;
+  const clearStale =
+    Boolean((parentNow as { needs_attention?: boolean } | null)?.needs_attention) &&
+    staleDiscoveryFlag.test(String((parentNow as { attention_reason?: string | null } | null)?.attention_reason ?? ""));
   await ctx.db
     .from("restaurants")
     .update({
+      ...(clearStale ? { needs_attention: false, attention_reason: null } : {}),
       dossier: {
         ...dossier,
         is_chain: true,
@@ -186,6 +207,7 @@ export async function POST(request: Request) {
         discovery_debug: {
           source: "bulk Discover all locations",
           website: result.website ?? null,
+          crawled_urls: crawledUrls,
           raw_addresses: locations.map((l) => l.address).filter(Boolean).slice(0, 40),
           decisions: seedResult.decisions.slice(0, 60),
           counts: {

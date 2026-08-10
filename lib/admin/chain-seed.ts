@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { composeAddress, normStreet, normCity, settlementCity } from "@/lib/admin/address";
 import { canonicalCountry, resolveCountryCode } from "@/lib/constants/countries";
-import { geocodePrecise, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
+import { geocodeStructured, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
 import { auditField } from "@/lib/admin/content-audit";
 
@@ -14,6 +14,10 @@ export interface SeedLocation {
   name: string | null;
   address?: string | null;
   city: string | null;
+  /** State/region, when the source carried it — improves the geocode query. */
+  region?: string | null;
+  /** Postal/ZIP code, when known — anchors the geocode (geocode-fix). */
+  postcode?: string | null;
   /** The branch's declared country (falls back to the chain-anchored country). */
   country?: string | null;
   /** The page this branch was read from (stored as provenance). */
@@ -214,6 +218,10 @@ export async function seedChainLocations(
     lng: number | null;
     country_code: string | null;
     geoCity: string | null;
+    /** geocode-fix — pin quality, persisted on the seeded row (Confirmed/Approx/Missing). */
+    geoPrecision: string | null;
+    geoConfidence: number | null;
+    geoSource: string | null;
     /** A specific attention reason (e.g. cross-country mis-pin) if not located. */
     attentionReason: string | null;
   }
@@ -229,9 +237,14 @@ export async function seedChainLocations(
     // Geocode with the BRANCH's declared country as context (falls back to the
     // chain-anchored country), so a place name resolves in the right country.
     const declaredCountry = canonicalCountry(loc.country ?? country);
-    // Part 3 — precision-first: a branch address that only resolves to a town
-    // centroid must NOT be pinned there; flag it for manual placement instead.
-    const geo = await geocodePrecise({ address: loc.address, city: loc.city, country: declaredCountry || country, name: loc.name });
+    // geocode-fix — the bulk chain path now runs through the SAME gated geocoder
+    // as the single-venue path (country-constrained, confidence-scored), and
+    // PERSISTS geo_precision/geo_confidence/geo_source on each seeded row. A branch
+    // that only resolves weakly is left unpinned and flagged, never planted.
+    const geo = await geocodeStructured({ address: loc.address, city: loc.city, region: loc.region, postcode: loc.postcode, country: declaredCountry || country, name: loc.name });
+    let geoPrecision: string | null = geo.precision;
+    let geoConfidence: number | null = geo.confidence;
+    const geoSource: string | null = geo.source;
     if (geo.result && hasCoords(geo.result.lat, geo.result.lng)) {
       // Hard write-guard (§3.3): if the geocoded country ≠ the declared country,
       // DO NOT store the pin — flag it. This kills the cross-country mis-pin bug
@@ -240,14 +253,17 @@ export async function seedChainLocations(
       const geoCode = geo.result.country_code ? geo.result.country_code.toUpperCase() : null;
       if (declaredCode && geoCode && declaredCode !== geoCode) {
         attentionReason = `Geocoded outside ${declaredCountry} (got ${geoCode}) — verify address / set pin`;
+        geoPrecision = "none";
+        geoConfidence = 0;
       } else {
         lat = geo.result.lat;
         lng = geo.result.lng;
         country_code = geo.result.country_code;
         geoCity = geo.result.city;
       }
-    } else if (geo.status === "coarse_only") {
-      attentionReason = GEOCODE_COARSE_REASON;
+    } else {
+      // Flagged — nothing confident resolved; surface the specific reason.
+      attentionReason = geo.reason ?? GEOCODE_COARSE_REASON;
     }
     // Street key from the branch's OWN address line only (not folded with the
     // city), so a city-only entry reads as "no distinct street".
@@ -264,6 +280,9 @@ export async function seedChainLocations(
       lng,
       country_code,
       geoCity,
+      geoPrecision,
+      geoConfidence,
+      geoSource,
       attentionReason,
     });
   }
@@ -396,6 +415,10 @@ export async function seedChainLocations(
         patch.lat = c.lat;
         patch.lng = c.lng;
         if (c.country_code) patch.country_code = c.country_code;
+        // Record the pin quality for the upgraded placeholder too.
+        patch.geo_precision = c.geoPrecision;
+        patch.geo_confidence = c.geoConfidence;
+        patch.geo_source = c.geoSource;
         // A placeholder that just got a real pin no longer needs a location flag.
         patch.needs_attention = false;
         patch.attention_reason = null;
@@ -449,6 +472,10 @@ export async function seedChainLocations(
       status: "pending",
       category: "restaurant",
       chain_parent_id: parentId,
+      // geocode-fix — persist pin quality so admin shows Confirmed/Approx/Missing.
+      geo_precision: c.geoPrecision,
+      geo_confidence: c.geoConfidence,
+      geo_source: c.geoSource,
     };
     if (located && c.country_code) insertRow.country_code = c.country_code;
     // Provenance — every pin traces back to the page it was read from (§3.4).

@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
 import { CircleDot, AlertTriangle, Ban, Crown, Inbox } from "lucide-react";
 import { freshnessTone, FRESHNESS_DAYS } from "@/lib/admin/freshness";
+import { GeoAuditPanel } from "@/components/admin/GeoAuditPanel";
 
 export const metadata = { title: "Status" };
 export const dynamic = "force-dynamic";
@@ -120,6 +121,9 @@ export default async function StatusPage() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {flags.map((t) => <TileCard key={t.href} t={t} />)}
       </div>
+
+      <h2 className="mb-3 mt-8 font-heading text-lg font-bold text-text-primary">Pin health</h2>
+      <GeoAuditPanel />
 
       <p className="mt-8 text-sm text-text-muted">
         The old scheduled “self-heal” sweep has been retired (it silently ran a pricey model). Refreshing stale venues is now: <Link href="/admin/listings?fresh=red" className="text-brand-gold hover:underline">open the Red set</Link>, select all, hit “Enrich selected”, confirm the cost. Same cheap Grok → Haiku pipeline, no cron, no separate engine.

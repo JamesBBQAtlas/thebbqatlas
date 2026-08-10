@@ -1491,6 +1491,18 @@ export function VenueHub({
                       {v.needs_attention && v.attention_reason && (
                         <div className="mt-1 inline-flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{v.attention_reason}</div>
                       )}
+                      {/* geocode-fix — a shaky pin looks different at a glance in the row;
+                          a Confirmed pin shows nothing here (the editor shows its green badge). */}
+                      {(() => {
+                        const pc = pinConfidence({ lat: v.lat, lng: v.lng, geoLocked: v.geoLocked, geoPrecision: v.geoPrecision, geoConfidence: v.geoConfidence });
+                        if (pc === "approximate") {
+                          return <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-amber-400" title="Approximate pin — postcode/town-level or low confidence. Verify the exact spot."><AlertTriangle className="h-3 w-3" />Pin approximate</div>;
+                        }
+                        if (pc === "missing") {
+                          return <div className="mt-1 inline-flex items-center gap-1 rounded-full border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[0.625rem] font-semibold text-destructive" title="No pin set — place it on the map."><MapPinOff className="h-3 w-3" />Pin missing</div>;
+                        }
+                        return null;
+                      })()}
                       {v.provenance && (
                         <div className="mt-1 text-[0.6875rem] leading-relaxed text-text-muted">
                           {v.provenance.source === "member" ? (
