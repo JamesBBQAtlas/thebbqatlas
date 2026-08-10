@@ -156,5 +156,22 @@ console.log("\n[round-2 — MULTI-LINE address blocks (the Thatcher /location/ r
     extractAddressesFromText("918 Natural Bridge Rd.\nOpen Thursday–Sunday").length === 0);
 }
 
+console.log("\n[v3 — Australian address extraction (the Ribs Lane gap)]");
+{
+  // Real strings from ribslane.com.au: "Suburb STATE 4-digit", no comma before state.
+  const single = "20 Strelitzia Ave, Forrestfield WA 6058, Australia · 644 Beaufort St, Mount Lawley WA 6050";
+  const got = extractAddressesFromText(single);
+  ok("extracts the Forrestfield branch", got.some((c) => c.address === "20 Strelitzia Ave, Forrestfield WA 6058"));
+  ok("extracts the Mount Lawley branch", got.some((c) => c.address === "644 Beaufort St, Mount Lawley WA 6050"));
+  ok("captures the 4-digit postcode + AU state", got.some((c) => c.postcode === "6058" && c.region === "WA"));
+
+  // Multi-line AU block (street then "Suburb STATE 4-digit").
+  const multi = "Subiaco\n101 Rokeby Rd\nSubiaco WA 6008\nOpen daily";
+  ok("multi-line AU block resolves", extractAddressesFromText(multi).some((c) => c.address === "101 Rokeby Rd, Subiaco WA 6008"));
+
+  // A NSW example (different state) to prove it's not WA-specific.
+  ok("NSW address extracts", extractAddressesFromText("12 King St, Newtown NSW 2042").some((c) => c.region === "NSW" && c.postcode === "2042"));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);

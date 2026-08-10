@@ -274,6 +274,19 @@ const US_ADDRESS =
 const INTL_ADDRESS =
   /\b(\d{1,6}[\w.\- ]{2,60}?(?:street|st|road|rd|avenue|ave|lane|ln|way|close|crescent|cres|parade|pde|terrace|drive|dr|walk|row|quay|wharf|square|sq|grove|hill|gardens|mews)\b[\w.,\- ]{0,60}?)\s+([A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}|[A-Z]\d[A-Z]\s*\d[A-Z]\d)\b/gi;
 
+// v3 — an AUSTRALIAN street line: "644 Beaufort St, Mount Lawley WA 6050" — the
+// suburb sits between the street and the STATE with NO comma before the state,
+// and the postcode is 4 digits (the Ribs Lane / ribslane.com.au gap: AU format
+// matched neither the US nor the UK/CA pattern, so extraction returned 0). AU
+// states: WA NSW VIC QLD SA TAS ACT NT. (NZ shares the 4-digit + suburb shape.)
+const AU_STATES = "WA|NSW|VIC|QLD|SA|TAS|ACT|NT";
+const AU_ADDRESS = new RegExp(
+  `\\b(\\d{1,6}[\\w.\\- ]{2,60}?(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|hwy|highway|pkwy|parkway|ct|court|pl|place|tce|terrace|cres|crescent|cl|close|pde|parade|esplanade|esp|grove|gr|circuit|cct|square|sq|row|walk|mall|arcade)\\b[\\w.\\- ]{0,30}?),\\s+([A-Za-z][A-Za-z.'\\- ]{1,28}?)\\s+(${AU_STATES})\\s+(\\d{4})\\b`,
+  "gi"
+);
+// The AU "Suburb STATE 4-digit" second half of a multi-line block.
+const AU_CITY_STATE_ZIP_LINE = new RegExp(`^([A-Za-z][A-Za-z.'\\- ]{1,28}?)\\s+(${AU_STATES})\\s+(\\d{4})\\b`, "i");
+
 /**
  * Extract candidate addresses from a page's raw VISIBLE text (not its markup).
  * Runs the US and international line patterns over the de-tagged text and returns
@@ -311,6 +324,14 @@ export function extractAddressesFromText(text: string, sourceUrl: string | null 
     const postcode = m[2].replace(/\s+/g, " ").trim();
     push({ street, postcode, address: `${street} ${postcode}` });
   }
+  // v3 — Australian "Street, Suburb STATE 4-digit" (Ribs Lane etc.).
+  for (const m of clean.matchAll(AU_ADDRESS)) {
+    const street = m[1].replace(/\s+/g, " ").trim().replace(/,+$/, "");
+    const city = m[2].replace(/\s+/g, " ").trim();
+    const region = m[3].toUpperCase();
+    const postcode = m[4];
+    push({ street, city, region, postcode, address: `${street}, ${city} ${region} ${postcode}` });
+  }
 
   // (2) MULTI-LINE block (round-2 fix): a street-number line IMMEDIATELY followed
   //     by a "City, ST ZIP" line is one address — the exact Thatcher /location/
@@ -319,13 +340,17 @@ export function extractAddressesFromText(text: string, sourceUrl: string | null 
   const lines = clean.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   for (let i = 0; i < lines.length - 1; i++) {
     if (!STREET_LINE.test(lines[i])) continue;
-    const cm = lines[i + 1].match(CITY_STATE_ZIP_LINE);
-    if (!cm) continue;
     const street = lines[i].replace(/,\s*$/, "").trim();
-    const city = cm[1].trim();
-    const region = cm[2].toUpperCase();
-    const postcode = cm[3];
-    push({ street, city, region, postcode, address: `${street}, ${city}, ${region} ${postcode}` });
+    const us = lines[i + 1].match(CITY_STATE_ZIP_LINE);
+    if (us) {
+      push({ street, city: us[1].trim(), region: us[2].toUpperCase(), postcode: us[3], address: `${street}, ${us[1].trim()}, ${us[2].toUpperCase()} ${us[3]}` });
+      continue;
+    }
+    // v3 — the AU "Suburb STATE 4-digit" second line.
+    const au = lines[i + 1].match(AU_CITY_STATE_ZIP_LINE);
+    if (au) {
+      push({ street, city: au[1].trim(), region: au[2].toUpperCase(), postcode: au[3], address: `${street}, ${au[1].trim()} ${au[2].toUpperCase()} ${au[3]}` });
+    }
   }
 
   return out;

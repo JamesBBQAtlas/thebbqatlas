@@ -851,63 +851,36 @@ function ChainTool({
     if (!result) return;
     setBusy("create");
     setError("");
-    let ok = 0;
-    let failed = 0;
-    for (let i = 0; i < result.locations.length; i++) {
-      if (!include[i]) continue;
-      const loc = result.locations[i];
-      setProgress(`Creating ${loc.location_label || loc.city || loc.name || "location"}…`);
-      const res = await fetch("/api/admin/venues", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          venue: {
-            name: loc.name || result.brand_name,
-            description: result.description ?? "",
-            website: result.website,
-            phone: loc.phone,
-            address: loc.address,
-            city: loc.city,
-            country: loc.country,
-            style: result.style,
-            hours: loc.hours,
-            // Branch's own Instagram if it has one, else the brand's; the rest
-            // inherit the brand (enrich a location individually for its full
-            // own socials/photos).
-            instagram_url: loc.instagram_url || result.instagram_url,
-            x_url: result.x_url,
-            facebook_url: result.facebook_url,
-            tiktok_url: result.tiktok_url,
-            youtube_url: result.youtube_url,
-            location_label: loc.location_label,
-          },
-          publish,
-          // Brand-level identity (brand's own accounts) stays on the brand.
-          brand: result.brand_name
-            ? {
-                name: result.brand_name,
-                description: result.description,
-                website: result.website,
-                instagram_url: result.instagram_url,
-                x_url: result.x_url,
-                facebook_url: result.facebook_url,
-                tiktok_url: result.tiktok_url,
-                youtube_url: result.youtube_url,
-              }
-            : undefined,
-          lead,
-          citations: result.citations,
-        }),
-      });
-      if (res.ok) ok++;
-      else failed++;
-      // Respect Nominatim's ~1 req/sec geocoding limit.
-      await sleep(1200);
-    }
+    setProgress("Creating the chain (deduping against existing venues)…");
+    // v3 — one call that DEDUPES against existing venues, reconciles to an existing
+    // chain (links, never duplicates), parents everything under a flagship, and
+    // writes discovery_debug. Only the ticked locations are sent.
+    const selected = result.locations.filter((_, i) => include[i]);
+    const res = await fetch("/api/admin/venues/chain-create-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        result: {
+          brand_name: result.brand_name,
+          description: result.description,
+          website: result.website,
+          style: result.style,
+          instagram_url: result.instagram_url,
+          x_url: result.x_url,
+          facebook_url: result.facebook_url,
+          tiktok_url: result.tiktok_url,
+          youtube_url: result.youtube_url,
+          locations: selected,
+        },
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
     setBusy(null);
-    setProgress(
-      `Done — ${ok} location${ok === 1 ? "" : "s"} ${publish ? "published" : "queued"}${failed ? `, ${failed} failed (check addresses)` : ""}. ✓`
-    );
+    if (!res.ok) {
+      setError(data.error || "Chain create failed.");
+      return;
+    }
+    setProgress(`${data.message ?? "Done."} ✓`);
   }
 
   const selectedCount = include.filter(Boolean).length;
