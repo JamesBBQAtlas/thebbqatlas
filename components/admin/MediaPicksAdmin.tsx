@@ -712,11 +712,18 @@ function SectionList({
   const [announce, setAnnounce] = useState("");
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  // Part B (B5) — bulk selection + action bar.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState("");
+  const [undo, setUndo] = useState<AdminMediaPick[] | null>(null);
+  const [moveTo, setMoveTo] = useState("");
 
   // Resync when the server data changes (after router.refresh()).
   const sig = kindRows.map((r) => `${r.id}:${r.sort_order}`).join(",");
   useEffect(() => {
     setOrder(kindRows);
+    setSelected(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig]);
 
@@ -759,6 +766,101 @@ function SectionList({
     persist(next);
   }
 
+  // ── B5 — selection + bulk actions ──────────────────────────────────────────
+  const selCount = selected.size;
+  const selectedPicks = order.filter((p) => selected.has(p.id));
+  const allVisibleSelected = visible.length > 0 && visible.every((p) => selected.has(p.id));
+  const anyPublished = selectedPicks.some((p) => p.is_published);
+  const anyDraft = selectedPicks.some((p) => !p.is_published);
+  function toggleOne(id: string) {
+    setSelected((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+  function toggleAll() {
+    setSelected(allVisibleSelected ? new Set() : new Set(visible.map((p) => p.id)));
+  }
+
+  async function bulkState(op: "publish" | "unpublish" | "delete") {
+    const ids = [...selected];
+    if (!ids.length) return;
+    if (op === "delete" && !confirm(`Delete ${ids.length} item${ids.length === 1 ? "" : "s"}? You can undo straight after.`)) return;
+    const removed = op === "delete" ? order.filter((p) => selected.has(p.id)) : null;
+    setBulkBusy(true);
+    setBulkMsg("");
+    try {
+      const res = await fetch("/api/admin/media-picks/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op, ids }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setBulkMsg((d.error as string) || "Bulk action failed."); return; }
+      const verb = op === "delete" ? "removed" : op === "publish" ? "published" : "unpublished";
+      setBulkMsg(`${d.succeeded} ${verb}${d.failed?.length ? ` · ${d.failed.length} failed` : ""}.`);
+      if (removed && removed.length) setUndo(removed);
+      setSelected(new Set());
+      router.refresh();
+    } catch {
+      setBulkMsg("Network error.");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function bulkRecheck() {
+    const ids = [...selected];
+    if (!ids.length) return;
+    setBulkBusy(true);
+    setBulkMsg("");
+    try {
+      await checkLinks(ids);
+      setBulkMsg(`Re-checked ${ids.length} link${ids.length === 1 ? "" : "s"}.`);
+      setSelected(new Set());
+      router.refresh();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function bulkMove() {
+    if (!canReorder) return;
+    const pos = parseInt(moveTo, 10);
+    if (!Number.isFinite(pos)) return;
+    const sel = order.filter((p) => selected.has(p.id));
+    const rest = order.filter((p) => !selected.has(p.id));
+    const target = Math.max(0, Math.min(rest.length, pos - 1));
+    const next = [...rest.slice(0, target), ...sel, ...rest.slice(target)];
+    setMoveTo("");
+    setBulkMsg(`Moved ${sel.length} item${sel.length === 1 ? "" : "s"} to position ${target + 1}.`);
+    persist(next);
+    setSelected(new Set());
+  }
+
+  async function undoDelete() {
+    if (!undo) return;
+    setBulkBusy(true);
+    try {
+      for (const p of undo) {
+        await api("POST", {
+          kind: p.kind,
+          name: p.name,
+          creator: p.creator || undefined,
+          url: p.url,
+          blurb: p.blurb,
+          image_url: p.image_url || undefined,
+          gear_link: p.gear_link || undefined,
+          links: JSON.stringify(p.links ?? {}),
+          is_published: p.is_published,
+          sort_order: p.sort_order,
+        });
+      }
+      setUndo(null);
+      setBulkMsg("");
+      router.refresh();
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   if (visible.length === 0) {
     return <p className="py-4 text-sm text-text-muted">{filtersActive ? "No matches." : "Nothing here yet."}</p>;
   }
@@ -766,6 +868,32 @@ function SectionList({
   return (
     <>
       <div aria-live="polite" className="sr-only">{announce}</div>
+
+      {/* Select-all + persistent bulk action bar (B5). */}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <label className="inline-flex items-center gap-1.5 text-xs text-text-muted">
+          <input type="checkbox" checked={allVisibleSelected} onChange={toggleAll} className="h-3.5 w-3.5" aria-label="Select all in this section" />
+          Select all
+        </label>
+        {selCount > 0 && (
+          <div className="sticky top-16 z-20 flex flex-1 flex-wrap items-center gap-2 rounded-lg border border-brand-gold/40 bg-surface-0/95 px-3 py-1.5 shadow-sm backdrop-blur">
+            <span className="text-xs font-semibold text-text-primary">{selCount} selected</span>
+            <button type="button" disabled={bulkBusy || !anyDraft} onClick={() => bulkState("publish")} title={!anyDraft ? "All selected are already published" : undefined} className="rounded-md border border-border-default px-2.5 py-1 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-30">Publish</button>
+            <button type="button" disabled={bulkBusy || !anyPublished} onClick={() => bulkState("unpublish")} title={!anyPublished ? "All selected are already drafts" : undefined} className="rounded-md border border-border-default px-2.5 py-1 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-30">Unpublish</button>
+            <button type="button" disabled={bulkBusy} onClick={bulkRecheck} className="rounded-md border border-border-default px-2.5 py-1 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">Re-check links</button>
+            {canReorder && (
+              <span className="inline-flex items-center gap-1">
+                <input type="number" min={1} max={order.length} value={moveTo} onChange={(e) => setMoveTo(e.target.value)} placeholder="#" className="w-12 rounded border border-border-default bg-surface-1 px-1 py-0.5 text-center text-xs text-text-primary" aria-label="Move selected to position" />
+                <button type="button" disabled={bulkBusy || !moveTo} onClick={bulkMove} className="rounded-md border border-border-default px-2 py-1 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-40">Move to #</button>
+              </span>
+            )}
+            <button type="button" disabled={bulkBusy} onClick={() => bulkState("delete")} className="ml-auto inline-flex items-center gap-1 rounded-md border border-border-default px-2.5 py-1 text-xs font-semibold text-text-muted hover:border-destructive/60 hover:text-destructive disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />Delete</button>
+            {bulkBusy && <Loader2 className="h-4 w-4 animate-spin text-brand-gold" />}
+          </div>
+        )}
+        {selCount === 0 && bulkMsg && <span className="text-xs text-text-muted">{bulkMsg}</span>}
+      </div>
+
       {!canReorder && order.length > 1 && (
         <p className="mb-2 text-xs text-text-muted">Clear search / filters to drag-reorder this list.</p>
       )}
@@ -781,6 +909,13 @@ function SectionList({
               onDragOver={canReorder ? (e) => { e.preventDefault(); setOverIndex(idx); } : undefined}
               onDrop={canReorder ? (e) => { e.preventDefault(); if (dragIndex !== null) move(dragIndex, idx); setDragIndex(null); setOverIndex(null); } : undefined}
             >
+              <input
+                type="checkbox"
+                checked={selected.has(pick.id)}
+                onChange={() => toggleOne(pick.id)}
+                className="mt-3 h-4 w-4 shrink-0"
+                aria-label={`Select ${pick.name}`}
+              />
               {canReorder && (
                 <div className="flex shrink-0 flex-col items-center gap-1 pt-2">
                   <button
@@ -828,7 +963,28 @@ function SectionList({
           <p className="text-xs text-text-muted"><Loader2 className="mr-1 inline h-3 w-3 animate-spin" />Saving order…</p>
         )}
       </div>
+
+      {/* Undo toast after a bulk delete (B5 — destructive = confirm + undo). */}
+      {undo && undo.length > 0 && <UndoToast count={undo.length} busy={bulkBusy} onUndo={undoDelete} onDismiss={() => setUndo(null)} />}
     </>
+  );
+}
+
+/** A fixed "N removed — Undo" toast; auto-dismisses so it never sticks around. */
+function UndoToast({ count, busy, onUndo, onDismiss }: { count: number; busy: boolean; onUndo: () => void; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 9000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+  return createPortal(
+    <div className="fixed bottom-4 left-1/2 z-[120] flex -translate-x-1/2 items-center gap-3 rounded-lg border border-border-default bg-surface-0 px-4 py-2.5 text-sm shadow-2xl">
+      <span className="text-text-primary">{count} removed.</span>
+      <button type="button" disabled={busy} onClick={onUndo} className="inline-flex items-center gap-1 font-bold text-brand-gold hover:underline disabled:opacity-50">
+        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}Undo
+      </button>
+      <button type="button" onClick={onDismiss} className="text-text-muted hover:text-text-primary" aria-label="Dismiss"><X className="h-4 w-4" /></button>
+    </div>,
+    document.body
   );
 }
 
