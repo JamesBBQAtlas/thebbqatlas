@@ -10,6 +10,9 @@
 
 @layer base {
   :root {
+    /* The sticky site header's content height (matches Header.tsx `h-18` = 4.5rem).
+       Single source for the map viewport + any header-clearance offsets. */
+    --header-height: 4.5rem;
     /* shadcn/ui — HSL equivalents of the brand hex tokens */
     --background: 20 27% 4%; /* #0C0907 */
     --foreground: 25 17% 94%; /* #F5F0EB */
@@ -482,11 +485,17 @@
    the map matches what's actually visible on mobile (100vh over-reports on iOS,
    pushing the bottom of the map — and its floating card — behind the toolbar). */
 .h-mapview {
-  height: calc(100vh - 4.5rem);
+  /* Subtract BOTH the header content height AND the header's safe-area inset
+     (the header carries `.safe-top` padding-top: env(safe-area-inset-top)).
+     Without the inset the page grew taller than the viewport on notched phones,
+     turning it scrollable — which let the sticky, translucent header ride over
+     the map's top controls (the Filters chip + recenter button). env() is 0
+     where unsupported, so desktop is unchanged. */
+  height: calc(100vh - var(--header-height) - env(safe-area-inset-top));
 }
 @supports (height: 100dvh) {
   .h-mapview {
-    height: calc(100dvh - 4.5rem);
+    height: calc(100dvh - var(--header-height) - env(safe-area-inset-top));
   }
 }
 
