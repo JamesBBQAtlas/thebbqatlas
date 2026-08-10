@@ -16,6 +16,7 @@
     "test:geocode": "tsx scripts/test-geocode-precision.mts",
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",
     "test:dedupe": "tsx scripts/test-submission-dedupe.mts",
+    "test:link-health": "tsx scripts/test-link-health.mts",
     "prepare": "husky"
   },
   "dependencies": {
