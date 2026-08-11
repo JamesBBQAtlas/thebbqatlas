@@ -10,9 +10,12 @@ import {
   isTooCoarse,
   decideStructuredGeo,
   extractUKPostcode,
+  structuredLadder,
+  isSentinelPin,
   type GeoResult,
   type PostcodeAnchor,
 } from "../lib/geo/geocode";
+import { resolveCountryCode } from "../lib/constants/countries";
 
 let pass = 0;
 let fail = 0;
@@ -158,6 +161,38 @@ console.log("\n[geocode-fix — extractUKPostcode]");
 ok("pulls NW1 0TH from a full address", extractUKPostcode("88 Royal College Street, London, NW1 0TH") === "NW1 0TH");
 ok("pulls SE1 3SU (no space variant)", extractUKPostcode("8-9 Snowsfields, SE13SU") === "SE1 3SU" || extractUKPostcode("8-9 Snowsfields, SE1 3SU") === "SE1 3SU");
 ok("returns null when there's no UK postcode", extractUKPostcode("123 Main St, Austin, TX 78704") === null);
+
+console.log("\n[pin-fixes — country-code mapping (the constraint that silently never applied)]");
+ok("resolveCountryCode('United States') → US (was null!)", resolveCountryCode(null, "United States") === "US");
+ok("resolveCountryCode('United Kingdom') → GB", resolveCountryCode(null, "United Kingdom") === "GB");
+ok("resolveCountryCode('United Arab Emirates') → AE", resolveCountryCode(null, "United Arab Emirates") === "AE");
+ok("variant 'USA' still → US", resolveCountryCode(null, "USA") === "US");
+
+console.log("\n[pin-fixes — the query ladder drops the ZIP so the street can resolve]");
+{
+  const rungs = structuredLadder({ address: "601 E Main St", city: "Arlington", region: "TX", postcode: "76010", country: "United States" });
+  ok("rung 1 is the full query (with ZIP)", /76010/.test(rungs[0]));
+  ok("rung 2 drops the postcode (the Arlington fix)", rungs.length > 1 && !/76010/.test(rungs[1]) && /601 E Main St/.test(rungs[1]) && /Arlington/.test(rungs[1]));
+  ok("a POI-by-name rung exists", rungs.some((r) => r.length > 0));
+  ok("no empty rungs", rungs.every((r) => r.trim().length > 0));
+}
+{
+  // A US street address that resolves precisely (no anchor for US) → confident.
+  const usHit: GeoResult = { lat: 32.736, lng: -97.108, country_code: "US", city: "Arlington", country: "United States", place_type: "address", precise: true };
+  const decided = decideStructuredGeo({ address: "601 E Main St", city: "Arlington", region: "TX", postcode: "76010", country: "United States" }, null, usHit, "US");
+  ok("a precise US address hit → confident (not low-confidence)", decided.status === "confident");
+  // The ZIP-centroid hit MapTiler returned for the over-specified query is rejected.
+  const zipCentroid: GeoResult = { lat: 32.7, lng: -97.1, country_code: "US", city: "Arlington", country: "United States", place_type: "postcode", precise: false };
+  const rej = decideStructuredGeo({ address: "601 E Main St", city: "Arlington", postcode: "76010", country: "United States" }, null, zipCentroid, "US");
+  ok("a ZIP-centroid (postcode) hit is NOT accepted as confident", rej.status !== "confident");
+}
+
+console.log("\n[pin-fixes — isSentinelPin (0,0 + country centroids are 'no pin')]");
+ok("(0,0) is a sentinel", isSentinelPin(0, 0) === true);
+ok("US centroid (39.7837,-100.4459) is a sentinel", isSentinelPin(39.7837305527552, -100.445882119238) === true);
+ok("US centroid within tolerance is a sentinel", isSentinelPin(39.784, -100.446) === true);
+ok("a real Arlington pin is NOT a sentinel", isSentinelPin(32.736, -97.108) === false);
+ok("null is not a sentinel (it's genuinely no-pin)", isSentinelPin(null, null) === false);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);

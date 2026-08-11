@@ -240,8 +240,7 @@ export async function POST(request: Request) {
     if (citations.length) patch.enrichment_sources = citations;
     if (!row.geo_locked && row.lat === 0 && row.lng === 0) {
       // Part 3 / geocode-fix — only plant a pin when the country-constrained,
-      // confidence-gated geocode returns a confident (or postcode-area) fix; a
-      // low-confidence miss is left unset (row stays at 0,0 and keeps its flag).
+      // confidence-gated geocode returns a confident (or postcode-area) fix.
       // A geo_locked row is never re-geocoded here.
       const geo = await geocodeStructured({ address: row.address, city: row.city, country: row.country, name: row.name });
       if (geo.result) {
@@ -251,6 +250,11 @@ export async function POST(request: Request) {
         patch.geo_precision = geo.precision;
         patch.geo_confidence = geo.confidence;
         patch.geo_source = geo.source;
+      } else {
+        // No confident pin → NEVER leave the venue at 0,0. Clear the sentinel to a
+        // true NULL so it reads as an honest "missing pin" (geocode-fix rule).
+        patch.lat = null;
+        patch.lng = null;
       }
     }
     // Part 5 — a Find-IG write is a live enrichment edit; stamp who/when.
@@ -617,6 +621,13 @@ export async function POST(request: Request) {
     proposed.lat = lat;
     proposed.lng = lng;
     if (country_code) proposed.country_code = country_code;
+  } else if (!pinLocked && noValidLocation && (row.lat != null || row.lng != null)) {
+    // geocode-fix rule — "no venue is ever left at 0,0". When we couldn't place a
+    // confident pin and there's no valid existing pin either, clear the stored
+    // sentinel (0,0) to a true NULL so the row reads as an honest "missing pin"
+    // rather than null-island. This self-heals the legacy 0,0 rows on re-enrich.
+    proposed.lat = null;
+    proposed.lng = null;
   }
   // geocode-fix — record how good this pin is (precision / confidence / source)
   // so admin shows Confirmed vs Approximate vs Missing. Only when we actually

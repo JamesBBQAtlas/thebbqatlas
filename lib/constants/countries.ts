@@ -112,6 +112,12 @@ export function countryName(code: string | null | undefined, fallback: string): 
  * without a country_code, e.g. the bundled fallback dataset). */
 export const COUNTRY_TO_CODE: Record<string, string> = {
   USA: "US",
+  // The CANONICAL display names (what canonicalCountry() stores) must map too —
+  // without these, resolveCountryCode("United States") returned null and the
+  // geocoder's country constraint silently never applied for the US/UK/UAE.
+  "United States": "US",
+  "United Kingdom": "GB",
+  "United Arab Emirates": "AE",
   UK: "GB",
   "South Korea": "KR",
   Canada: "CA",

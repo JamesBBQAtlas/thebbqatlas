@@ -89,6 +89,22 @@ function validCoord(lat: number, lng: number): boolean {
   return Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
 }
 
+/**
+ * Known PLACEHOLDER coordinates that are not real venue pins — the (0,0) null
+ * island, and country-centroid points a geocoder returns for an address-less
+ * query (e.g. the US centroid an address-less parent got stamped with). These
+ * must be treated as "no pin", never corroborated by the backfill or trusted by
+ * the map. Add more national centroids here as they surface.
+ */
+const SENTINEL_CENTROIDS: ReadonlyArray<readonly [number, number]> = [
+  [39.7837305527552, -100.445882119238], // MapTiler US country centroid
+];
+export function isSentinelPin(lat: number | null | undefined, lng: number | null | undefined): boolean {
+  if (typeof lat !== "number" || typeof lng !== "number" || !Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat === 0 && lng === 0) return true;
+  return SENTINEL_CENTROIDS.some(([cLat, cLng]) => Math.abs(lat - cLat) < 0.01 && Math.abs(lng - cLng) < 0.01);
+}
+
 interface MtContext {
   id?: string;
   text?: string;
@@ -439,15 +455,40 @@ export function decideStructuredGeo(
  * reason. Never accepts MapTiler features[0] blindly; never guesses a centroid.
  *
  * The network I/O lives here; the decision lives in `decideStructuredGeo`.
+ *
+ * A LADDER of queries is tried, most-specific → least (all country-constrained):
+ * dropping the postcode token on the 2nd rung is deliberate — an over-specified
+ * "601 E Main St, Arlington, TX, 76010, USA" makes MapTiler return the ZIP-area
+ * centroid (rejected as too-coarse), whereas the same address without the ZIP
+ * resolves to the street. We stop at the first CONFIDENT decision and otherwise
+ * keep the best (approximate anchor > flagged) — restoring the fallback the
+ * single-query version had lost (the Arlington low-confidence regression).
  */
+export function structuredLadder(p: StructuredParts): string[] {
+  const j = (xs: (string | null | undefined)[]) =>
+    xs.filter((s) => s && String(s).trim()).join(", ");
+  return [
+    j([p.address, p.city, p.region, p.postcode, p.country]),
+    j([p.address, p.city, p.region, p.country]), // drop the ZIP → street resolves
+    j([p.address, p.city, p.country]),
+    j([p.name, p.city, p.region, p.country]), // POI-by-name fallback
+    j([p.city, p.region, p.postcode, p.country]), // area (context only)
+  ].filter((q, i, a) => q && a.indexOf(q) === i);
+}
+
+const geoRank = (s: StructuredGeo): number =>
+  s.status === "confident" ? 2 : s.status === "approximate" ? 1 : 0;
+
 export async function geocodeStructured(parts: StructuredParts): Promise<StructuredGeo> {
   const iso = resolveCountryCode(null, parts.country ?? null);
   const anchor = await postcodeAnchor(iso, parts.postcode);
 
-  const q = [parts.address, parts.city, parts.region, parts.postcode, parts.country]
-    .filter((s) => s && String(s).trim())
-    .join(", ");
-  const hit = q ? await queryMapTiler(q, iso) : null;
-
-  return decideStructuredGeo(parts, anchor, hit, iso);
+  let best: StructuredGeo | null = null;
+  for (const q of structuredLadder(parts)) {
+    const hit = await queryMapTiler(q, iso);
+    const decided = decideStructuredGeo(parts, anchor, hit, iso);
+    if (decided.status === "confident") return decided; // best possible — stop
+    if (!best || geoRank(decided) > geoRank(best)) best = decided;
+  }
+  return best ?? decideStructuredGeo(parts, anchor, null, iso);
 }
