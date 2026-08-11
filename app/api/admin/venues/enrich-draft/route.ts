@@ -22,6 +22,7 @@ import { hasNonLatinScript } from "@/lib/utils/script";
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { geocodeStructured, GEOCODE_COARSE_REASON, GEOCODE_APPROX_REASON } from "@/lib/geo/geocode";
+import { shouldKeepLockedPin } from "@/lib/geo/pin-lock";
 import { COST_PER_CHAIN_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
@@ -527,7 +528,7 @@ export async function POST(request: Request) {
   // Fix 4 — the operator hand-set/confirmed this pin. A re-enrich must NEVER move
   // it (mirrors manual_copy). We keep the locked coordinates untouched.
   let pinLocked = false;
-  if (row.geo_locked && validCoord(row.lat as number, row.lng as number)) {
+  if (shouldKeepLockedPin(row.geo_locked, row.lat as number, row.lng as number)) {
     pinLocked = true;
     lat = row.lat as number;
     lng = row.lng as number;

@@ -10,6 +10,7 @@
     "enrich": "node scripts/enrich-venues.mjs",
     "audit:grants": "node scripts/audit-write-grants.mjs",
     "audit:affiliate": "tsx scripts/audit-affiliate.mts",
+    "audit:schema": "node scripts/audit-schema-columns.mjs",
     "test:chain": "tsx scripts/test-chain-discovery.mts",
     "test:chain-part4": "tsx scripts/test-chain-part4.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
@@ -18,6 +19,8 @@
     "test:dedupe": "tsx scripts/test-submission-dedupe.mts",
     "test:link-health": "tsx scripts/test-link-health.mts",
     "test:wrl": "tsx scripts/test-wrl-url.mts",
+    "test:pin-lock": "tsx scripts/test-pin-lock.mts",
+    "test:enrich-safety": "tsx scripts/test-enrich-safety.mts",
     "prepare": "husky"
   },
   "dependencies": {

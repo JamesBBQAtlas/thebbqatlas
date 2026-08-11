@@ -9,3 +9,10 @@ npm run audit:grants
 # stored gear/book row on a foreign store / foreign tag. The DB half runs when
 # Supabase creds are in the local env; the logic + component scan always run.
 npm run audit:affiliate
+# Schema-vs-code column guard (post-cleanup): blocks a push that writes a column
+# to a core table which no committed migration creates — the exact class that
+# took enrichment down (info_note) and left the geo_* fields unmigrated. No DB
+# needed: the committed migrations are the schema of record; the guard is
+# conservative and only fails on a column it's sure the code writes and the
+# schema lacks.
+npm run audit:schema
