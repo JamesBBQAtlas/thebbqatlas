@@ -23,6 +23,23 @@ interface AuditResult {
   error?: string;
 }
 
+/** Shape returned by POST /api/admin/venues/geo-backfill. */
+interface BackfillResult {
+  ok: boolean;
+  mode: "dry-run" | "apply";
+  counts: {
+    candidates_total: number;
+    processed: number;
+    updated: number;
+    confirmed: number;
+    approximate: number;
+    geocode_calls: number;
+    remaining: number;
+  };
+  note: string;
+  error?: string;
+}
+
 /**
  * Item 2 (geocode-fix) — pin-sanity audit surface. Sweeps every venue and reports
  * a COUNT of pins that need a human: missing, incomplete address, low-confidence /
@@ -54,8 +71,33 @@ export function GeoAuditPanel() {
     }
   }
 
+  // Item 3 — non-destructive confidence backfill for already-pinned venues.
+  const [bfBusy, setBfBusy] = useState<"" | "scan" | "apply">("");
+  const [bf, setBf] = useState<BackfillResult | null>(null);
+  const [bfErr, setBfErr] = useState("");
+
+  async function backfill(apply: boolean) {
+    setBfBusy(apply ? "apply" : "scan");
+    setBfErr("");
+    try {
+      const r = await fetch(`/api/admin/venues/geo-backfill${apply ? "?apply=1" : ""}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apply ? { apply: true } : {}),
+      });
+      const d = (await r.json().catch(() => ({}))) as BackfillResult;
+      if (!r.ok) { setBfErr(d.error || "Backfill failed."); return; }
+      setBf(d);
+    } catch {
+      setBfErr("Network error.");
+    } finally {
+      setBfBusy("");
+    }
+  }
+
   const c = res?.counts;
   const problems = c ? c.missing + c.incomplete + c.low_confidence + c.far : 0;
+  const bc = bf?.counts;
 
   return (
     <div className="rounded-xl border border-border-subtle bg-surface-0 p-5">
@@ -117,6 +159,45 @@ export function GeoAuditPanel() {
           </p>
         </div>
       )}
+
+      {/* Item 3 — confidence backfill for the existing pinned catalogue. */}
+      <div className="mt-5 border-t border-border-subtle pt-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Backfill pin confidence</p>
+        <p className="mt-2 max-w-2xl text-sm text-text-muted">
+          Confidence (the Confirmed / Approximate badge) is only recorded when a venue is geocoded, so pins placed before the geocode-fix read <span className="text-text-secondary">blank</span> until refreshed. This corroborates each already-pinned venue against a fresh geocode and fills its confidence in — <span className="text-text-secondary">without ever moving the pin</span>, and skipping locked pins. (The other path is simply “Flag for review → re-enrich”, which backfills confidence as a side effect.)
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => backfill(false)}
+            disabled={Boolean(bfBusy)}
+            className="inline-flex items-center gap-2 rounded-md border border-border-default px-3 py-2 text-xs font-semibold text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold disabled:opacity-50"
+          >
+            {bfBusy === "scan" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+            Preview backfill (dry-run)
+          </button>
+          {bf && bc && bc.processed > 0 && (
+            <button
+              type="button"
+              onClick={() => backfill(true)}
+              disabled={Boolean(bfBusy)}
+              className="inline-flex items-center gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-semibold text-emerald-400 hover:border-emerald-500/60 disabled:opacity-50"
+            >
+              {bfBusy === "apply" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <MapPin className="h-3.5 w-3.5" />}
+              Backfill this batch
+            </button>
+          )}
+        </div>
+        {bfErr && <p className="mt-3 text-sm text-red-400">{bfErr}</p>}
+        {bc && (
+          <p className="mt-3 text-sm text-text-secondary">
+            {bf!.mode === "apply"
+              ? `Backfilled ${bc.updated} pin${bc.updated === 1 ? "" : "s"} (${bc.confirmed} confirmed · ${bc.approximate} approximate). `
+              : `${bc.candidates_total} pinned venue${bc.candidates_total === 1 ? "" : "s"} need confidence; this batch would do ${bc.processed} (${bc.confirmed} confirmed · ${bc.approximate} to verify). `}
+            <span className="text-text-muted">{bf!.note}</span>
+          </p>
+        )}
+      </div>
     </div>
   );
 }
