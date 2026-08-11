@@ -164,7 +164,7 @@ export function GeoAuditPanel() {
       <div className="mt-5 border-t border-border-subtle pt-4">
         <p className="text-xs font-semibold uppercase tracking-[0.05em] text-text-muted">Backfill pin confidence</p>
         <p className="mt-2 max-w-2xl text-sm text-text-muted">
-          Confidence (the Confirmed / Approximate badge) is only recorded when a venue is geocoded, so pins placed before the geocode-fix read <span className="text-text-secondary">blank</span> until refreshed. This corroborates each already-pinned venue against a fresh geocode and fills its confidence in — <span className="text-text-secondary">without ever moving the pin</span>, and skipping locked pins. (The other path is simply “Flag for review → re-enrich”, which backfills confidence as a side effect.)
+          Confidence (the Confirmed / Approximate badge) is only recorded when a venue is geocoded, so pins placed before the geocode-fix read <span className="text-text-secondary">blank</span> until refreshed. This corroborates each <span className="text-text-secondary">genuinely-pinned</span> venue against a fresh geocode and fills its confidence in — <span className="text-text-secondary">without ever moving the pin</span>, skipping locked pins and placeholder (0,0 / centroid) pins. (The other path is simply “Flag for review → re-enrich”, which backfills confidence as a side effect.)
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button

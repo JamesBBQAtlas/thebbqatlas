@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { revalidateVenues } from "@/lib/cache/venues";
-import { geocodeStructured, extractUKPostcode } from "@/lib/geo/geocode";
+import { geocodeStructured, extractUKPostcode, isSentinelPin } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
 
 export const dynamic = "force-dynamic";
@@ -40,12 +40,18 @@ interface Row {
   lng: number | null;
 }
 
-function hasPin(r: Row): boolean {
+/** A genuine pin to corroborate — real coords AND not a placeholder sentinel
+ *  (0,0 or a country centroid). Sentinel pins are "missing", never backfilled. */
+function isRealCandidatePin(r: Row): boolean {
   return (
     typeof r.lat === "number" && typeof r.lng === "number" &&
-    Number.isFinite(r.lat) && Number.isFinite(r.lng) && !(r.lat === 0 && r.lng === 0)
+    Number.isFinite(r.lat) && Number.isFinite(r.lng) &&
+    !isSentinelPin(r.lat, r.lng)
   );
 }
+
+// The exact US country-centroid point some address-less rows were stamped with.
+const US_CENTROID: [number, number] = [39.7837305527552, -100.445882119238];
 
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
@@ -56,19 +62,25 @@ export async function POST(request: Request) {
   const apply = url.searchParams.get("apply") === "1" || body.apply === true;
   const limit = Math.min(MAX_PER_RUN, Math.max(1, Number(body.limit) || MAX_PER_RUN));
 
-  // Candidates: a real pin, no confidence yet, not locked. Count the full backlog
-  // first (for an honest "remaining"), then take this run's slice.
+  // Candidates: a GENUINE pin, no confidence yet, not locked. Sentinel pins —
+  // (0,0) and the US country-centroid point — are excluded in SQL so they neither
+  // inflate the count (was 787 incl. the 524 null-island rows) nor burn a geocode
+  // call; the pin-sanity audit already treats those as "missing". A JS
+  // isSentinelPin pass is the belt-and-suspenders. Count the backlog first (for an
+  // honest "remaining"), then take this run's slice.
   const base = ctx.db
     .from("restaurants")
     .select("id, name, address, city, country, lat, lng", { count: "exact" })
     .is("geo_precision", null)
     .eq("geo_locked", false)
     .not("lat", "is", null)
-    .not("lng", "is", null);
+    .not("lng", "is", null)
+    .or("lat.neq.0,lng.neq.0") // exclude the exact (0,0) null-island sentinel
+    .or(`lat.neq.${US_CENTROID[0]},lng.neq.${US_CENTROID[1]}`); // exclude the US centroid
 
   const { data, count, error } = await base.order("id", { ascending: true }).limit(limit);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  const rows = ((data ?? []) as Row[]).filter(hasPin); // drop any 0,0 that slipped the SQL filter
+  const rows = ((data ?? []) as Row[]).filter(isRealCandidatePin); // drop any sentinel that slipped the SQL filter
 
   let processed = 0, updated = 0, confirmed = 0, approximate = 0, geocodeCalls = 0;
 
