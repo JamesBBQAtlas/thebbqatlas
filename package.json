@@ -13,6 +13,7 @@
     "audit:schema": "node scripts/audit-schema-columns.mjs",
     "test:chain": "tsx scripts/test-chain-discovery.mts",
     "test:chain-part4": "tsx scripts/test-chain-part4.mts",
+    "test:chain-roster": "tsx scripts/test-chain-roster-fix.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
     "test:geocode": "tsx scripts/test-geocode-precision.mts",
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",
