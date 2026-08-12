@@ -115,6 +115,7 @@ export default async function ListingsPage({
     attn: one("attn") === "1",
     closed: one("closed") === "1",
     flagship: one("flagship") === "1",
+    unrostered: one("unrostered") === "1",
   };
   const supabase = await createClient();
   const {

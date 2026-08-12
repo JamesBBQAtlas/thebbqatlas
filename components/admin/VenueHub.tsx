@@ -282,7 +282,7 @@ export function VenueHub({
   styleOptions: { slug: string; label: string }[];
   initialStatus?: string;
   /** Deep-link filters from the dashboard tiles (e.g. ?fresh=red). */
-  initialFilters?: { fresh?: string; attn?: boolean; closed?: boolean; flagship?: boolean };
+  initialFilters?: { fresh?: string; attn?: boolean; closed?: boolean; flagship?: boolean; unrostered?: boolean };
   /** Published summaries of the flagships of any chain CHILDREN in this list —
    *  so a child can resolve its (often already-approved, out-of-list) parent's
    *  enriched state + show it on demand without leaving Pending. */
@@ -304,6 +304,7 @@ export function VenueHub({
   const [attnF, setAttnF] = useState(Boolean(initialFilters?.attn)); // needs_attention
   const [closedF, setClosedF] = useState(Boolean(initialFilters?.closed)); // permanently_closed
   const [flagshipF, setFlagshipF] = useState(Boolean(initialFilters?.flagship)); // flagship_unset
+  const [unrosteredF, setUnrosteredF] = useState(Boolean(initialFilters?.unrostered)); // chain candidate, not yet rostered
   // Column sort — default ENRICHED newest-first; initialised from the URL so a
   // refresh keeps it (?sort=enriched&dir=desc). Sorts the WHOLE filtered set.
   const searchParams = useSearchParams();
@@ -437,6 +438,14 @@ export function VenueHub({
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    // Parents that already have at least one branch child — used by the
+    // "unrostered chains" filter to exclude chains whose roster is already built.
+    const parentsWithChildren = new Set<string>();
+    for (const v of venues) if (v.chainParentId) parentsWithChildren.add(v.chainParentId);
+    // A chain flagged/detected but not yet rostered: a candidate, top-level row,
+    // not yet rostered, with zero branch children (the Build-roster backlog).
+    const isUnrosteredChain = (v: HubVenue) =>
+      v.chainCandidate && !v.chainRostered && !v.chainSeed && !v.chainParentId && !parentsWithChildren.has(v.id);
     const list = venues.filter((v) => {
       if (statusF !== "all" && v.status !== statusF) return false;
       if (country !== "all" && v.country !== country) return false;
@@ -448,12 +457,13 @@ export function VenueHub({
       if (attnF && !v.needs_attention) return false;
       if (closedF && !v.permanentlyClosed) return false;
       if (flagshipF && !v.flagshipUnset) return false;
+      if (unrosteredF && !isUnrosteredChain(v)) return false;
       if (needle && !`${v.name} ${v.city ?? ""} ${v.country ?? ""}`.toLowerCase().includes(needle)) return false;
       return true;
     });
     // Sorting is applied at the UNIT level (below), so chain groups stay intact.
     return list;
-  }, [venues, q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF]);
+  }, [venues, q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF, unrosteredF]);
 
   // Group a chain's sibling seeds directly beneath their parent so a detected
   // chain reads as one block ("parent + its N seeds"), not scattered rows.
@@ -523,7 +533,7 @@ export function VenueHub({
   // stranded on an out-of-range page after narrowing the results.
   useEffect(() => {
     setPage(1);
-  }, [q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF, sortKey, sortDir]);
+  }, [q, statusF, country, photoF, igF, freshF, attnF, closedF, flagshipF, unrosteredF, sortKey, sortDir]);
   // Clamp if the current page fell past the end (e.g. rows removed).
   useEffect(() => {
     if (page > pageCount) setPage(pageCount);
@@ -1021,6 +1031,19 @@ export function VenueHub({
     router.refresh();
   }
 
+  // Re-crown — an operator promoting an EXISTING branch to flagship (the current
+  // flagship is demoted to a branch under it). Same set-flagship route (which
+  // re-points chain_parent_id with no cycle, audit-logged); we just gate it
+  // behind a confirm because it moves the whole roster's root.
+  async function recrownBranch(v: HubVenue) {
+    const flag = v.chainParentId ? flagshipById.get(v.chainParentId) : null;
+    const msg = flag
+      ? `Make “${v.name}”${v.city ? ` (${v.city})` : ""} the flagship of this chain? “${flag.name}” becomes a branch under it.`
+      : `Make “${v.name}”${v.city ? ` (${v.city})` : ""} the flagship of this chain?`;
+    if (typeof window !== "undefined" && !window.confirm(msg)) return;
+    await setFlagship(v);
+  }
+
   async function copyDecision(id: string, action: "approve" | "discard") {
     keepScroll();
     markActed(id);
@@ -1197,6 +1220,8 @@ export function VenueHub({
         <button type="button" onClick={() => setAttnF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${attnF ? "border-amber-500/60 bg-amber-500/10 text-amber-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Needs attention</button>
         <button type="button" onClick={() => setClosedF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${closedF ? "border-destructive/60 bg-destructive/10 text-destructive" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Closed</button>
         <button type="button" onClick={() => setFlagshipF((s) => !s)} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${flagshipF ? "border-amber-500/60 bg-amber-500/10 text-amber-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Flagship unset</button>
+        {/* Build-roster backlog — chains detected but not yet rostered (item 4). */}
+        <button type="button" onClick={() => setUnrosteredF((s) => !s)} title="Chains detected but not yet rostered — Build roster to add their locations" className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${unrosteredF ? "border-emerald-500/60 bg-emerald-500/10 text-emerald-400" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`}>Chains to roster</button>
         {/* Country sort lives here rather than on a column header (the middle
             column shows the photo state, not a country flag). Clicking toggles it. */}
         <button type="button" onClick={() => setSort("country")} className={`rounded-md border px-3 py-2 text-xs font-semibold transition-colors ${sortKey === "country" ? "border-brand-gold/60 bg-brand-gold/10 text-brand-gold" : "border-border-default text-text-secondary hover:border-brand-gold/60 hover:text-brand-gold"}`} title="Sort by country">Country {sortCaret("country")}</button>
@@ -1485,7 +1510,19 @@ export function VenueHub({
                             className="text-brand-gold hover:underline"
                           >
                             view flagship ↗
-                          </a>
+                          </a>{" "}
+                          ·{" "}
+                          {/* Re-crown (build-prompt item 3): promote THIS branch to
+                              flagship; the current flagship drops to a branch. */}
+                          <button
+                            type="button"
+                            onClick={() => recrownBranch(v)}
+                            disabled={busy}
+                            title="Make this branch the chain's flagship (the current flagship becomes a branch under it)"
+                            className="inline-flex items-center gap-0.5 text-brand-gold hover:underline disabled:opacity-40"
+                          >
+                            <Crown className="h-3 w-3" />make flagship
+                          </button>
                         </div>
                       )}
                       {v.needs_attention && v.attention_reason && (

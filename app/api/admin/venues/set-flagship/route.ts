@@ -113,12 +113,16 @@ export async function POST(request: Request) {
   // (fill-empty only), clear the stale "flagship not set" attention.
   for (const m of members) {
     if (m.id === chosenRow.id) continue;
+    // Demote the old parent (and every sibling) off the chain affordance — the
+    // "Discover locations" button now belongs only to the new flagship parent.
+    // chain_rostered_at is a flagship-level marker (when the roster was built), so
+    // a demoted member (now a branch) must have it cleared — re-crowning must not
+    // leave the old flagship still reading as rostered.
     const patch: Record<string, unknown> = {
       chain_parent_id: chosenRow.id,
       flagship_unset: false,
-      // Demote the old parent (and every sibling) off the chain affordance — the
-      // "Discover locations" button now belongs only to the new flagship parent.
       chain_candidate: false,
+      chain_rostered_at: null,
       needs_attention: false,
       attention_reason: null,
     };
