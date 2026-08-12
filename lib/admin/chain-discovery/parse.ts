@@ -456,6 +456,52 @@ function sameHostUrl(href: string, base: string): string | null {
   }
 }
 
+/**
+ * Common single-segment pages that are NOT per-location pages, so the leaf-link
+ * sweep doesn't waste the budget fetching them.
+ */
+const LEAF_STOPWORDS = new Set([
+  "", "home", "index", "menu", "menus", "about", "about-us", "aboutus",
+  "contact", "contact-us", "contactus", "blog", "news", "press", "media",
+  "shop", "store", "cart", "checkout", "account", "login", "log-in", "signin",
+  "sign-in", "signup", "sign-up", "register", "privacy", "privacy-policy",
+  "terms", "terms-of-service", "tos", "gift", "gift-card", "gift-cards",
+  "giftcards", "gallery", "photos", "catering", "careers", "career", "jobs",
+  "faq", "faqs", "order", "order-online", "online-order", "reservations",
+  "reserve", "book", "booking", "events", "event", "merch", "merchandise",
+  "franchise", "franchising", "wholesale", "our-story", "story", "team",
+  "reviews", "feedback", "subscribe", "newsletter", "sitemap", "search",
+  "cookies", "accessibility", "returns", "shipping", "cart", "checkout",
+]);
+
+/**
+ * Shallow (1–2 segment) same-host internal links that could be PER-LOCATION pages
+ * — e.g. a neighbourhood-named page `/riverdale-park` linked from the nav on a
+ * site with NO `/locations` index (the 2Fifty case). Excludes obvious non-location
+ * pages (menu/about/blog/shop…) and asset links. The sweep fetches a bounded set of
+ * these and reads any address from their visible text, so a chain whose branch
+ * pages aren't named with a locator word (Locations/Visit/Find) is still found.
+ */
+export function findLeafPageLinks(html: string, baseUrl: string): string[] {
+  const $ = cheerio.load(html);
+  const out = new Set<string>();
+  $("a[href]").each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    if (!href || href.startsWith("#") || /^(mailto:|tel:|javascript:)/i.test(href)) return;
+    const abs = sameHostUrl(href, baseUrl);
+    if (!abs) return;
+    let path: string;
+    try { path = new URL(abs).pathname.replace(/\/+$/, ""); } catch { return; }
+    const segs = path.split("/").filter(Boolean);
+    if (segs.length < 1 || segs.length > 2) return; // shallow pages only
+    const last = segs[segs.length - 1];
+    if (/\.[a-z0-9]{2,4}$/i.test(last)) return; // an asset (.jpg/.pdf/…), not a page
+    if (LEAF_STOPWORDS.has(segs[0].toLowerCase())) return;
+    out.add(abs);
+  });
+  return [...out];
+}
+
 /** Find candidate locator-page URLs from a page's nav/footer links (§1). */
 export function findLocatorLinks(html: string, baseUrl: string): string[] {
   const $ = cheerio.load(html);

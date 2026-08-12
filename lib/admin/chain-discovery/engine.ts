@@ -25,6 +25,7 @@ import {
   parseVisibleText,
   refineCandidates,
   findLocatorLinks,
+  findLeafPageLinks,
   findChildLocatorLinks,
   looksFlat,
 } from "./parse";
@@ -134,6 +135,10 @@ async function sweepVisibleText(
   }
   // The site's own nav/footer links (its own wording) — bounded.
   if (homeHtml) for (const u of findLocatorLinks(homeHtml, website).slice(0, 12)) urls.add(u);
+  // PLUS shallow per-location pages whose links DON'T use a locator word — a
+  // neighbourhood-named page like `/riverdale-park` on a site with no `/locations`
+  // index (the 2Fifty gap). Bounded so we never crawl the whole site.
+  if (homeHtml) for (const u of findLeafPageLinks(homeHtml, website).slice(0, 20)) urls.add(u);
 
   const candidates: RawCandidate[] = [];
   const fetchedUrls: string[] = [];

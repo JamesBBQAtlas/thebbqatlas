@@ -6,7 +6,7 @@ import { grokCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage } from "@/lib/ai/usage-log";
 import { auditField } from "@/lib/admin/content-audit";
 import { seedChainLocations } from "@/lib/admin/chain-seed";
-import { discoverChain } from "@/lib/admin/chain-discovery/engine";
+import { discoverChainLocations } from "@/lib/chains/discoverLocations";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
 import { hasStreetAddress } from "@/lib/admin/chain-discovery/normalize";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
@@ -120,23 +120,53 @@ export async function POST(request: Request) {
   }
   await ctx.db.from("restaurants").update(parentPatch).eq("id", restaurantId);
 
-  // ── Steps 1-4 — discover the full location set from the chain's own site ──
-  // Part 4A — the crawl is ADDRESS-DRIVEN and the per-venue cost cap is WAIVED
-  // for a chain (the crawl makes no LLM calls; the lift matters for the stronger
-  // copy writer below). No dollar cap on discovery itself — only wall-clock.
-  const discovery = await discoverChain({
+  // ── Steps 1-4 — discover the full location set via the ONE shared engine ──
+  // Part 4A — chain-roster and the bulk "Discover all locations" tool both call
+  // discoverChainLocations, so they can never diverge again (that divergence is
+  // exactly how 2Fifty's Riverdale Park branch was found by the bulk tool and
+  // missed by the single one). It runs the site CRAWL *and* a WEB pass and unions
+  // them: the crawl reads the chain's own pages (locator index, JSON-LD,
+  // per-location pages, visible text) for free; the web pass finds JS-rendered or
+  // off-site locations the crawler can't see. Neither alone is trusted complete.
+  // No dollar cap on discovery — only wall-clock (~190s under the 300s limit).
+  const lead = {
+    name: brand,
+    website,
+    instagram: row.instagram_handle ? `https://www.instagram.com/${row.instagram_handle}/` : undefined,
+    address: (row.address as string | null) ?? undefined,
+    city: (row.city as string | null) ?? undefined,
+    country: (row.country as string | null) ?? undefined,
+  };
+  const discovery = await discoverChainLocations({
+    lead,
     website,
     brand,
     country: row.country ?? null,
-    // Cap the crawl at ~190s so there's headroom under the 300s function limit
-    // for geocoding + seeding every discovered branch.
     deadlineMs: 190_000,
   });
 
+  // Fold the web pass into the spend ledger (the crawl is free; the web pass costs
+  // a Grok search). Logged separately from Step 0's site-resolution call.
+  if (discovery.ranWeb && discovery.usage && discovery.model && discovery.cost > 0) {
+    grokCostTotal = round4(grokCostTotal + discovery.cost);
+    await logAiUsage(ctx.db, {
+      provider: "xai", model: discovery.model, task: "roster",
+      entity_type: "restaurant", entity_id: restaurantId,
+      input_tokens: discovery.usage.in_tokens, output_tokens: discovery.usage.out_tokens,
+      search_count: discovery.usage.searches, cost: discovery.cost, usage_raw: discovery.usage, user_id: ctx.userId,
+    });
+  }
+
+  // The shared module reports an array of source types (e.g. ["crawl:hierarchical",
+  // "web"]); collapse to one label for the debug record + operator message.
+  const sourceType = discovery.sourceTypes.join("+") || "none";
+
   const anchoredCountry = discovery.country ?? row.country ?? null;
-  // Was this asserted to be a chain (by enrichment or the operator)? If so, a
-  // <2-branch result is a LOUD failure — never a silent "not a chain".
-  const knownChain = Boolean(dossier.is_chain);
+  // Was this asserted to be a chain (by enrichment or the operator, OR by the web
+  // pass)? If so, a <2-branch result is a LOUD failure — never a silent "not a
+  // chain". Folding in discovery.isChain makes variation E (locations exist but
+  // only off-site, no street to roster) surface loudly instead of vanishing.
+  const knownChain = Boolean(dossier.is_chain) || discovery.isChain;
 
   // Part 4B — LOUD on failure, but ONLY when extraction found NOTHING (round-2
   // fix). Finding exactly ONE real location is a VALID result — a single venue, or
@@ -157,11 +187,14 @@ export async function POST(request: Request) {
         dossier: {
           ...dossier,
           is_chain: true,
-          discovery_source_type: discovery.sourceType,
+          discovery_source_type: sourceType,
           discovery_debug: {
             crawled_urls: urlList,
             raw_addresses: rawList,
             low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
+            source_types: discovery.sourceTypes,
+            ran_web: discovery.ranWeb,
+            ran_crawl: discovery.ranCrawl,
             notes: discovery.notes,
             at: new Date().toISOString(),
           },
@@ -169,7 +202,7 @@ export async function POST(request: Request) {
       }).eq("id", restaurantId);
       revalidateVenues();
       return NextResponse.json({
-        ok: false, brand, website, chain_underfilled: true, source_type: discovery.sourceType,
+        ok: false, brand, website, chain_underfilled: true, source_type: sourceType,
         found: 0, added: 0,
         crawled_urls: urlList, raw_addresses: rawList,
         low_confidence: discovery.lowConfidence.map((l) => l.address),
@@ -186,7 +219,7 @@ export async function POST(request: Request) {
     }).eq("id", restaurantId);
     revalidateVenues();
     return NextResponse.json({
-      ok: true, brand, website, not_a_chain: true, source_type: discovery.sourceType,
+      ok: true, brand, website, not_a_chain: true, source_type: sourceType,
       found: 0, added: 0, notes: discovery.notes,
       low_confidence: discovery.lowConfidence.map((l) => l.address),
       cost: grokCostTotal,
@@ -206,9 +239,11 @@ export async function POST(request: Request) {
     brand,
     anchoredCountry,
     discovery.locations.map((l) => ({
-      name: l.location_label,
-      address: l.street ?? l.address,
+      name: l.location_label ?? l.name,
+      address: l.address,
       city: l.city,
+      region: l.region,
+      postcode: l.postcode,
       country: l.country,
       source_url: l.source_url,
     }))
@@ -221,11 +256,21 @@ export async function POST(request: Request) {
   // record it + surface a one-click re-parent suggestion (the flagship must be the
   // parent at the root — we don't auto-move rows unprompted). No signal → leave
   // flagship_unset so the operator crowns it, as before.
-  const flagshipPick = identifyFlagship(discovery.locations, {
-    flagshipLocation:
-      (dossier as { flagship_location?: { city?: string | null; address?: string | null } | null })
-        .flagship_location ?? null,
-  });
+  const flagshipPick = identifyFlagship(
+    // DiscoveredLocation carries its street line as `address`; map it to the
+    // Pick<NormalLocation> shape identifyFlagship expects (index stays 1:1).
+    discovery.locations.map((l) => ({
+      location_label: l.location_label,
+      street: l.address,
+      city: l.city,
+      address: l.address ?? "",
+    })),
+    {
+      flagshipLocation:
+        (dossier as { flagship_location?: { city?: string | null; address?: string | null } | null })
+          .flagship_location ?? null,
+    }
+  );
   let flagshipCrowned = false;
   let suggestedFlagship: { label: string | null; city: string | null; reason: string } | null = null;
   if (flagshipPick) {
@@ -263,7 +308,7 @@ export async function POST(request: Request) {
       ...dossier,
       is_chain: true,
       chain_locations_url: discovery.locatorUrl,
-      discovery_source_type: discovery.sourceType,
+      discovery_source_type: sourceType,
       identified_flagship: flagshipCrowned
         ? { scope: "parent", reason: flagshipPick?.reason ?? null }
         : suggestedFlagship
@@ -278,6 +323,15 @@ export async function POST(request: Request) {
         raw_addresses: discovery.rawAddresses.slice(0, 40),
         decisions: result.decisions.slice(0, 60),
         low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
+        source_types: discovery.sourceTypes,
+        ran_web: discovery.ranWeb,
+        ran_crawl: discovery.ranCrawl,
+        // How each rostered location was found — crawl-only, web-only, or both.
+        found_via: {
+          crawl: discovery.locations.filter((l) => l.found_via === "crawl").length,
+          web: discovery.locations.filter((l) => l.found_via === "web").length,
+          both: discovery.locations.filter((l) => l.found_via === "both").length,
+        },
         counts: {
           distinct: distinctRostered,
           added: result.added.length,
@@ -296,15 +350,17 @@ export async function POST(request: Request) {
   await ctx.db.from("restaurants").update({ flagship_unset: singleLocation ? false : !flagshipCrowned }).eq("chain_parent_id", restaurantId);
 
   await auditField(ctx.db, restaurantId, "chain", null,
-    { rostered: true, added: result.added.length, linked: result.linked, distinct: distinctRostered, source: discovery.sourceType },
-    { source: "roster", changedBy: ctx.userId, note: `roster built via ${discovery.sourceType}` });
+    { rostered: true, added: result.added.length, linked: result.linked, distinct: distinctRostered, source: sourceType },
+    { source: "roster", changedBy: ctx.userId, note: `roster built via ${sourceType}` });
 
   revalidateVenues();
   const sourceLabel =
-    discovery.sourceType === "hierarchical" ? `by crawling ${discovery.pagesFetched} pages`
-    : discovery.sourceType === "jsonapi" ? "from the store-locator API"
-    : discovery.sourceType === "jsonld" ? "from the locations page (structured data)"
-    : discovery.sourceType === "text" ? "from the site's own pages (addresses in text)"
+    discovery.sourceTypes.length > 1 ? `by crawling ${discovery.pagesFetched} page(s) and a web search`
+    : discovery.sourceTypes.includes("web") ? "from a web search"
+    : sourceType.includes("hierarchical") ? `by crawling ${discovery.pagesFetched} pages`
+    : sourceType.includes("jsonapi") ? "from the store-locator API"
+    : sourceType.includes("jsonld") ? "from the locations page (structured data)"
+    : sourceType.includes("text") ? "from the site's own pages (addresses in text)"
     : "from the official locations page";
   const locSuffix = result.needsLocation ? ` · ${result.needsLocation} need a pin` : "";
   const partSuffix = discovery.partial ? " · PARTIAL (re-run to continue)" : "";
@@ -325,7 +381,7 @@ export async function POST(request: Request) {
     flagship_unset: singleLocation ? false : !flagshipCrowned,
     flagship_crowned: flagshipCrowned || singleLocation,
     suggested_flagship: suggestedFlagship,
-    source_type: discovery.sourceType,
+    source_type: sourceType,
     source_note: `${distinctRostered} distinct location${distinctRostered === 1 ? "" : "s"} ${sourceLabel}${discovery.country ? ` · ${discovery.country}` : ""}`,
     locator_url: discovery.locatorUrl,
     country: discovery.country,
