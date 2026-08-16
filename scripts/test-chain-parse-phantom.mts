@@ -2,7 +2,7 @@
  * (BUILDPROMPTCHAINROSTERCONSOLIDATED). Pure + network-free.
  * Run: node_modules/.bin/tsx scripts/test-chain-parse-phantom.mts
  */
-import { cleanAddress, normStreet, normCity } from "../lib/admin/address";
+import { cleanAddress, extractCleanAddress, normStreet, normCity } from "../lib/admin/address";
 import { extractAddressesFromText, parseVisibleText } from "../lib/admin/chain-discovery/parse";
 import { chooseAbsorbTarget, type AbsorbCandidate } from "../lib/admin/chain-seed";
 
@@ -113,6 +113,63 @@ console.log("\n[A7] all-caps folds in the dedupe key (LOUIS == Louis)");
   // The full mangled Sugarfire twin (phone + Saint + caps) collapses on text.
   ok("'997-23019200 OLIVE BLVD. ST., LOUIS' keys == clean row",
     normStreet("997-23019200 OLIVE BLVD. ST., LOUIS") === normStreet("9200 Olive Blvd., St. Louis"));
+}
+
+// ── A8 (Pit Room / Roegels) — a scraped page-text blob dumped in the address ──
+console.log("\n[A8] the real street is extracted from a scraped-text blob");
+{
+  // The two live twins: surrounding page text (hours / neighbourhood / nav label /
+  // business name) glued around the real address. Extract the street, drop the blob.
+  ok("'7 days a week IN MONTROSE 1201 Richmond Ave, Houston' → '1201 Richmond Ave, Houston'",
+    cleanAddress("7 days a week IN MONTROSE 1201 Richmond Ave, Houston") === "1201 Richmond Ave, Houston",
+    cleanAddress("7 days a week IN MONTROSE 1201 Richmond Ave, Houston"));
+  ok("'77449KATY FREEWAY WebsiteRoegels Barbecue Co2223 South Voss Road, Houston' → '2223 South Voss Road, Houston'",
+    cleanAddress("77449KATY FREEWAY WebsiteRoegels Barbecue Co2223 South Voss Road, Houston") === "2223 South Voss Road, Houston",
+    cleanAddress("77449KATY FREEWAY WebsiteRoegels Barbecue Co2223 South Voss Road, Houston"));
+  // A leading business-name / nav run before the number is dropped too.
+  ok("leading nav segments before the number are dropped",
+    cleanAddress("Website, Menu, 400 Main St, Austin") === "400 Main St, Austin",
+    cleanAddress("Website, Menu, 400 Main St, Austin"));
+}
+
+console.log("\n[A8] each blob keys + geocodes to the flagship (dedupes to one)");
+{
+  ok("Montrose blob keys == '1201 Richmond Ave' flagship",
+    normStreet("7 days a week IN MONTROSE 1201 Richmond Ave, Houston") === normStreet("1201 Richmond Ave, Houston, TX 77006"),
+    [normStreet("7 days a week IN MONTROSE 1201 Richmond Ave, Houston"), normStreet("1201 Richmond Ave, Houston, TX 77006")]);
+  ok("Voss blob keys == '2223 South Voss Road' flagship",
+    normStreet("77449KATY FREEWAY WebsiteRoegels Barbecue Co2223 South Voss Road, Houston") === normStreet("2223 South Voss Road, Houston, TX 77057"),
+    [normStreet("77449KATY FREEWAY WebsiteRoegels Barbecue Co2223 South Voss Road, Houston"), normStreet("2223 South Voss Road, Houston, TX 77057")]);
+}
+
+console.log("\n[A8] guard — proper-name camelCase + clean/range addresses are NEVER damaged");
+{
+  ok("'6001 McKinley Parkway, Blasdell' unchanged", cleanAddress("6001 McKinley Parkway, Blasdell") === "6001 McKinley Parkway, Blasdell", cleanAddress("6001 McKinley Parkway, Blasdell"));
+  ok("'500 MacArthur Blvd, Oakland' unchanged", cleanAddress("500 MacArthur Blvd, Oakland") === "500 MacArthur Blvd, Oakland");
+  ok("'10 WestQuay Rd, Southampton' unchanged", cleanAddress("10 WestQuay Rd, Southampton") === "10 WestQuay Rd, Southampton");
+  ok("'220 LaFayette St, New York' unchanged", cleanAddress("220 LaFayette St, New York") === "220 LaFayette St, New York");
+  ok("bare 'MacArthur Blvd' (no number) unchanged", cleanAddress("MacArthur Blvd") === "MacArthur Blvd");
+  ok("'DeSoto' token alone unchanged", cleanAddress("DeSoto") === "DeSoto");
+  // Clean, hyphenated-range and unit-lead addresses must survive the blob step.
+  ok("clean '1201 Richmond Ave, Houston' unchanged", cleanAddress("1201 Richmond Ave, Houston") === "1201 Richmond Ave, Houston");
+  ok("range '100-200 Main St' unchanged", cleanAddress("100-200 Main St") === "100-200 Main St");
+  ok("range '12-14 Oak Ave' unchanged", cleanAddress("12-14 Oak Ave") === "12-14 Oak Ave");
+  ok("unit lead 'Suite 100, 200 Main St' preserved", cleanAddress("Suite 100, 200 Main St") === "Suite 100, 200 Main St", cleanAddress("Suite 100, 200 Main St"));
+}
+
+console.log("\n[A8] extract report — a blob with NO clean street is flagged, not guessed");
+{
+  // Acceptance 4: no extractable NNN Street → wasBlob but not extracted, address
+  // left exactly as-is (never a guessed street). Seed flags needs_attention.
+  const noStreet = extractCleanAddress("7 days a week IN MONTROSE Website Menu Order Online");
+  ok("blob w/ nav prose but no street → wasBlob, NOT extracted", noStreet.wasBlob === true && noStreet.extracted === false, noStreet);
+  ok("un-extractable blob is returned unchanged (no guess)", noStreet.address === "7 days a week IN MONTROSE Website Menu Order Online");
+  // A confident extraction reports extracted=true.
+  const good = extractCleanAddress("77449KATY FREEWAY WebsiteRoegels Barbecue Co2223 South Voss Road, Houston");
+  ok("a confident extraction reports extracted=true", good.extracted === true && good.address === "2223 South Voss Road, Houston");
+  // A plain thin address is NOT a blob (no false flag).
+  const thin = extractCleanAddress("Houston");
+  ok("plain thin address 'Houston' is not a blob", thin.wasBlob === false && thin.extracted === false && thin.address === "Houston");
 }
 
 // ── PART 2 (A4) — phantom seed: choose which branch becomes flagship ─────────

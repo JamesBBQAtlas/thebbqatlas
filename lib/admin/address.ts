@@ -65,6 +65,89 @@ function reuniteSaintCity(s: string): string {
   return s;
 }
 
+/**
+ * Street-type words for the ADDRESS ANCHOR below (a superset mirror of
+ * STREET_TYPE_TOKEN, as an alternation source). Kept as its own list so the
+ * anchor regex reads clearly; both describe the same closed set of road types.
+ */
+const STREET_TYPE_WORDS = [
+  "ave", "avenue", "blvd", "boulevard", "rd", "road", "dr", "drive", "ln", "lane",
+  "st", "street", "ct", "court", "pl", "place", "way", "hwy", "highway", "pkwy",
+  "parkway", "ter", "terrace", "cir", "circle", "sq", "square", "trl", "trail",
+  "pike", "row", "cres", "crescent", "close", "walk", "parade",
+];
+
+/**
+ * The ADDRESS ANCHOR: a real US-style street line — a 1–5 digit building number,
+ * then 0–4 name words, then a street-type token. The building number may lead a
+ * word boundary OR sit glued to a preceding letter run ("…Co2223 South Voss Rd"),
+ * so the lookbehind excludes only a digit/decimal before it (never a letter). We
+ * anchor on THIS and slice, rather than trying to "repair" a scraped blob.
+ */
+const ADDRESS_ANCHOR = new RegExp(
+  String.raw`(?<![\d.])(\d{1,5})(?!\d)\s+(?:[A-Za-z][A-Za-z.'&-]*\s+){0,4}(?:${STREET_TYPE_WORDS.join("|")})\.?(?=$|[\s,])`,
+  "i"
+);
+
+/** Nav / label / marketing / hours prose a page scrape sweeps in AROUND the real
+ *  address ("Website", "Menu", "7 days a week", "Order Online", day-of-week runs). */
+const BLOB_NAV =
+  /\b(?:website|menu|order\s*online|order\s*now|directions|hours|reservations?|catering|home|locations?|find\s*us|open|closed|delivery|takeout|pickup|days?\s*a\s*week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i;
+
+/** A letter/number camel-jam from stripped HTML tags ("Co2223", "77449KATY") —
+ *  a run of letters glued to a run of digits. NOT a building-number letter suffix
+ *  ("107a" is 1 trailing letter) and NOT proper-name camelCase (no digits). */
+function hasLetterNumberGlue(s: string): boolean {
+  return /[A-Za-z]{2}\d{2}/.test(s) || /\d{3}[A-Za-z]{2}/.test(s);
+}
+
+/** A legit address LEAD (a unit/suite/floor before the building number) that must
+ *  NOT be mistaken for blob prefix junk. */
+const ADDRESS_LEAD =
+  /^(?:unit|apt|apartment|suite|ste|no|number|building|bldg|fl|floor|space|shop|lot)\b/i;
+
+/**
+ * Extract the clean street address from a scraped-text BLOB (The Pit Room +
+ * Roegels): a page-text dump (nav / hours / website label / business name) with
+ * the real `NNN Street[, City[, ST ZIP]]` buried inside. We locate the address
+ * anchor and slice from the building number — everything before it (leading prose
+ * AND earlier comma-junk) is discarded. Returns whether the input LOOKED like a
+ * blob and whether we CONFIDENTLY extracted a street, so the caller can flag a
+ * blob we couldn't reduce rather than geocode garbage.
+ *
+ * Cast-iron conservative:
+ *  • an address that already starts at its building number (empty prefix) is
+ *    returned untouched — so a clean address is never rewritten;
+ *  • a numeric-range prefix ("100-200 Main St", "12-14 Oak Ave") is left alone;
+ *  • a unit/suite lead ("Suite 100, 200 Main St") is preserved, not sliced off;
+ *  • we slice ONLY when a real NNN-Street-type anchor exists — never guess a
+ *    street out of prose (no anchor ⇒ leave it, flag if it carried blob signals).
+ * Proper-name camelCase ("McKinley", "MacArthur", "WestQuay", "LaFayette",
+ * "DeSoto") is never touched: those are street NAMES that follow the number, and
+ * we only ever drop text BEFORE the number.
+ */
+function stripAddressBlob(s: string): { address: string; wasBlob: boolean; extracted: boolean } {
+  const signalled = BLOB_NAV.test(s) || hasLetterNumberGlue(s);
+  const m = ADDRESS_ANCHOR.exec(s);
+  if (!m) {
+    // No confident street to extract. It's a blob (flag it) only if it carried a
+    // nav/marketing keyword or a letter/number glue; otherwise it's just a thin
+    // address ("Houston") and stays as-is.
+    return { address: s, wasBlob: signalled, extracted: false };
+  }
+  const start = m.index;
+  const prefix = s.slice(0, start);
+  const prefixCore = prefix.replace(/[\s,.:;|/–—-]+/g, " ").trim();
+  if (!prefixCore) return { address: s, wasBlob: false, extracted: false }; // clean lead
+  if (/^[\d\s-]+$/.test(prefix)) return { address: s, wasBlob: false, extracted: false }; // "100-200 Main St"
+  if (ADDRESS_LEAD.test(prefixCore) && prefixCore.split(" ").length <= 2) {
+    return { address: s, wasBlob: false, extracted: false }; // "Suite 100, 200 Main St"
+  }
+  // Real prose before a real street anchor → a scraped blob. Slice from the
+  // building number; the pin + dedupe key now match the clean twin.
+  return { address: s.slice(start).trim(), wasBlob: true, extracted: true };
+}
+
 /** Return the single copy when `tokens` is an EXACT adjacent repeat [U, U]
  *  (case-insensitive), else null. The one entry point for doubled-scrape collapse. */
 function halveIfDoubled(tokens: string[]): string[] | null {
@@ -114,17 +197,35 @@ function collapseDoubledAddress(s: string): string {
  *     geocodes to the right pin and splits street-from-city correctly;
  *   \u2022 doubled-scrape collapse: fold an exactly-repeated street/address run
  *     ("534 Highway 71 534 Highway 71, Bastrop" \u2192 "534 Highway 71, Bastrop"), so a
- *     doubled twin keys identically to the clean row and dedupes to one.
+ *     doubled twin keys identically to the clean row and dedupes to one;
+ *   \u2022 blob extraction: pull the real "NNN Street[, City]" out of a scraped page-text
+ *     blob ("7 days a week IN MONTROSE 1201 Richmond Ave, Houston" \u2192 "1201 Richmond
+ *     Ave, Houston"), discarding the surrounding prose so it keys to the flagship.
  * Conservative throughout \u2014 a decimal, "St. Louis", "Walla Walla", "New York,
- * New York" and "100 100th Ave" are all left exactly as they are.
+ * New York", "100 100th Ave" and "100-200 Main St" are all left exactly as they
+ * are, and a blob with no confident street is left untouched (caller flags it).
  */
 export function cleanAddress(addr: string | null | undefined): string {
+  return extractCleanAddress(addr).address;
+}
+
+/**
+ * The full address clean, PLUS whether the input looked like a scraped-text blob
+ * and whether we confidently extracted a street from it. `cleanAddress` is the
+ * `.address` of this; the seed path uses the flags so a blob we COULDN'T reduce
+ * is flagged needs_attention instead of geocoded as garbage (The Pit Room case).
+ */
+export function extractCleanAddress(
+  addr: string | null | undefined
+): { address: string; wasBlob: boolean; extracted: boolean } {
   let s = clean(addr);
-  if (!s) return "";
+  if (!s) return { address: "", wasBlob: false, extracted: false };
   s = stripGluedPhone(s);                              // bug 1: phone glued to the street number
-  s = s.replace(/([A-Za-z])\.([A-Z])/g, "$1. $2");     // A5: un-glue "St.San" → "St. San"
+  const blob = stripAddressBlob(s);                    // Pit Room/Roegels: extract the street from a page-text blob
+  s = blob.address.replace(/([A-Za-z])\.([A-Z])/g, "$1. $2"); // A5: un-glue "St.San" → "St. San"
   s = reuniteSaintCity(s);                             // bug 2: "Ave. St., Louis" → "Ave., St. Louis"
-  return collapseDoubledAddress(s);                    // Southside: fold an exact doubled run
+  s = collapseDoubledAddress(s);                       // Southside: fold an exact doubled run
+  return { address: s, wasBlob: blob.wasBlob, extracted: blob.extracted };
 }
 
 /**

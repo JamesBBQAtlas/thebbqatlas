@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
-import { composeAddress, normStreet, normCity, settlementCity, cleanAddress } from "@/lib/admin/address";
+import { composeAddress, normStreet, normCity, settlementCity, extractCleanAddress } from "@/lib/admin/address";
 import { canonicalCountry, resolveCountryCode } from "@/lib/constants/countries";
 import { geocodeStructured, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
@@ -158,10 +158,19 @@ export async function seedChainLocations(
   const found = locations.length;
   const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0, decisions: [] };
   if (!found) return result;
-  // A5 parse-robustness — clean every incoming address (un-glue "St.San" →
-  // "St. San") BEFORE geocoding and dedupe, so a glued abbreviation can't push the
-  // pin into the Gulf or fuse the street type onto the city (the Black's twin).
-  locations = locations.map((l) => ({ ...l, address: l.address ? cleanAddress(l.address) : l.address }));
+  // Parse-robustness — clean every incoming address BEFORE geocoding and dedupe:
+  // un-glue "St.San" → "St. San" (A5), strip a phone glued to the number (A7), and
+  // extract the real street from a scraped page-text blob (Pit Room/Roegels), so a
+  // glued/blob twin keys to the flagship instead of pinning the Gulf or spawning a
+  // duplicate. A blob we CAN'T reduce to a street is remembered (blobUnresolved) so
+  // its seed is flagged for a human below — never geocoded as garbage or guessed.
+  const blobUnresolved: boolean[] = [];
+  locations = locations.map((l) => {
+    if (!l.address) { blobUnresolved.push(false); return l; }
+    const ex = extractCleanAddress(l.address);
+    blobUnresolved.push(ex.wasBlob && !ex.extracted);
+    return { ...l, address: ex.address };
+  });
   const note = (address: string, decision: string, reason?: string) =>
     result.decisions.push({ address, decision, ...(reason ? { reason } : {}) });
 
@@ -268,6 +277,19 @@ export async function seedChainLocations(
     } else {
       // Flagged — nothing confident resolved; surface the specific reason.
       attentionReason = geo.reason ?? GEOCODE_COARSE_REASON;
+    }
+    // Scraped-blob guard — the address was a page-text dump with no confidently
+    // extractable street. Never trust a geocode of prose: drop any pin and flag it
+    // for a human to re-enter the address, rather than planting a garbage location.
+    if (blobUnresolved[i]) {
+      lat = null;
+      lng = null;
+      country_code = null;
+      geoCity = null;
+      geoPrecision = "none";
+      geoConfidence = 0;
+      attentionReason =
+        "Address looks like scraped page text — no clean street could be extracted. Verify and re-enter the address.";
     }
     // Street key from the branch's OWN address line only (not folded with the
     // city), so a city-only entry reads as "no distinct street".
