@@ -6,6 +6,7 @@ import { Link } from "@/i18n/navigation";
 import { CircleDot, AlertTriangle, Ban, Crown, Inbox } from "lucide-react";
 import { freshnessTone, FRESHNESS_DAYS } from "@/lib/admin/freshness";
 import { GeoAuditPanel } from "@/components/admin/GeoAuditPanel";
+import { CountryBackfillPanel } from "@/components/admin/CountryBackfillPanel";
 
 export const metadata = { title: "Status" };
 export const dynamic = "force-dynamic";
@@ -124,6 +125,9 @@ export default async function StatusPage() {
 
       <h2 className="mb-3 mt-8 font-heading text-lg font-bold text-text-primary">Pin health</h2>
       <GeoAuditPanel />
+
+      <h2 className="mb-3 mt-8 font-heading text-lg font-bold text-text-primary">Country names</h2>
+      <CountryBackfillPanel />
 
       <p className="mt-8 text-sm text-text-muted">
         The old scheduled “self-heal” sweep has been retired (it silently ran a pricey model). Refreshing stale venues is now: <Link href="/admin/listings?fresh=red" className="text-brand-gold hover:underline">open the Red set</Link>, select all, hit “Enrich selected”, confirm the cost. Same cheap Grok → Haiku pipeline, no cron, no separate engine.
