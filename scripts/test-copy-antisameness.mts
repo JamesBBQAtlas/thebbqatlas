@@ -1,7 +1,16 @@
 /* Enrichment copy — anti-sameness (ENRICHMENTPROMPTANTISAMENESS). Pure.
  * Run: node_modules/.bin/tsx scripts/test-copy-antisameness.mts
  */
-import { OPENING_STYLES, openingStyleFor, bannedPhrasesIn, ungroundedClaims } from "../lib/ai/enrich";
+import {
+  OPENING_STYLES,
+  openingStyleFor,
+  bannedPhrasesIn,
+  ungroundedClaims,
+  stripPerLocationOperators,
+  sanitizePoisonedFacts,
+  poisonedFacts,
+  sharedPerLocationOperators,
+} from "../lib/ai/enrich";
 
 let pass = 0, fail = 0;
 function ok(name: string, cond: boolean, extra?: unknown) {
@@ -65,6 +74,74 @@ console.log("\n[NO INVENTED FACTS — grounding tripwire]");
 
   // Acceptance 4 — an empty-facts venue yields zero invented claims when copy is honest.
   ok("empty-facts venue + honest bare copy → no claims", ungroundedClaims("A barbecue spot in town.", { name: "Smoke Co" }).length === 0);
+}
+
+console.log("\n[NO INVENTED FACTS — part 2: the poisoned FACTS stage]");
+{
+  // The exact live incident: the invented pitmaster was laundered INTO a facts
+  // field, so on re-enrich the grounding found him in the dossier and passed him.
+  const poisoned = {
+    name: "Sugarfire Smokehouse",
+    city: "St. Louis",
+    what_it_is: "barbecue joint",
+    founders_pitmaster: "Mike Johnson (Chef/Owner), Carolyn Downs (Pastry Chef/Owner); Chef Dave Molina (this location)",
+    established: null,
+    awards_press: [] as string[],
+  };
+  // Gap 2 — grounding must NOT treat the laundered field as ground truth: the copy
+  // claim "Chef Dave Molina" is now held, even though the poisoned dossier "names" him.
+  ok("laundered 'Dave Molina' in the facts no longer grounds the copy claim (HELD)",
+    ungroundedClaims("Chef Dave Molina runs the pits here.", poisoned).some((c) => c.kind === "person" && c.text === "Dave Molina"),
+    ungroundedClaims("Chef Dave Molina runs the pits here.", poisoned));
+  // But the REAL, untagged brand operators still ground — no false hold.
+  ok("a real untagged operator (Mike Johnson) still grounds",
+    ungroundedClaims("Mike Johnson started the smokehouse.", poisoned).length === 0,
+    ungroundedClaims("Mike Johnson started the smokehouse.", poisoned));
+
+  // Gap 1 — the sanitizer strips ONLY the per-location operator, keeps the real ones.
+  const s = stripPerLocationOperators(poisoned.founders_pitmaster);
+  ok("strip keeps the real founders, drops the per-location operator",
+    s.value === "Mike Johnson (Chef/Owner), Carolyn Downs (Pastry Chef/Owner)" && s.stripped.length === 1,
+    s);
+  ok("a value that is ONLY a per-location operator collapses to null",
+    stripPerLocationOperators("Chef Dave Molina (this location)").value === null);
+  ok("the 'runs this branch' verb shape is also stripped",
+    stripPerLocationOperators("Dave Molina runs this branch").value === null,
+    stripPerLocationOperators("Dave Molina runs this branch"));
+  ok("a real solo operator (no tag) is untouched",
+    stripPerLocationOperators("Aaron Franklin").value === "Aaron Franklin");
+
+  // sanitizePoisonedFacts cleans the whole dossier + reports what it removed.
+  const clean = sanitizePoisonedFacts(poisoned);
+  ok("sanitizePoisonedFacts drops the poison from founders_pitmaster",
+    !/dave molina/i.test(String(clean.dossier.founders_pitmaster)) && clean.stripped.length === 1, clean.dossier.founders_pitmaster);
+  ok("sanitizePoisonedFacts leaves a clean dossier's facts intact",
+    sanitizePoisonedFacts({ founders_pitmaster: "Aaron Franklin", awards_press: ["Texas Monthly Top 50"] }).stripped.length === 0);
+}
+
+console.log("\n[NO INVENTED FACTS — part 2: poisoned-facts detector for the sweep]");
+{
+  const poisoned = { founders_pitmaster: "Chef Dave Molina (this location)", what_it_is: "barbecue joint" };
+  // Acceptance 4 — the detector flags a per-location operator in an existing dossier.
+  ok("poisonedFacts flags a '(this location)' operator", poisonedFacts(poisoned).some((p) => p.field === "founders_pitmaster" && /molina/i.test(p.text)));
+  ok("poisonedFacts is clean on a real, untagged operator", poisonedFacts({ founders_pitmaster: "Aaron Franklin, Stacy Franklin" }).length === 0);
+  ok("poisonedFacts flags a 'runs this branch' assertion in setting_vibe", poisonedFacts({ setting_vibe: "Dave Molina runs this location day to day" }).length === 1);
+
+  // Cross-branch: the same tagged operator across 2+ branches (the Sugarfire shape).
+  const branches = [
+    { label: "Olivette", founders_pitmaster: "Chef Dave Molina (this location)" },
+    { label: "Valley Park", founders_pitmaster: "Chef Dave Molina (this location)" },
+    { label: "Downtown", founders_pitmaster: "Mike Johnson (Chef/Owner)" }, // real brand founder, untagged
+  ];
+  const shared = sharedPerLocationOperators(branches);
+  ok("sharedPerLocationOperators flags Molina across 2+ branches", shared.some((s) => /molina/i.test(s.name) && s.branches.length === 2), shared);
+  ok("a real untagged brand founder across branches is NOT flagged", !shared.some((s) => /johnson/i.test(s.name)));
+  // A brand founder legitimately shared across every branch must never be flagged.
+  const realShared = sharedPerLocationOperators([
+    { label: "A", founders_pitmaster: "Aaron Franklin" },
+    { label: "B", founders_pitmaster: "Aaron Franklin" },
+  ]);
+  ok("Aaron Franklin shared across branches (untagged) → no false flag", realShared.length === 0, realShared);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

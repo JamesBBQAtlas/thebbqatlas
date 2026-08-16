@@ -298,6 +298,8 @@ CHAIN SIGNAL — cheap, costs NO extra search: if the venue's own site clearly s
 
 COPYRIGHT / SOURCING RULE: collect FACTS ONLY (facts aren't copyrightable). NEVER reproduce third-party expressive content — no review text, no editorial blurbs, no photos — from Google or anywhere. Do not scrape any site en masse. The dossier is raw facts + source URLs; all published copy is written fresh by us later.
 
+NO INVENTED PEOPLE — THE ONE RULE THAT DOES NOT BEND. A person's name (a chef, pitmaster, owner, founder) goes into a facts field ONLY if that exact name is stated in THIS venue's own source. Never guess a name, never infer one, never carry a name from another venue. NEVER fabricate a PER-LOCATION operator: do NOT write "run by [name]", "[name] (this location)", "[name] runs this branch", or any name tagged to this specific outpost unless the source explicitly names that person for this venue. One person is NEVER written as the operator of multiple branches. If you cannot verify who founded or runs it, set "founders_pitmaster" to null and add "founders_pitmaster" to "unknowns" — a missing name is correct; an invented one is a product failure that outranks completeness.
+
 ENGLISH BY DEFAULT — the atlas is English-facing. Return "name", "address", "city", "region_state" and "country" in ENGLISH / LATIN script: romanise CJK (品川区 → "Shinagawa", 渋谷区 → "Shibuya", 新宿区 → "Shinjuku", 牛角 → "Ushigoro"), transliterate Arabic (مرسى دبي → "Dubai Marina"), and use the standard ENGLISH country name (الإمارات العربية المتحدة → "United Arab Emirates", 日本 → "Japan", 대한민국 → "South Korea", Brasil → "Brazil", Éire → "Ireland"). KEEP accented Latin exactly as written — do NOT strip diacritics (São Paulo, Cariló, Málaga are correct). For "name", use the venue's common ENGLISH/Latin form (e.g. "Ushigoro"), not the native script. Never output a city, country or address in a non-Latin script.
 
 For anything you cannot verify within the budget, use null (or [] for lists) and list the field name under "unknowns" — NEVER guess or invent. Put a source URL for each non-obvious fact in "sources".
@@ -310,6 +312,7 @@ Field notes:
 - "what_it_is": ONE factual line (e.g. "Central Texas barbecue joint and butcher shop"). Not a description.
 - "established": when the overall BUSINESS/BRAND was founded — its origin year (e.g. "2014"). This is a brand-level fact.
 - "opening_date": when THIS SPECIFIC location/branch opened, ONLY if you can verify it AND it differs from the brand's founding (e.g. a 2019 branch of a brand founded in 2014). For a single independent venue, or the original/flagship location, leave this null (its opening IS the brand's founding). NEVER guess.
+- "founders_pitmaster": the real name(s) of the founder(s) / pitmaster, EXACTLY as the venue's own source states them (e.g. "Aaron Franklin", or "the Miller family") — a brand-level fact shared by the whole business. Put a source URL in "sources". If the source names no one, set null and add "founders_pitmaster" to "unknowns". NEVER invent a name, and NEVER tag a name to this outpost only ("(this location)", "runs this branch") — that per-location-operator shape is a fabrication and is forbidden.
 - "hours": an object keyed mon,tue,wed,thu,fri,sat,sun with strings like "11:00-20:00" or "Closed", or null. Note "sells out early"/variable in "ordering_notes".
 - "bbq_style": the real-world style in plain words (e.g. "Central Texas", "Carolina", "Kansas City", "asado", "Korean", "braai").
 - "price_band": one of £, ££, £££, ££££ or null.
@@ -446,7 +449,15 @@ Return ONLY the dossier JSON described in your instructions. Facts only — no d
     sources: asArray(data.sources),
     unknowns: asArray(data.unknowns),
   };
-  return { dossier, citations, usage, model };
+  // NO INVENTED PEOPLE (part 2) — belt to the prompt's braces: strip any
+  // per-location-tagged operator the model still emitted or that arrived via a
+  // poisoned import, so a fabricated "(this location)" name never enters the
+  // facts. If founders_pitmaster is emptied by the strip, name it in "unknowns".
+  const { dossier: sanitized, stripped } = sanitizePoisonedFacts(dossier);
+  if (stripped.length && !sanitized.founders_pitmaster && !sanitized.unknowns.includes("founders_pitmaster")) {
+    sanitized.unknowns = [...sanitized.unknowns, "founders_pitmaster"];
+  }
+  return { dossier: sanitized, citations, usage, model };
 }
 
 /**
@@ -996,6 +1007,132 @@ function foldForMatch(s: string): string {
   return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
+// ── NO INVENTED FACTS, part 2 — poisoned facts (the Sugarfire "Chef Dave Molina
+// (this location)" case). A hallucination that got written into a FACTS field
+// (founders_pitmaster) once launders itself: on re-enrich, grounding found the
+// invented name IN the dossier it was checking against and passed it back into
+// copy across 11 branches. The tell is a person TAGGED to this specific outpost.
+
+/** A person fragment tagged as running THIS branch — the poisoned-facts tell.
+ *  A real, brand-level operator ("Aaron Franklin", "Mike Johnson (Chef/Owner)")
+ *  carries NO such tag, so it is never caught by this. */
+const PER_LOCATION_OPERATOR_RE =
+  /\(\s*this\s+(?:location|branch|outpost|spot|store|site|venue|one)\s*\)|\b(?:runs?|operates?|helms?|mans?|leads?|heads?)\s+this\s+(?:location|branch|outpost|spot|store|site|venue|one)\b/i;
+
+/**
+ * Strip any per-location-tagged operator fragment from a facts value, keeping the
+ * real (untagged) operators. "Mike Johnson (Chef/Owner), Carolyn Downs (Owner);
+ * Chef Dave Molina (this location)" → "Mike Johnson (Chef/Owner), Carolyn Downs
+ * (Owner)". A value that is ONLY a per-location operator collapses to null.
+ */
+export function stripPerLocationOperators(
+  value: string | null | undefined
+): { value: string | null; stripped: string[] } {
+  if (typeof value !== "string" || !value.trim()) return { value: value ?? null, stripped: [] };
+  const frags = value.split(/\s*[;,]\s*/).map((f) => f.trim()).filter(Boolean);
+  const kept: string[] = [];
+  const stripped: string[] = [];
+  for (const f of frags) {
+    if (PER_LOCATION_OPERATOR_RE.test(f)) stripped.push(f);
+    else kept.push(f);
+  }
+  return { value: kept.length ? kept.join(", ") : null, stripped };
+}
+
+/**
+ * Remove per-location-tagged operator fragments from EVERY text fact of a dossier
+ * (strings and string arrays), so a laundered "(this location)" fabrication can't
+ * sit in the facts OR ground a copy claim against itself. Returns a shallow-cloned
+ * dossier plus the fragments removed. One definition, used at BOTH the write stage
+ * (researchDossier) and the grounding stage (ungroundedClaims).
+ */
+export function sanitizePoisonedFacts<T>(
+  dossier: T
+): { dossier: T; stripped: string[] } {
+  const out: Record<string, unknown> = { ...(dossier as Record<string, unknown>) };
+  const stripped: string[] = [];
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === "string") {
+      const r = stripPerLocationOperators(v);
+      if (r.stripped.length) {
+        out[k] = r.value;
+        stripped.push(...r.stripped);
+      }
+    } else if (Array.isArray(v)) {
+      const kept = v.filter((item) => !(typeof item === "string" && PER_LOCATION_OPERATOR_RE.test(item)));
+      if (kept.length !== v.length) {
+        stripped.push(...(v.filter((item) => typeof item === "string" && PER_LOCATION_OPERATOR_RE.test(item)) as string[]));
+        out[k] = kept;
+      }
+    }
+  }
+  return { dossier: out as T, stripped };
+}
+
+/** A poisoned fact — a facts field asserting a person tagged to this outpost. */
+export interface PoisonedFact {
+  field: string;
+  text: string;
+}
+
+/**
+ * Poisoned-facts detector for the grounding/sameness sweep: flag any facts field
+ * that asserts a person with a per-location qualifier ("(this location)", "runs
+ * this branch"). Surfaces an EXISTING bad fact for purge, not just new copy —
+ * exactly the Sugarfire shape. Empty when the dossier is clean.
+ */
+export function poisonedFacts(dossier: unknown): PoisonedFact[] {
+  if (!dossier || typeof dossier !== "object") return [];
+  const out: PoisonedFact[] = [];
+  for (const [field, v] of Object.entries(dossier as Record<string, unknown>)) {
+    if (typeof v === "string") {
+      for (const frag of v.split(/\s*[;,]\s*/).map((f) => f.trim()).filter(Boolean)) {
+        if (PER_LOCATION_OPERATOR_RE.test(frag)) out.push({ field, text: frag });
+      }
+    } else if (Array.isArray(v)) {
+      for (const item of v) {
+        if (typeof item === "string" && PER_LOCATION_OPERATOR_RE.test(item)) out.push({ field, text: item });
+      }
+    }
+  }
+  return out;
+}
+
+/** A leading role word we drop before comparing an operator NAME across branches. */
+const OPERATOR_ROLE_PREFIX = /^(?:chef|pitmaster|pit master|owner|founder|co-?founder|proprietor|head chef)\s+/i;
+
+/**
+ * Cross-branch poison: the SAME per-location-tagged operator name asserted across
+ * 2+ branches — the exact Sugarfire pattern (one invented man tagged "(this
+ * location)" on 11 outposts). Only per-location-TAGGED operators are considered,
+ * so a real brand founder legitimately shared across every branch (Aaron Franklin,
+ * no tag) is never flagged. Returns each reused name with the branch labels.
+ */
+export function sharedPerLocationOperators(
+  branches: { label: string; founders_pitmaster: string | null | undefined }[]
+): { name: string; branches: string[] }[] {
+  const byName = new Map<string, Set<string>>();
+  for (const b of branches) {
+    for (const p of poisonedFacts({ founders_pitmaster: b.founders_pitmaster ?? null })) {
+      // Reduce the fragment to a bare name: drop the "(this location)"-style tag,
+      // any parenthetical, a role prefix, and any "runs this branch" verb tail.
+      const name = p.text
+        .replace(PER_LOCATION_OPERATOR_RE, "")
+        .replace(/\([^)]*\)/g, "")
+        .replace(OPERATOR_ROLE_PREFIX, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+      if (!name) continue;
+      if (!byName.has(name)) byName.set(name, new Set());
+      byName.get(name)!.add(b.label);
+    }
+  }
+  return [...byName.entries()]
+    .filter(([, labels]) => labels.size >= 2)
+    .map(([name, labels]) => ({ name, branches: [...labels] }));
+}
+
 /** A specific claim in copy that can't be traced to the venue's own facts. */
 export interface UngroundedClaim {
   kind: "person" | "year";
@@ -1022,7 +1159,17 @@ const PERSON_PATTERNS: RegExp[] = [
 export function ungroundedClaims(copy: string | null | undefined, dossier: unknown): UngroundedClaim[] {
   const text = copy ?? "";
   if (!text.trim()) return [];
-  const hay = foldForMatch(JSON.stringify(dossier ?? {}));
+  // Ground against SANITIZED facts — strip any per-location-tagged operator first,
+  // so a name that exists in the dossier ONLY because a prior generation invented
+  // it ("Chef Dave Molina (this location)") can't ground the copy claim against
+  // itself. A real, untagged operator (Aaron Franklin) is untouched and still
+  // grounds. This is the part-2 fix: the dossier can contain laundered AI output,
+  // so it is not treated as ground truth for the very claim it's checking.
+  const groundSource =
+    dossier && typeof dossier === "object"
+      ? sanitizePoisonedFacts(dossier as Record<string, unknown>).dossier
+      : dossier;
+  const hay = foldForMatch(JSON.stringify(groundSource ?? {}));
   const out: UngroundedClaim[] = [];
   const seen = new Set<string>();
 
