@@ -22,7 +22,7 @@ import {
 import { hasNonLatinScript } from "@/lib/utils/script";
 import { grokCost, claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
-import { geocodeStructured, GEOCODE_COARSE_REASON, GEOCODE_APPROX_REASON } from "@/lib/geo/geocode";
+import { geocodeStructured, GEOCODE_COARSE_REASON, GEOCODE_APPROX_REASON, coherentGeoConfidence } from "@/lib/geo/geocode";
 import { shouldKeepLockedPin } from "@/lib/geo/pin-lock";
 import { COST_PER_CHAIN_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
 import { canonicalCountry, isRecognizedCountry } from "@/lib/constants/countries";
@@ -248,14 +248,24 @@ export async function POST(request: Request) {
         patch.lat = geo.result.lat;
         patch.lng = geo.result.lng;
         if (geo.result.country_code) patch.country_code = geo.result.country_code;
-        patch.geo_precision = geo.precision;
-        patch.geo_confidence = geo.confidence;
-        patch.geo_source = geo.source;
+        // GEO HONESTY (Fix 3) — confidence trio co-set with the coordinate.
+        const g = coherentGeoConfidence(geo.result.lat, geo.result.lng, {
+          geo_precision: geo.precision,
+          geo_confidence: geo.confidence,
+          geo_source: geo.source,
+        });
+        patch.geo_precision = g.geo_precision;
+        patch.geo_confidence = g.geo_confidence;
+        patch.geo_source = g.geo_source;
       } else {
         // No confident pin → NEVER leave the venue at 0,0. Clear the sentinel to a
-        // true NULL so it reads as an honest "missing pin" (geocode-fix rule).
+        // true NULL so it reads as an honest "missing pin" (geocode-fix rule), and
+        // drop any stale confidence so it can't outlive the coordinate (Fix 3).
         patch.lat = null;
         patch.lng = null;
+        patch.geo_precision = null;
+        patch.geo_confidence = null;
+        patch.geo_source = null;
       }
     }
     // Part 5 — a Find-IG write is a live enrichment edit; stamp who/when.
@@ -638,9 +648,19 @@ export async function POST(request: Request) {
   // so admin shows Confirmed vs Approximate vs Missing. Only when we actually
   // geocoded this pass (a locked or dossier-supplied pin leaves these untouched).
   if (!pinLocked && geoSource !== null) {
-    proposed.geo_precision = geoPrecision;
-    proposed.geo_confidence = geoConfidence;
-    proposed.geo_source = geoSource;
+    // GEO HONESTY (Fix 3) — co-set the trio with the EFFECTIVE coordinate this
+    // write lands on (the proposed pin, else the row's existing one). If that's
+    // null, the trio is nulled — a confidence never outlives its coordinate.
+    const effLat = ("lat" in proposed ? (proposed.lat as number | null) : row.lat);
+    const effLng = ("lng" in proposed ? (proposed.lng as number | null) : row.lng);
+    const g = coherentGeoConfidence(effLat, effLng, {
+      geo_precision: geoPrecision,
+      geo_confidence: geoConfidence,
+      geo_source: geoSource,
+    });
+    proposed.geo_precision = g.geo_precision;
+    proposed.geo_confidence = g.geo_confidence;
+    proposed.geo_source = g.geo_source;
   }
   // Store the TOWN — settlement-normalised, and NEVER a POI/landmark (a POI in
   // the city field is a failure: fall back to the town parsed from the address).

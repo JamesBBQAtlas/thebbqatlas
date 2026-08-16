@@ -105,6 +105,68 @@ export function isSentinelPin(lat: number | null | undefined, lng: number | null
   return SENTINEL_CENTROIDS.some(([cLat, cLng]) => Math.abs(lat - cLat) < 0.01 && Math.abs(lng - cLng) < 0.01);
 }
 
+/** A real, storable pin — finite, not (0,0), not a national-centroid sentinel. */
+export function hasRealPoint(lat: number | null | undefined, lng: number | null | undefined): boolean {
+  return (
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    !(lat === 0 && lng === 0) &&
+    !isSentinelPin(lat, lng)
+  );
+}
+
+/** The pin-quality trio that must never outlive its coordinates. */
+export interface GeoConfidenceFields {
+  geo_precision: string | null;
+  geo_confidence: number | null;
+  geo_source: string | null;
+}
+
+/**
+ * GEO HONESTY INVARIANT — confidence/precision/source are only meaningful WITH a
+ * real pin. Given the coordinates and the pin-quality trio, return the trio as-is
+ * when the point is real, or ALL-NULL when it isn't. So no row can carry a stamped
+ * confidence for a coordinate that doesn't exist (the Home Team phantom:
+ * geo_confidence 0.9 with lat/lng NULL). Apply this at EVERY geo write so the pair
+ * is always co-set — coordinates and confidence together, or both null.
+ */
+export function coherentGeoConfidence(
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+  fields: Partial<GeoConfidenceFields> | null | undefined
+): GeoConfidenceFields {
+  if (!hasRealPoint(lat, lng)) {
+    return { geo_precision: null, geo_confidence: null, geo_source: null };
+  }
+  return {
+    geo_precision: fields?.geo_precision ?? null,
+    geo_confidence: typeof fields?.geo_confidence === "number" ? fields.geo_confidence : null,
+    geo_source: fields?.geo_source ?? null,
+  };
+}
+
+/**
+ * FLAGSHIP LOCATION GUARD (roster provenance): a flagship must be a real, located
+ * place. Refuse to seed one when BOTH there is no street address AND the only
+ * geocode resolved to a country that DISAGREES with the brand's declared country
+ * — a bare IG-handle geocode that lands a US brand in Myanmar is not a location.
+ * A flagship WITH a street, or one whose pin is in the right country, is fine.
+ */
+export function flagshipUnlocatable(opts: {
+  hasStreet: boolean;
+  declaredCountryCode: string | null | undefined;
+  geoCountryCode: string | null | undefined;
+}): boolean {
+  if (opts.hasStreet) return false;
+  return Boolean(
+    opts.declaredCountryCode &&
+      opts.geoCountryCode &&
+      opts.declaredCountryCode.toUpperCase() !== opts.geoCountryCode.toUpperCase()
+  );
+}
+
 interface MtContext {
   id?: string;
   text?: string;

@@ -626,31 +626,105 @@ const STREET_ABBR: Record<string, string> = {
 // trailing letters), so those stay in the street name where they belong.
 const BUILDING_NO = /^\d+[a-z]?$/;
 
+// Compass directionals (after STREET_ABBR folds the spelled forms to these). A
+// SINGLE trailing one is folded from the key — the Blue Hound twin
+// "6712 Hwy 441 N" vs "6712 Hwy 441".
+const DIRECTIONALS = new Set(["n", "s", "e", "w", "ne", "nw", "se", "sw"]);
+
 /**
- * Normalise a STREET address to an identity key. Takes the portion before the
- * first comma (the street line — so a trailing colonia/sub-locality/city never
- * pollutes it), folds diacritics, lowercases, strips punctuation + suite/unit
- * designators, and standardises street-type abbreviations. Crucially it is
- * **number-position agnostic**: a building number may lead (US "107 Main St") or
- * trail (MX/EU "Main St 107"); both yield the SAME key. So the three Old Jimmy's
- * variants — "Plutarco Elías Calles 107", "Plutarco Elias Calles 107",
- * "107 Plutarco Elías Calles" — all normalise to one key. Empty when unusable.
+ * Canonicalise a state-route / highway designator to ONE form — "hwy <number>" —
+ * so the same road keys identically however it's written: "MS Highway 57",
+ * "MS-57", "Highway 57", "Hwy 57" (the Shed twin), and "US-31" / "US Highway 31",
+ * "SH 121" / "State HWY 121". Runs on the lowercased street BEFORE punctuation is
+ * stripped (it needs the hyphen in "MS-57"). Fires ONLY on a route KEYWORD or a
+ * state-code-hyphen-number, so a plain "57 Main St" (no keyword) is never touched
+ * — the NUMBER is always preserved, so two different routes never merge.
+ */
+/** Merge a maximal run of ≥2 short (≤2-letter) alpha tokens into one concatenated
+ *  token, so initials fold: ["s","w","w"] → ["sww"], ["s","ww"] → ["sww"], ["n","e"]
+ *  → ["ne"]. A run of length 1 ("n", "el") is left untouched. */
+function mergeShortAlphaRuns(tokens: string[]): string[] {
+  const out: string[] = [];
+  const short = (t: string) => /^[a-z]{1,2}$/.test(t);
+  let i = 0;
+  while (i < tokens.length) {
+    if (short(tokens[i])) {
+      let j = i + 1;
+      while (j < tokens.length && short(tokens[j])) j++;
+      if (j - i >= 2) { out.push(tokens.slice(i, j).join("")); i = j; continue; }
+    }
+    out.push(tokens[i]);
+    i++;
+  }
+  return out;
+}
+
+function canonicalizeRoutes(s: string): string {
+  return s
+    // "MS-57", "US-31", "SH-121" — a 2-letter code hyphen-glued to a number (the
+    // digits guard means a hyphenated range "100-200" is never matched).
+    .replace(/\b[a-z]{2}-(\d+)\b/g, "hwy $1")
+    // "state highway 121", "us highway 31", "ms highway 57", "highway 57", "route 66".
+    .replace(/\b(?:state\s+|us\s+|[a-z]{2}\s+)?(?:highway|hwy|hway|route|rte)\s*#?\s*(\d+)\b/g, "hwy $1")
+    // "sh 121", "fm 1960", "sr 45", "rm 620", "cr 200" — a route-class prefix + number.
+    .replace(/\b(?:sh|fm|sr|rm|cr)\s+(\d+)\b/g, "hwy $1");
+}
+
+/**
+ * Normalise a STREET address to an identity key — the ONE dedupe key, fed to both
+ * the union-dedupe and the geo-dedupe. Takes the portion before the first comma
+ * (the street line — so a trailing colonia/sub-locality/city never pollutes it),
+ * folds diacritics + case, and canonicalises the SAME physical address however
+ * it's spelled so a twin collapses against its sibling:
+ *   • periods dropped (not between digits) so initials fold — "S. W.W." == "S WW"
+ *     (the 2M Smokehouse twin) — and "St." == "St";
+ *   • state-route forms → one "hwy N" (the Shed twin);
+ *   • unit/suite noise removed — "#300", "Suite 300", "Ste 300", "Unit 4" (the
+ *     Jack Stack twin);
+ *   • street-type words → one token ("Street" == "St", "Road" == "Rd");
+ *   • a single trailing compass directional folded (the Blue Hound twin).
+ * Crucially it stays **number-position agnostic**: a building number may lead
+ * ("107 Main St") or trail ("Main St 107"); both yield the SAME key. It NEVER
+ * merges genuinely different places — a different building number or a different
+ * street name keeps its own key. Empty when unusable.
  */
 export function normStreet(addr: string | null | undefined): string {
-  // Clean the address FIRST (un-glue "St.San" → "St. San") so a glued abbreviation
-  // never fuses the street type onto the city inside the dedupe key (A5).
+  // Clean the address FIRST (un-glue "St.San", strip a phone/blob) so a glued
+  // abbreviation never fuses the street type onto the city inside the key.
   const first = foldDiacritics(cleanAddress(addr)).split(",")[0] ?? "";
   let s = first.toLowerCase();
-  // Drop suite/unit/apt designators AND their number FIRST, so a suite number is
-  // never mistaken for the building number when we reorder below.
-  s = s.replace(/\b(suite|ste|unit|apt|apartment|no|#)\s*#?\s*[\w-]+/g, " ");
+  // Drop periods that aren't decimals, so initials fold ("s. w.w." → "s ww",
+  // "st." → "st") — the 2M twin. A decimal ("3.5") is preserved.
+  s = s.replace(/\.(?!\d)/g, "");
+  // Canonicalise state-route forms while the hyphen is still present.
+  s = canonicalizeRoutes(s);
+  // Drop unit/suite designators AND their id, so a suite is never part of the
+  // street identity (nor mistaken for a building number). Unit words first, then a
+  // bare "#123". Conservative list — only true unit words, so a street name like
+  // "Space Center Blvd" is never eaten.
+  s = s
+    .replace(/\b(?:suite|ste|unit|apt|apartment|no)\b\s*#?\s*[\w-]+/g, " ")
+    .replace(/#\s*[\w-]+/g, " ");
   s = s.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
   if (!s) return "";
-  const tokens = s.split(" ").map((w) => STREET_ABBR[w] ?? w);
-  // Pull the building number(s) to the front so "107 Main St" == "Main St 107".
-  const nums = tokens.filter((t) => BUILDING_NO.test(t)).sort();
-  const words = tokens.filter((t) => !BUILDING_NO.test(t));
-  return [...nums, ...words].join(" ").trim();
+  // Fold street-type + directional words to a canonical token ("street" → "st").
+  let words = s.split(" ").map((w) => STREET_ABBR[w] ?? w);
+  // Fold a SINGLE trailing compass directional FIRST ("6712 Hwy 441 N" == "…441",
+  // "Danville Rd SW" == "Danville Rd") — before any merge, so the directional isn't
+  // fused onto the street type. Only when a real token precedes it.
+  if (words.length > 1 && DIRECTIONALS.has(words[words.length - 1])) {
+    words = words.slice(0, -1);
+  }
+  // Merge a run of ≥2 short (≤2-letter) alpha tokens into one, so INITIALS key the
+  // same however spaced: "S. W.W." (→ "s w w") == "S WW" (→ "s ww") == "sww" (the
+  // 2M Smokehouse twin), and "N E" == "NE". A lone short token ("N Main", "El Paso")
+  // is left alone, so genuinely different directions/names never merge.
+  words = mergeShortAlphaRuns(words);
+  // Number-position agnostic: pull building/route numbers to the front so
+  // "107 Main St" == "Main St 107".
+  const nums = words.filter((t) => BUILDING_NO.test(t)).sort();
+  const rest = words.filter((t) => !BUILDING_NO.test(t));
+  return [...nums, ...rest].join(" ").trim();
 }
 
 /**

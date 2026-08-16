@@ -16,6 +16,8 @@ import {
   type DiscoveredLocation,
 } from "../lib/chains/discoverLocations";
 import { findDuplicates } from "../lib/venues/dedupe";
+import { rosterNameIsOffBrand, brandTokens, addressHasStreet } from "../lib/admin/chain-seed";
+import { coherentGeoConfidence, flagshipUnlocatable, hasRealPoint } from "../lib/geo/geocode";
 import {
   isUnrosteredChain,
   parentIdsWithChildren,
@@ -135,6 +137,75 @@ console.log("\n[A] ambiguous (same street, different number, no geo) → NOT a s
   // A same-brand same-city name hit may still surface it for a human, but it must
   // NOT be a high-confidence "same address" auto-merge.
   ok("107 vs 205 is never a 'same address' high-confidence match", !dups.some((d) => d.reason === "same address"), dups);
+}
+
+// ── FIX 1: fuzzy dedupe — spelling-variant twins that shipped live duplicates ─
+console.log("\n[FIX 1] fuzzy dedupe — the four live twins collapse to ONE key");
+{
+  const pairs: [string, string, string][] = [
+    ["2731 S. W.W. White Road", "2731 S WW White Rd", "San Antonio"],       // Road≠Rd, S. W.W.≠S WW
+    ["6712 Hwy 441 N", "6712 Hwy 441", "Dillard"],                          // trailing directional
+    ["7501 MS Highway 57", "7501 MS-57", "Ocean Springs"],                  // state-route form
+    ["101 W 22nd St. #300", "101 W 22nd Street", "Kansas City"],            // suite + St.≠Street
+  ];
+  for (const [a, b, city] of pairs) {
+    ok(`key: "${a}" == "${b}"`, normStreet(a) === normStreet(b), [normStreet(a), normStreet(b)]);
+    const merged = mergeDiscovered([mk(a, city, { country: "United States" }), mk(b, city, { country: "United States" })], []);
+    ok(`  union collapses "${a.slice(0, 14)}…" to one`, merged.length === 1, merged.map((m) => m.address));
+  }
+}
+
+console.log("\n[FIX 1] over-collapse guard — two REAL locations stay separate");
+{
+  // Two real Wright's, Bentonville — different building number AND different street.
+  const wr = mergeDiscovered([mk("208 NE 3rd St", "Bentonville", { country: "United States" }), mk("1410 SE 8th St", "Bentonville", { country: "United States" })], []);
+  ok("Wright's 208 NE 3rd vs 1410 SE 8th → TWO", wr.length === 2, wr.map((m) => m.address));
+  ok("  their street keys differ", normStreet("208 NE 3rd St") !== normStreet("1410 SE 8th St"));
+  // Two real Big Bob Gibson, Decatur — different streets entirely.
+  const bb = mergeDiscovered([mk("1715 6th Ave SE", "Decatur", { country: "United States" }), mk("2520 Danville Rd SW", "Decatur", { country: "United States" })], []);
+  ok("Big Bob Gibson two Decatur addresses → TWO", bb.length === 2, bb.map((m) => m.address));
+  // A hyphenated range keeps BOTH numbers (never rewritten to one).
+  ok("range '100-200 Main St' retains both numbers", normStreet("100-200 Main St").includes("100") && normStreet("100-200 Main St").includes("200"), normStreet("100-200 Main St"));
+  // 2M initials fold, but a genuinely different street does not collapse into it.
+  ok("2M twin keys the same, a different street does not", normStreet("2731 S. W.W. White Road") !== normStreet("2731 Broadway"));
+}
+
+// ── FIX 2a: roster provenance — off-brand link is not absorbed as a branch ────
+console.log("\n[FIX 2a] off-brand roster link is not a branch (Jackalope vs Jack's BBQ)");
+{
+  ok("'Jackalope Tex-Mex & Cantina' is OFF-brand for 'Jack's BBQ'", rosterNameIsOffBrand("Jackalope Tex-Mex & Cantina", "Jack's BBQ"));
+  ok("'Jack's BBQ Redmond' IS a branch (shares 'jacks')", !rosterNameIsOffBrand("Jack's BBQ Redmond", "Jack's BBQ"));
+  ok("'Jack's BBQ Seattle' IS a branch (longest token is the city, not the brand)", !rosterNameIsOffBrand("Jack's BBQ Seattle", "Jack's BBQ"));
+  ok("a null / empty name is treated as a branch, never split off", !rosterNameIsOffBrand(null, "Jack's BBQ") && !rosterNameIsOffBrand("", "Jack's BBQ"));
+  ok("a weak brand token ('2M') never splits a sibling off", !rosterNameIsOffBrand("2M Smokehouse Westside", "2M Smokehouse"));
+  ok("brandTokens is the shared tokeniser (keeps 'jacks', drops 'bbq')", brandTokens("Jack's BBQ").includes("jacks") && !brandTokens("Jack's BBQ").includes("bbq"));
+}
+
+// ── FIX 2b: a flagship must be a real, located place ─────────────────────────
+console.log("\n[FIX 2b] flagship location guard (Home Team → Myanmar)");
+{
+  ok("no street + foreign-country pin → HELD (unlocatable)", flagshipUnlocatable({ hasStreet: false, declaredCountryCode: "US", geoCountryCode: "MM" }));
+  ok("a real street → locatable even if the geocode wobbles", !flagshipUnlocatable({ hasStreet: true, declaredCountryCode: "US", geoCountryCode: "MM" }));
+  ok("no street but a SAME-country pin → allowed (city-level flagship)", !flagshipUnlocatable({ hasStreet: false, declaredCountryCode: "US", geoCountryCode: "US" }));
+  ok("addressHasStreet: a real street true, a bare city false", addressHasStreet("2731 S WW White Rd", "San Antonio") && !addressHasStreet(null, "Charleston"));
+}
+
+// ── FIX 3: geo honesty — confidence never outlives its coordinate ────────────
+console.log("\n[FIX 3] confidence/coordinate are co-set (or both null)");
+{
+  const withPin = coherentGeoConfidence(32.7, -79.9, { geo_precision: "address", geo_confidence: 0.9, geo_source: "maptiler" });
+  ok("a real pin keeps its confidence trio", withPin.geo_confidence === 0.9 && withPin.geo_precision === "address" && withPin.geo_source === "maptiler");
+  const noPin = coherentGeoConfidence(null, null, { geo_precision: "address", geo_confidence: 0.9, geo_source: "maptiler" });
+  ok("no coordinate → the WHOLE trio is nulled (the phantom's 0.9-with-null-pin)", noPin.geo_confidence === null && noPin.geo_precision === null && noPin.geo_source === null);
+  ok("(0,0) null-island is not a real pin → trio nulled", coherentGeoConfidence(0, 0, { geo_precision: "poi", geo_confidence: 0.8, geo_source: "x" }).geo_confidence === null);
+  ok("hasRealPoint: real yes; null / 0,0 no", hasRealPoint(32.7, -79.9) && !hasRealPoint(null, -79.9) && !hasRealPoint(0, 0));
+  // Acceptance 1 — the invariant across every coordinate shape.
+  const shapes: [number | null, number | null][] = [[10, 20], [null, null], [0, 0], [10, null]];
+  const holds = shapes.every(([la, ln]) => {
+    const g = coherentGeoConfidence(la, ln, { geo_precision: "p", geo_confidence: 0.5, geo_source: "s" });
+    return hasRealPoint(la, ln) ? g.geo_confidence !== null : g.geo_confidence === null;
+  });
+  ok("invariant: geo_confidence is set IFF a real coordinate exists", holds);
 }
 
 // ── PART B: chip predicate == deep-link predicate ───────────────────────────

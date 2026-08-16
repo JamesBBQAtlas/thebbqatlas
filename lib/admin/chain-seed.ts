@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { composeAddress, normStreet, normCity, settlementCity, extractCleanAddress } from "@/lib/admin/address";
 import { canonicalCountry, resolveCountryCode } from "@/lib/constants/countries";
-import { geocodeStructured, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
+import { geocodeStructured, GEOCODE_COARSE_REASON, coherentGeoConfidence } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
 import { auditField } from "@/lib/admin/content-audit";
 
@@ -41,27 +41,64 @@ export interface SeedResult {
   /** New rows inserted flagged as a POSSIBLE duplicate of an existing record
    *  (uncertain same-city/same-brand match) — never a silent twin (Part 4C). */
   possibleDuplicates: number;
+  /** Off-brand locations-page links seeded standalone under their real name and
+   *  flagged, NOT absorbed as a branch under the parent (Fix 2a). */
+  offBrand: number;
   /** Per-incoming-location decision log, for the parent's discovery_debug so the
    *  roster "shows its working" (Part 4B/FAIL 5): what happened to each address. */
   decisions: { address: string; decision: string; reason?: string }[];
 }
 
-/** A distinctive lowercase token from a brand name, for FUZZY matching existing
- *  records whose name is a variant ("Thatcher Barbecue Company" vs "Thatcher BBQ
- *  Company"). Drops the generic BBQ/company words and keeps the longest word. */
-export function brandToken(brand: string): string {
-  const STOP = new Set([
-    "bbq", "barbecue", "barbeque", "barbq", "bar", "b", "que", "q", "co", "company",
-    "inc", "llc", "ltd", "the", "and", "grill", "grille", "smokehouse", "smoke",
-    "house", "restaurant", "kitchen", "pit", "pits", "joint", "brothers", "bros",
-  ]);
-  const words = brand
+/** The generic BBQ/company/type words that carry no brand identity. */
+const BRAND_STOP = new Set([
+  "bbq", "barbecue", "barbeque", "barbq", "bar", "b", "que", "q", "co", "company",
+  "inc", "llc", "ltd", "the", "and", "grill", "grille", "smokehouse", "smoke",
+  "house", "restaurant", "kitchen", "pit", "pits", "joint", "brothers", "bros",
+]);
+
+/** The distinctive lowercase tokens of a brand name, longest-first — the generic
+ *  BBQ/company words dropped. The ONE brand tokeniser (naming-pollution #208),
+ *  reused by fuzzy matching AND the roster off-brand guard — not a fork. */
+export function brandTokens(brand: string): string[] {
+  return brand
     .toLowerCase()
+    .replace(/['’]/g, "") // drop apostrophes WITHOUT splitting: "Jack's" → "jacks"
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
     .filter(Boolean)
-    .filter((w) => !STOP.has(w));
-  return words.sort((a, b) => b.length - a.length)[0] ?? "";
+    .filter((w) => !BRAND_STOP.has(w))
+    .sort((a, b) => b.length - a.length);
+}
+
+/** A distinctive lowercase token from a brand name, for FUZZY matching existing
+ *  records whose name is a variant ("Thatcher Barbecue Company" vs "Thatcher BBQ
+ *  Company"). The single strongest (longest) distinctive word. */
+export function brandToken(brand: string): string {
+  return brandTokens(brand)[0] ?? "";
+}
+
+/**
+ * ROSTER PROVENANCE GUARD (Fix 2a): is this locations-page link an OFF-BRAND sister
+ * business rather than a branch? A candidate is a branch only if its name shares
+ * the flagship brand's distinctive token — "Jack's BBQ Redmond" shares "jacks", so
+ * it's a branch; "Jackalope Tex-Mex & Cantina" shares nothing with "Jack's BBQ", so
+ * it is NOT — it must not be renamed to the parent or attached as a child. Reuses
+ * the ONE brand tokeniser. Conservative: a name that's all generic words, or a
+ * brand whose own token is too weak (< 3 chars, e.g. "2M") to judge, is treated as
+ * a branch (never wrongly split off).
+ */
+export function rosterNameIsOffBrand(name: string | null | undefined, brand: string): boolean {
+  if (!name) return false;
+  const parentTok = brandToken(brand);
+  if (parentTok.length < 3) return false; // brand token too weak to judge
+  const nameToks = brandTokens(name);
+  if (!nameToks.length) return false; // name is all generic words → treat as branch
+  const brandToks = new Set(brandTokens(brand));
+  const nameNorm = name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  // A branch SHARES the brand's distinctive token (as a token, or as a substring
+  // to catch "Jack's BBQ Seattle" whose longest token is the city).
+  const shares = nameToks.some((t) => brandToks.has(t)) || nameNorm.includes(parentTok);
+  return !shares;
 }
 
 interface ExistingRow {
@@ -131,6 +168,13 @@ function hasDistinctStreet(streetKey: string, cityKey: string): boolean {
   return streetKey.split(" ").some((w) => STREET_TYPES.has(w)); // named road
 }
 
+/** Does this raw address carry a real STREET LINE (building number or named road),
+ *  versus a bare city? The public wrapper of hasDistinctStreet, for the flagship
+ *  location guard (Fix 2b). */
+export function addressHasStreet(address: string | null | undefined, city: string | null | undefined): boolean {
+  return hasDistinctStreet(normStreet(address ?? null), cityKeyOf(city ?? null));
+}
+
 /**
  * Seed / reconcile a chain's sibling locations (§09.2.2). Identity is the
  * PHYSICAL LOCATION — matched by normalised STREET address or GEO PROXIMITY,
@@ -156,7 +200,7 @@ export async function seedChainLocations(
   locations: SeedLocation[]
 ): Promise<SeedResult> {
   const found = locations.length;
-  const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0, decisions: [] };
+  const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0, offBrand: 0, decisions: [] };
   if (!found) return result;
   // Parse-robustness — clean every incoming address BEFORE geocoding and dedupe:
   // un-glue "St.San" → "St. San" (A5), strip a phone glued to the number (A7), and
@@ -368,6 +412,52 @@ export async function seedChainLocations(
     const label = loc.name && loc.name !== brand ? loc.name : loc.city;
     if (!label) continue;
 
+    // ROSTER PROVENANCE GUARD (Fix 2a) — a differently-named sister business
+    // cross-linked from the brand's locations page (Jackalope Tex-Mex on Jack's
+    // BBQ's page) is NOT a branch. Never rename it to the parent or attach it as a
+    // child: seed it standalone under its REAL name, flagged for a human, so the
+    // real venue is preserved but not filed under the wrong brand.
+    if (rosterNameIsOffBrand(loc.name, brand)) {
+      const offCity = settlementCity(loc.city) || loc.city || "";
+      const offSlug = await uniqueRestaurantSlug(db, `${loc.name} ${offCity || label}`);
+      const offComposed = composeAddress({ street: loc.address, city: loc.city });
+      const offLocated = hasCoords(c.lat, c.lng);
+      const offGeo = coherentGeoConfidence(offLocated ? c.lat : null, offLocated ? c.lng : null, {
+        geo_precision: c.geoPrecision,
+        geo_confidence: c.geoConfidence,
+        geo_source: c.geoSource,
+      });
+      const offRow: Record<string, unknown> = {
+        slug: offSlug,
+        name: loc.name,
+        location_label: null,
+        description: `${loc.name} — barbecue${offCity ? ` in ${offCity}` : ""}.`,
+        style: "other",
+        lat: offLocated ? c.lat : null,
+        lng: offLocated ? c.lng : null,
+        address: offComposed,
+        city: offCity,
+        country: canonicalCountry(loc.country ?? country),
+        price_level: 2,
+        hero_image_url: "",
+        hero_source: "none",
+        status: "pending",
+        category: "restaurant",
+        chain_parent_id: null,
+        geo_precision: offGeo.geo_precision,
+        geo_confidence: offGeo.geo_confidence,
+        geo_source: offGeo.geo_source,
+        needs_attention: true,
+        attention_reason: `Off-brand link from ${brand} locations page — verify. This is "${loc.name}", not a ${brand} branch.`,
+      };
+      if (offLocated && c.country_code) offRow.country_code = c.country_code;
+      if (loc.source_url) offRow.enrichment_sources = [loc.source_url];
+      await db.from("restaurants").insert(offRow);
+      result.offBrand += 1;
+      note(offComposed || (loc.address ?? loc.name ?? ""), "off_brand", `named "${loc.name}" — not a ${brand} branch; seeded standalone + flagged`);
+      continue;
+    }
+
     // Fix 5 — placeholder collapse. A branch with NO distinct street is just a
     // city-level (or worse, city-less) placeholder: it carries nothing to tell it
     // apart from another member in the same city or at the same pin. So BEFORE the
@@ -476,6 +566,14 @@ export async function seedChainLocations(
     const slug = await uniqueRestaurantSlug(db, `${brand} ${settle || label}`);
     const composed = composeAddress({ street: loc.address, city: loc.city });
     const located = hasCoords(c.lat, c.lng);
+    // GEO HONESTY (Fix 3) — the pin-quality trio is co-set with the coordinate:
+    // written together when we have a real pin, both NULL when we don't. No seed
+    // ever carries a confidence for a coordinate it lacks.
+    const seedGeo = coherentGeoConfidence(located ? c.lat : null, located ? c.lng : null, {
+      geo_precision: c.geoPrecision,
+      geo_confidence: c.geoConfidence,
+      geo_source: c.geoSource,
+    });
     const insertRow: Record<string, unknown> = {
       slug,
       name: brand,
@@ -499,9 +597,9 @@ export async function seedChainLocations(
       category: "restaurant",
       chain_parent_id: parentId,
       // geocode-fix — persist pin quality so admin shows Confirmed/Approx/Missing.
-      geo_precision: c.geoPrecision,
-      geo_confidence: c.geoConfidence,
-      geo_source: c.geoSource,
+      geo_precision: seedGeo.geo_precision,
+      geo_confidence: seedGeo.geo_confidence,
+      geo_source: seedGeo.geo_source,
     };
     if (located && c.country_code) insertRow.country_code = c.country_code;
     // Provenance — every pin traces back to the page it was read from (§3.4).

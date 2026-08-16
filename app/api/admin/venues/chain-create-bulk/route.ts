@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { checkDuplicate } from "@/lib/venues/dedupe-server";
-import { seedChainLocations, resolvePhantomFlagship, type SeedLocation } from "@/lib/admin/chain-seed";
+import { seedChainLocations, resolvePhantomFlagship, addressHasStreet, type SeedLocation } from "@/lib/admin/chain-seed";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
-import { geocodeStructured } from "@/lib/geo/geocode";
-import { canonicalCountry } from "@/lib/constants/countries";
+import { geocodeStructured, coherentGeoConfidence, flagshipUnlocatable } from "@/lib/geo/geocode";
+import { canonicalCountry, resolveCountryCode } from "@/lib/constants/countries";
 import { uniqueRestaurantSlug, resolveOrCreateBrand } from "@/lib/admin/venues";
 import { BBQ_STYLES } from "@/lib/constants/styles";
 import { auditField, auditCreated } from "@/lib/admin/content-audit";
@@ -114,7 +114,27 @@ export async function POST(request: Request) {
       youtube_url: result.youtube_url ?? null,
     });
     const geo = await geocodeStructured({ address: flag.address, city: flag.city, country: declaredCountry || country, name: brand });
-    const located = Boolean(geo.result);
+    // FLAGSHIP LOCATION GUARD (Fix 2b) — a flagship must be a real, located place.
+    // Refuse to plant one when it has NO street AND its only geocode landed in a
+    // country that disagrees with the brand (the Home Team → Myanmar phantom from a
+    // bare IG-handle geocode). Held pending + flagged, never a live/pending pin.
+    const declaredCode = resolveCountryCode(null, declaredCountry || country || null);
+    const geoCode = geo.result?.country_code ?? null;
+    const unlocatableFlagship = flagshipUnlocatable({
+      hasStreet: addressHasStreet(flag.address, flag.city),
+      declaredCountryCode: declaredCode,
+      geoCountryCode: geoCode,
+    });
+    // A real pin only when we located it AND the flagship guard didn't reject it.
+    const located = Boolean(geo.result) && !unlocatableFlagship;
+    const flagLat = located ? geo.result!.lat : null;
+    const flagLng = located ? geo.result!.lng : null;
+    // GEO HONESTY (Fix 3) — pin-quality trio co-set with the coordinate, or null.
+    const flagGeo = coherentGeoConfidence(flagLat, flagLng, {
+      geo_precision: geo.precision,
+      geo_confidence: geo.confidence,
+      geo_source: geo.source,
+    });
     const style = result.style && (BBQ_STYLES as readonly string[]).includes(result.style) ? result.style : "other";
     const slug = await uniqueRestaurantSlug(ctx.db, `${brand} ${flag.city ?? "flagship"}`);
     const { data: created, error: insErr } = await ctx.db
@@ -125,16 +145,16 @@ export async function POST(request: Request) {
         location_label: flag.location_label ?? null,
         description: `${brand} — barbecue${flag.city ? ` in ${flag.city}` : ""}.`,
         style,
-        lat: located ? geo.result!.lat : null,
-        lng: located ? geo.result!.lng : null,
+        lat: flagLat,
+        lng: flagLng,
         address: flag.address ?? null,
         city: flag.city ?? null,
         country: declaredCountry || country,
         country_code: located ? geo.result!.country_code : null,
         // geocode-fix — persist pin quality (Confirmed/Approx/Missing in admin).
-        geo_precision: geo.precision,
-        geo_confidence: geo.confidence,
-        geo_source: geo.source,
+        geo_precision: flagGeo.geo_precision,
+        geo_confidence: flagGeo.geo_confidence,
+        geo_source: flagGeo.geo_source,
         website: result.website ?? null,
         instagram_url: result.instagram_url ?? null,
         x_url: result.x_url ?? null,
@@ -152,9 +172,11 @@ export async function POST(request: Request) {
         flagship_unset: false,
         chain_rostered_at: new Date().toISOString(),
         needs_attention: !located,
-        attention_reason: !located
-          ? geo.reason ?? "Couldn't locate — check address / set pin manually"
-          : null,
+        attention_reason: unlocatableFlagship
+          ? "handle geocode only — no street address; country mismatch"
+          : !located
+            ? geo.reason ?? "Couldn't locate — check address / set pin manually"
+            : null,
         dossier: { is_chain: true, discovery_source_type: "bulk", flagship_reason: fp?.reason ?? "first location listed" },
       })
       .select("id")
