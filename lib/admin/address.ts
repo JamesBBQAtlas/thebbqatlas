@@ -20,6 +20,21 @@ export function foldDiacritics(s: string): string {
 }
 
 /**
+ * Clean a raw address string for parsing/geocoding (A5 parse-robustness). Un-glues
+ * an abbreviation period stuck to the next word \u2014 "510 Hull St.San Marcos" \u2192
+ * "510 Hull St. San Marcos", "Ave.North" \u2192 "Ave. North" \u2014 so the address geocodes
+ * to the right pin and splits street-from-city correctly instead of manufacturing
+ * a "Marcos" city and a Gulf-of-Mexico pin. Conservative: only a letter + "." +
+ * an upper-case letter (an abbreviation boundary), never a decimal or "St. Louis"
+ * that already has its space.
+ */
+export function cleanAddress(addr: string | null | undefined): string {
+  const s = clean(addr);
+  if (!s) return "";
+  return s.replace(/([A-Za-z])\.([A-Z])/g, "$1. $2");
+}
+
+/**
  * Build a full address from dossier parts, skipping any token already present
  * in what we've accumulated (so a street that already contains the city/zip
  * isn't doubled up). Produces e.g. "3002 W 47th Ave, Kansas City, KS 66103".
@@ -428,7 +443,9 @@ const BUILDING_NO = /^\d+[a-z]?$/;
  * "107 Plutarco Elías Calles" — all normalise to one key. Empty when unusable.
  */
 export function normStreet(addr: string | null | undefined): string {
-  const first = foldDiacritics(clean(addr)).split(",")[0] ?? "";
+  // Clean the address FIRST (un-glue "St.San" → "St. San") so a glued abbreviation
+  // never fuses the street type onto the city inside the dedupe key (A5).
+  const first = foldDiacritics(cleanAddress(addr)).split(",")[0] ?? "";
   let s = first.toLowerCase();
   // Drop suite/unit/apt designators AND their number FIRST, so a suite number is
   // never mistaken for the building number when we reorder below.

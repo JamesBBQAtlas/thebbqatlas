@@ -381,9 +381,13 @@ export function visibleText(html: string): string {
   return $("body").text() || $.root().text();
 }
 
-/** Extract addresses straight from an HTML page's visible text (Part 4A). */
+/** Extract addresses straight from an HTML page's visible text (Part 4A). Un-glues
+ *  an abbreviation period stuck to the next word ("St.San" → "St. San") first — a
+ *  glued period otherwise fuses the street type onto the city and yields a wrong
+ *  pin (A5). Newlines are preserved so the multi-line block joiner still works. */
 export function parseVisibleText(html: string, sourceUrl: string | null = null): RawCandidate[] {
-  return extractAddressesFromText(visibleText(html), sourceUrl);
+  const text = visibleText(html).replace(/([A-Za-z])\.([A-Z])/g, "$1. $2");
+  return extractAddressesFromText(text, sourceUrl);
 }
 
 // Words that mark a candidate's address as a SCRAPED BLOB (hours / nav / marketing

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { checkDuplicate } from "@/lib/venues/dedupe-server";
-import { seedChainLocations, type SeedLocation } from "@/lib/admin/chain-seed";
+import { seedChainLocations, resolvePhantomFlagship, type SeedLocation } from "@/lib/admin/chain-seed";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
 import { geocodeStructured } from "@/lib/geo/geocode";
 import { canonicalCountry } from "@/lib/constants/countries";
@@ -174,6 +174,11 @@ export async function POST(request: Request) {
 
   // ── 3. Seed the rest under the parent — dedupes/links, never duplicates ──
   const seedResult = await seedChainLocations(ctx.db, parentId, brand, country, seedLocs);
+
+  // A4 — if the parent we're rostering under turned out to be an address-less seed
+  // (e.g. an existing handle-only row we matched into), absorb the best real branch
+  // so we never leave a phantom flagship. No-op when the parent has a real street.
+  await resolvePhantomFlagship(ctx.db, parentId, locations[0]?.city ?? null);
 
   // ── 4. discovery_debug + is_chain on the parent (same trail as single path) ──
   const { data: parentNow } = await ctx.db

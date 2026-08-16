@@ -5,7 +5,7 @@ import { resolveChainSite } from "@/lib/ai/enrich";
 import { grokCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage } from "@/lib/ai/usage-log";
 import { auditField } from "@/lib/admin/content-audit";
-import { seedChainLocations } from "@/lib/admin/chain-seed";
+import { seedChainLocations, resolvePhantomFlagship } from "@/lib/admin/chain-seed";
 import { discoverChainLocations } from "@/lib/chains/discoverLocations";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
 import { hasStreetAddress } from "@/lib/admin/chain-discovery/normalize";
@@ -280,6 +280,20 @@ export async function POST(request: Request) {
     else suggestedFlagship = { label: fl.location_label, city: fl.city, reason: flagshipPick.reason };
   }
 
+  // Part 2 (A4) — if the origin seed carried NO street of its own (a handle-only
+  // IG seed), don't leave it as an address-less phantom flagship above the real
+  // branches (N+1 rows). Absorb the best real branch into the seed row (keeps its
+  // id/slug) and drop the duplicate — N real locations ⇒ N records. A no-op when
+  // the parent already has a real street, so a normal chain is never disturbed.
+  const phantomCityHint =
+    (row.city as string | null) ??
+    (flagshipPick ? discovery.locations[flagshipPick.index].city : null);
+  const phantom = await resolvePhantomFlagship(ctx.db, restaurantId, phantomCityHint);
+  if (phantom.absorbed) {
+    flagshipCrowned = true; // the seed row is now a real flagship
+    suggestedFlagship = null; // no re-parent suggestion needed — it's crowned
+  }
+
   // Truthful, DISTINCT counts (FAIL 2): a duplicate is now LINKED, not counted as
   // "new"; the real roster size is new + linked + updated-in-place + the parent.
   const alreadyPresent = result.updated.length + result.matchedParent;
@@ -336,6 +350,9 @@ export async function POST(request: Request) {
         // number-position / colonia variants of one address) — recorded, not
         // silently dropped, so the roster shows its dedupe working (A3).
         merged_variants: discovery.mergedAway.slice(0, 40),
+        // A4 — whether an address-less seed was absorbed into a real branch to
+        // avoid a phantom flagship (N real ⇒ N records).
+        phantom_flagship_absorbed: phantom.absorbed,
         counts: {
           distinct: distinctRostered,
           added: result.added.length,

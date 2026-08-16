@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
-import { composeAddress, normStreet, normCity, settlementCity } from "@/lib/admin/address";
+import { composeAddress, normStreet, normCity, settlementCity, cleanAddress } from "@/lib/admin/address";
 import { canonicalCountry, resolveCountryCode } from "@/lib/constants/countries";
 import { geocodeStructured, GEOCODE_COARSE_REASON } from "@/lib/geo/geocode";
 import { haversineKm } from "@/lib/utils/geo";
@@ -158,6 +158,10 @@ export async function seedChainLocations(
   const found = locations.length;
   const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0, decisions: [] };
   if (!found) return result;
+  // A5 parse-robustness — clean every incoming address (un-glue "St.San" →
+  // "St. San") BEFORE geocoding and dedupe, so a glued abbreviation can't push the
+  // pin into the Gulf or fuse the street type onto the city (the Black's twin).
+  locations = locations.map((l) => ({ ...l, address: l.address ? cleanAddress(l.address) : l.address }));
   const note = (address: string, decision: string, reason?: string) =>
     result.decisions.push({ address, decision, ...(reason ? { reason } : {}) });
 
@@ -535,4 +539,96 @@ export async function seedChainLocations(
   }
 
   return result;
+}
+
+/** A discovered branch that could be promoted to flagship. */
+export interface AbsorbCandidate {
+  id: string;
+  address: string | null;
+  city: string | null;
+  location_label: string | null;
+  lat: number | null;
+  lng: number | null;
+}
+
+/**
+ * Choose which discovered branch becomes the flagship when the origin seed has no
+ * street of its own (A4). Prefers a branch that carries a REAL street in the
+ * seed's own city (the `cityHint`), else the first branch with a real street.
+ * Returns null when no branch has a distinct street (a genuinely address-less
+ * chain — left for a human, never force-promoted). Pure — unit-tested.
+ */
+export function chooseAbsorbTarget(
+  children: AbsorbCandidate[],
+  cityHint: string | null
+): AbsorbCandidate | null {
+  const withStreet = children.filter((c) => hasDistinctStreet(normStreet(c.address), cityKeyOf(c.city)));
+  if (!withStreet.length) return null;
+  if (cityHint) {
+    const hintKey = cityKeyOf(cityHint);
+    const inCity = withStreet.find((c) => cityKeyOf(c.city) === hintKey);
+    if (inCity) return inCity;
+  }
+  return withStreet[0];
+}
+
+/**
+ * A4 phantom-seed fix. A handle-only IG seed (no street of its own) would be left
+ * as an address-less "flagship-not-set" row ON TOP of the real branches — N+1 rows
+ * for an N-location chain (the Bain BBQ shape). Instead, absorb the best real
+ * branch INTO the parent (the parent keeps its id/slug, so nothing is orphaned)
+ * and delete that now-duplicate branch. Result: N rows, one real flagship, no
+ * address-less phantom. Idempotent — a parent that already has a real street is
+ * left untouched, so a normal chain is never disturbed.
+ */
+export async function resolvePhantomFlagship(
+  db: SupabaseClient,
+  parentId: string,
+  cityHint: string | null
+): Promise<{ absorbed: boolean; promotedId?: string; promotedLabel?: string | null }> {
+  const { data: parent } = await db
+    .from("restaurants")
+    .select("id, address, city")
+    .eq("id", parentId)
+    .single();
+  if (!parent) return { absorbed: false };
+  const p = parent as { address: string | null; city: string | null };
+  // Parent already has a real street → not a phantom; nothing to do.
+  if (hasDistinctStreet(normStreet(p.address), cityKeyOf(p.city))) return { absorbed: false };
+
+  const { data: kids } = await db
+    .from("restaurants")
+    .select("id, address, city, location_label, lat, lng, country, country_code, geo_precision, geo_confidence, geo_source")
+    .eq("chain_parent_id", parentId);
+  const children = (kids ?? []) as (AbsorbCandidate & {
+    country: string | null; country_code: string | null;
+    geo_precision: string | null; geo_confidence: number | null; geo_source: string | null;
+  })[];
+  const target = chooseAbsorbTarget(children, cityHint);
+  if (!target) return { absorbed: false }; // no real branch to promote — leave for a human
+
+  const full = children.find((c) => c.id === target.id)!;
+  // Copy the branch's location facts onto the parent (keeping its id/slug/name),
+  // making it a real flagship. location_label → null (a flagship isn't a branch).
+  await db.from("restaurants").update({
+    address: full.address,
+    city: full.city,
+    lat: full.lat,
+    lng: full.lng,
+    country: full.country,
+    country_code: full.country_code,
+    geo_precision: full.geo_precision,
+    geo_confidence: full.geo_confidence,
+    geo_source: full.geo_source,
+    location_label: null,
+    flagship_unset: false,
+    needs_attention: false,
+    attention_reason: null,
+  }).eq("id", parentId);
+  // Remove the now-duplicate branch (freshly created this run — no inbound refs).
+  await db.from("restaurants").delete().eq("id", target.id);
+  await auditField(db, parentId, "flagship", null,
+    { promoted_from_seed: target.id, address: full.address },
+    { source: "roster", changedBy: null, note: "address-less seed absorbed the best branch — no phantom flagship" });
+  return { absorbed: true, promotedId: target.id, promotedLabel: full.location_label };
 }
