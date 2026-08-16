@@ -2,7 +2,7 @@ import "server-only";
 import { GROK_ENABLED } from "@/lib/ai/grok";
 import { discoverChain as webDiscover, type VenueLead } from "@/lib/ai/enrich";
 import { discoverChain as crawlDiscover } from "@/lib/admin/chain-discovery/engine";
-import { streetKey } from "@/lib/admin/chain-discovery/normalize";
+import { normStreet, normCity } from "@/lib/admin/address";
 import { Crawler } from "@/lib/admin/chain-discovery/fetch";
 import { grokCost, round4 } from "@/lib/ai/cost";
 
@@ -72,12 +72,28 @@ export interface DiscoverOutcome {
   cost: number;
   ranWeb: boolean;
   ranCrawl: boolean;
+  /** Format-variant duplicates collapsed by the union dedupe (A3 — honest debug). */
+  mergedAway: MergeRecord[];
 }
 
-/** Stable dedupe key: leading street token + city, lower-cased. */
+/**
+ * Stable dedupe key = normalised (number + street) + normalised city, via the ONE
+ * shared normalizer (normStreet/normCity). Diacritic-, number-position- and
+ * abbreviation-agnostic, so every format variant of one physical address collapses
+ * to a single key (the Old Jimmy's fix). Colonia-tolerant: the sub-locality lives
+ * past the first comma and never enters the street key.
+ */
 export function locationKey(l: { address: string | null; city: string | null }): string {
-  const lead = (l.address ?? "").split(",")[0] ?? "";
-  return `${streetKey(lead) || lead.trim().toLowerCase()}|${(l.city ?? "").trim().toLowerCase()}`;
+  const street = normStreet(l.address) || foldStreetFallback(l.address);
+  return `${street}|${normCity(l.city)}`;
+}
+
+/** Fallback street text when normStreet finds no usable street (keeps a stable,
+ *  diacritic-folded key rather than an empty one). */
+function foldStreetFallback(address: string | null): string {
+  return ((address ?? "").split(",")[0] ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .trim().toLowerCase();
 }
 
 /** True when a location carries a real street line (a building number + words). */
@@ -96,7 +112,29 @@ export function mergeDiscovered(
   primary: DiscoveredLocation[],
   secondary: DiscoveredLocation[]
 ): DiscoveredLocation[] {
+  return mergeDiscoveredTraced(primary, secondary).locations;
+}
+
+/** A collapsed duplicate: the address that was folded away and the address it
+ *  was folded INTO — recorded in discovery_debug so the roster shows its working. */
+export interface MergeRecord {
+  merged: string;
+  into: string;
+  key: string;
+}
+
+/**
+ * Union two discovered lists, deduped by street+city, AND report what collapsed.
+ * `mergeDiscovered` returns just the locations (back-compat); this variant also
+ * returns a `merged` trail (A3 "be honest" — every dedupe is recorded, never a
+ * silent drop). Pure — unit-tested.
+ */
+export function mergeDiscoveredTraced(
+  primary: DiscoveredLocation[],
+  secondary: DiscoveredLocation[]
+): { locations: DiscoveredLocation[]; merged: MergeRecord[] } {
   const byKey = new Map<string, DiscoveredLocation>();
+  const merged: MergeRecord[] = [];
   const add = (l: DiscoveredLocation) => {
     if (!hasStreet(l)) return; // never roster a location with no street
     const key = locationKey(l);
@@ -104,6 +142,10 @@ export function mergeDiscovered(
     if (!existing) {
       byKey.set(key, { ...l });
       return;
+    }
+    // A duplicate of one we already kept — record it, then fold its fields in.
+    if (l.address && existing.address && l.address !== existing.address) {
+      merged.push({ merged: l.address, into: existing.address, key });
     }
     // Merge: keep existing, fill any null string field from the incoming one.
     for (const f of ["name", "location_label", "address", "city", "region", "postcode", "country", "phone", "instagram_url", "source_url"] as const) {
@@ -115,7 +157,7 @@ export function mergeDiscovered(
   };
   for (const l of primary) add(l);
   for (const l of secondary) add(l);
-  return [...byKey.values()];
+  return { locations: [...byKey.values()], merged };
 }
 
 /** The web-discovery signature — the real one is Grok; tests inject a fake. */
@@ -185,8 +227,9 @@ export async function discoverChainLocations(opts: {
     found_via: "web",
   }));
 
-  // Web is the bulk tool's reference → listed first; the crawl unions in.
-  const locations = mergeDiscovered(webLocs, crawlLocs);
+  // Web is the bulk tool's reference → listed first; the crawl unions in. The
+  // traced form also records which format-variants collapsed (A3 — honest debug).
+  const { locations, merged: mergedAway } = mergeDiscoveredTraced(webLocs, crawlLocs);
 
   const sourceTypes: string[] = [];
   if (crawl && crawl.sourceType !== "none" && crawlLocs.length) sourceTypes.push(`crawl:${crawl.sourceType}`);
@@ -238,5 +281,6 @@ export async function discoverChainLocations(opts: {
     cost,
     ranWeb: Boolean(web),
     ranCrawl: Boolean(crawl),
+    mergedAway,
   };
 }

@@ -10,6 +10,16 @@ const clean = (v: string | null | undefined): string =>
   typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "";
 
 /**
+ * Fold accents / diacritics to ASCII so the SAME place matches however it's
+ * accented: "Elías" → "Elias", "García" → "Garcia", "São" → "Sao", "ñ" → "n".
+ * Used by every identity normalizer below, so a diacritic-only spelling variant
+ * (the Old Jimmy's dupe) can never split one physical location into two records.
+ */
+export function foldDiacritics(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+/**
  * Build a full address from dossier parts, skipping any token already present
  * in what we've accumulated (so a street that already contains the city/zip
  * isn't doubled up). Produces e.g. "3002 W 47th Ave, Kansas City, KS 66103".
@@ -388,45 +398,48 @@ export function preferFullerAddress(
   return addressScore(f) >= addressScore(e) ? f : e;
 }
 
+// Street-type + directional + common non-English street-type words, each folded
+// to ONE canonical token so the same road matches however it's written/accented.
+const STREET_ABBR: Record<string, string> = {
+  avenue: "ave", street: "st", road: "rd", boulevard: "blvd", drive: "dr",
+  lane: "ln", court: "ct", place: "pl", parkway: "pkwy", highway: "hwy",
+  freeway: "fwy", terrace: "ter", square: "sq", crescent: "cres",
+  north: "n", south: "s", east: "e", west: "w",
+  northeast: "ne", northwest: "nw", southeast: "se", southwest: "sw",
+  // Non-English street-type words (folded to a stable token; applied to BOTH
+  // sides of every comparison, so it can only ever help a match, never split one).
+  calle: "c", avenida: "av", carrera: "cra", carretera: "ctra",
+  strasse: "str", rua: "r", viale: "via",
+};
+
+// A pure building-number token: digits with at most one trailing letter ("107",
+// "107a"). Deliberately NOT an ordinal in a street name ("47th", "1st" carry two
+// trailing letters), so those stay in the street name where they belong.
+const BUILDING_NO = /^\d+[a-z]?$/;
+
 /**
- * Normalise a STREET address to an identity key: take the portion before the
- * first comma (the street line), lowercase, strip punctuation, collapse
- * whitespace, and standardise the common US street-type abbreviations so
- * "3002 W 47th Ave" == "3002 W 47th Avenue". Empty string if nothing usable.
+ * Normalise a STREET address to an identity key. Takes the portion before the
+ * first comma (the street line — so a trailing colonia/sub-locality/city never
+ * pollutes it), folds diacritics, lowercases, strips punctuation + suite/unit
+ * designators, and standardises street-type abbreviations. Crucially it is
+ * **number-position agnostic**: a building number may lead (US "107 Main St") or
+ * trail (MX/EU "Main St 107"); both yield the SAME key. So the three Old Jimmy's
+ * variants — "Plutarco Elías Calles 107", "Plutarco Elias Calles 107",
+ * "107 Plutarco Elías Calles" — all normalise to one key. Empty when unusable.
  */
 export function normStreet(addr: string | null | undefined): string {
-  const first = clean(addr).split(",")[0] ?? "";
-  let s = first
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const first = foldDiacritics(clean(addr)).split(",")[0] ?? "";
+  let s = first.toLowerCase();
+  // Drop suite/unit/apt designators AND their number FIRST, so a suite number is
+  // never mistaken for the building number when we reorder below.
+  s = s.replace(/\b(suite|ste|unit|apt|apartment|no|#)\s*#?\s*[\w-]+/g, " ");
+  s = s.replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
   if (!s) return "";
-  const abbr: Record<string, string> = {
-    avenue: "ave",
-    street: "st",
-    road: "rd",
-    boulevard: "blvd",
-    drive: "dr",
-    lane: "ln",
-    court: "ct",
-    place: "pl",
-    parkway: "pkwy",
-    highway: "hwy",
-    north: "n",
-    south: "s",
-    east: "e",
-    west: "w",
-    northeast: "ne",
-    northwest: "nw",
-    southeast: "se",
-    southwest: "sw",
-  };
-  s = s
-    .split(" ")
-    .map((w) => abbr[w] ?? w)
-    .join(" ");
-  return s;
+  const tokens = s.split(" ").map((w) => STREET_ABBR[w] ?? w);
+  // Pull the building number(s) to the front so "107 Main St" == "Main St 107".
+  const nums = tokens.filter((t) => BUILDING_NO.test(t)).sort();
+  const words = tokens.filter((t) => !BUILDING_NO.test(t));
+  return [...nums, ...words].join(" ").trim();
 }
 
 /**
@@ -435,7 +448,9 @@ export function normStreet(addr: string | null | undefined): string {
  * punctuation, collapse whitespace. "Olathe, KS" and "Olathe" both → "olathe".
  */
 export function normCity(city: string | null | undefined): string {
-  let s = clean(city).toLowerCase();
+  // Fold diacritics first, so "San Pedro Garza García" == "San Pedro Garza
+  // Garcia" (the Old Jimmy's city variant) instead of the accent splitting them.
+  let s = foldDiacritics(clean(city)).toLowerCase();
   if (!s) return "";
   s = s
     .replace(/,?\s*(united states|usa|u\.s\.a\.|u\.s\.)\s*$/i, "")

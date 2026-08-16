@@ -4,6 +4,7 @@
  * location, and decides whether a candidate has a REAL street address — the
  * non-negotiable gate that stops the engine from ever inventing a branch.
  */
+import { normStreet } from "@/lib/admin/address";
 
 export interface RawCandidate {
   location_label?: string | null;
@@ -93,21 +94,14 @@ export function normalize(c: RawCandidate, defaultCountry: string | null): Norma
   };
 }
 
-/** Normalised street key for dedupe: lowercased, punctuation-stripped, common
- *  abbreviations folded so "123 Main St" == "123 main street". */
+/**
+ * Normalised street key for dedupe. Delegates to the ONE shared street
+ * normalizer (`normStreet` in lib/admin/address) so the crawl engine's internal
+ * dedupe, the roster union dedupe, the chain reconcile, and the single-venue
+ * dedupe can never diverge on how an address is keyed (diacritics, number
+ * position, abbreviations) — divergent copies are exactly how the Old Jimmy's
+ * triple-duplicate slipped through.
+ */
 export function streetKey(street: string | null | undefined): string {
-  let s = (street ?? "").toLowerCase();
-  if (!s) return "";
-  s = s
-    // Drop suite/unit/apt designators AND their number (before stripping punctuation).
-    .replace(/\b(suite|ste|unit|apt|apartment|no|#)\s*#?\s*[\w-]+/g, " ")
-    .replace(/[.,#]/g, " ")
-    .replace(/\bstreet\b/g, "st")
-    .replace(/\bavenue\b/g, "ave")
-    .replace(/\bboulevard\b/g, "blvd")
-    .replace(/\broad\b/g, "rd")
-    .replace(/\bdrive\b/g, "dr")
-    .replace(/\s+/g, " ")
-    .trim();
-  return s;
+  return normStreet(street);
 }

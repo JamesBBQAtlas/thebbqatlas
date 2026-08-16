@@ -332,6 +332,10 @@ export async function POST(request: Request) {
           web: discovery.locations.filter((l) => l.found_via === "web").length,
           both: discovery.locations.filter((l) => l.found_via === "both").length,
         },
+        // Format-variant duplicates the union dedupe collapsed (diacritic /
+        // number-position / colonia variants of one address) — recorded, not
+        // silently dropped, so the roster shows its dedupe working (A3).
+        merged_variants: discovery.mergedAway.slice(0, 40),
         counts: {
           distinct: distinctRostered,
           added: result.added.length,
