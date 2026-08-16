@@ -24,7 +24,7 @@ import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { geocodeStructured, GEOCODE_COARSE_REASON, GEOCODE_APPROX_REASON } from "@/lib/geo/geocode";
 import { shouldKeepLockedPin } from "@/lib/geo/pin-lock";
 import { COST_PER_CHAIN_VENUE_CEILING } from "@/lib/constants/enrichment-cost";
-import { canonicalCountry } from "@/lib/constants/countries";
+import { canonicalCountry, isRecognizedCountry } from "@/lib/constants/countries";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { normalizeHandle } from "@/lib/admin/seed-import";
 import { looksLikeSeedStub } from "@/lib/admin/seed-copy";
@@ -642,8 +642,11 @@ export async function POST(request: Request) {
   const storedCity = bestSettlement({ city, address, geoCity });
   if (storedCity) proposed.city = storedCity;
   // Canonical country name (one chip per country; stops the USA/United States,
-  // Mexico/México split re-appearing as we enrich).
+  // Mexico/México, MX/Mexico, Deutschland/Germany splits re-appearing as we
+  // enrich). An UNRECOGNISED value (or the ambiguous "Georgia") keeps its raw
+  // text but flags the row for review below — never silently stored as junk.
   if (country) proposed.country = canonicalCountry(country);
+  const countryUnrecognized = Boolean(country) && !isRecognizedCountry(country);
 
   // Part 5 — item TYPE (category). Enrichment CLASSIFIES the type from the
   // dossier; the value is a PROPOSAL. A hand-set category (manual_category) is
@@ -748,6 +751,7 @@ export async function POST(request: Request) {
     categoryUnclear ||
     factConflicts.length > 0 ||
     nonLatin ||
+    countryUnrecognized ||
     (effectivelySibling ? locationFactsMissing : copy.needs_attention);
   metadata.needs_attention = attention;
   metadata.attention_reason = attention
@@ -773,6 +777,8 @@ export async function POST(request: Request) {
             ? describeConflicts(factConflicts)
             : nonLatin
               ? `${nonLatinFields.join(", ")} still in non-Latin script — add an English/romanised form before publishing.`
+              : countryUnrecognized
+                ? `Country "${country}" not recognised — verify and set the canonical country (note: "Georgia" is both a country and a US state).`
               : effectivelySibling
                 ? "This outpost's own location facts (address/hours) are missing — add them, then re-enrich."
                 : copy.attention_reason ?? "Dossier too thin to write an honest page — needs more research or manual facts."

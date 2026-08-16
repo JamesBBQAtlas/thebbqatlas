@@ -15,6 +15,7 @@
     "test:chain-part4": "tsx scripts/test-chain-part4.mts",
     "test:chain-roster": "tsx scripts/test-chain-roster-fix.mts",
     "test:chain-dedupe": "tsx scripts/test-chain-dedupe.mts",
+    "test:country": "tsx scripts/test-country-normalize.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
     "test:geocode": "tsx scripts/test-geocode-precision.mts",
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",

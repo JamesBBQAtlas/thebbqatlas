@@ -3,6 +3,7 @@ import { uniqueRestaurantSlug } from "./venues";
 import { loadExistingVenues } from "@/lib/venues/dedupe-server";
 import { findDuplicates, normName, type VenueLike } from "@/lib/venues/dedupe";
 import { normCity, settlementCity } from "@/lib/admin/address";
+import { canonicalCountry } from "@/lib/constants/countries";
 import { auditCreated } from "@/lib/admin/content-audit";
 
 /**
@@ -155,7 +156,7 @@ export async function importSeedRows(
       // Store the settlement, not the admin district ("City of Westminster" →
       // London), so imported seeds group correctly from the start (Fix C).
       city: settlementCity(cell(row, iCity)),
-      country: cell(row, iCountry),
+      country: canonicalCountry(cell(row, iCountry)),
       website: cell(row, iWebsite) || null,
       hero_post_url: isInstagramPost(heroRaw) ? heroRaw : null,
     });

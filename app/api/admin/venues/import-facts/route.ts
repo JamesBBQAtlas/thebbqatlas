@@ -11,6 +11,7 @@ import {
   mapSocials,
 } from "@/lib/ai/enrich";
 import { bestSettlement } from "@/lib/admin/address";
+import { canonicalCountry } from "@/lib/constants/countries";
 import { claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { auditCreated } from "@/lib/admin/content-audit";
@@ -134,7 +135,7 @@ async function processRow(
       if (country_code) patch.country_code = country_code;
     }
     if (city) patch.city = city;
-    if (dossier.country) patch.country = dossier.country;
+    if (dossier.country) patch.country = canonicalCountry(dossier.country);
     await db.from("restaurants").update(patch).eq("id", existing.id);
     return { created: false, attention: copy.needs_attention };
   }
@@ -150,7 +151,7 @@ async function processRow(
     lng: lng ?? 0,
     address: address || "",
     city: city || "",
-    country: dossier.country || "",
+    country: canonicalCountry(dossier.country) || "",
     country_code,
     website: dossier.website,
     phone: dossier.phone,
