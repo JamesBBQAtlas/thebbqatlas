@@ -2,7 +2,7 @@
  * (BUILDPROMPTCHAINROSTERCONSOLIDATED). Pure + network-free.
  * Run: node_modules/.bin/tsx scripts/test-chain-parse-phantom.mts
  */
-import { cleanAddress, normStreet } from "../lib/admin/address";
+import { cleanAddress, normStreet, normCity } from "../lib/admin/address";
 import { extractAddressesFromText, parseVisibleText } from "../lib/admin/chain-discovery/parse";
 import { chooseAbsorbTarget, type AbsorbCandidate } from "../lib/admin/chain-seed";
 
@@ -78,6 +78,41 @@ console.log("\n[A6] over-collapse guard — genuine repeats are NEVER damaged");
   ok("distinct suites at one street are not merged",
     cleanAddress("100 Main St, Suite 1") === "100 Main St, Suite 1" &&
     cleanAddress("100 Main St, Suite 2") === "100 Main St, Suite 2");
+}
+
+// ── A7 (Sugarfire) — phone glued to street number + Saint-prefix city split ───
+console.log("\n[A7] phone glued to the street number is stripped");
+{
+  ok("724-7601 + 3150 → 3150…", cleanAddress("724-76013150 Elm Point Ind. Dr., St. Charles").startsWith("3150 Elm Point"), cleanAddress("724-76013150 Elm Point Ind. Dr., St. Charles"));
+  ok("265-1234 + 1541 → 1541…", cleanAddress("265-12341541 Bryan Rd, Dardenne Prairie") === "1541 Bryan Rd, Dardenne Prairie");
+  ok("keys identically to the clean twin", normStreet("797-8487605 Washington Ave. St., Louis") === normStreet("605 Washington Ave., St. Louis"));
+  // Conservative — a normal address is never stripped of digits.
+  ok("normal '3150 Elm Point Dr' untouched", cleanAddress("3150 Elm Point Dr") === "3150 Elm Point Dr");
+  ok("hyphenated building '100-200 Main St' untouched", cleanAddress("100-200 Main St") === "100-200 Main St");
+  ok("'12-14 Oak Ave' untouched", cleanAddress("12-14 Oak Ave") === "12-14 Oak Ave");
+}
+
+console.log("\n[A7] a Saint-prefix city split back into the street is reunited");
+{
+  ok("'…Ave. St., Louis' → '…Ave., St. Louis'", cleanAddress("605 Washington Ave. St., Louis") === "605 Washington Ave., St. Louis");
+  ok("'…Dr. St., Charles' → '…Dr., St. Charles'", cleanAddress("3150 Elm Point Ind. Dr. St., Charles") === "3150 Elm Point Ind. Dr., St. Charles");
+  ok("Ste. reunited", cleanAddress("100 Elm Dr. Ste., Genevieve") === "100 Elm Dr., Ste. Genevieve");
+  ok("Mt. reunited", cleanAddress("200 Oak Blvd. Mt., Vernon") === "200 Oak Blvd., Mt. Vernon");
+  ok("Ft. reunited", cleanAddress("300 Pine Rd. Ft., Worth") === "300 Pine Rd., Ft. Worth");
+  // The A5 mirror must NOT regress: a real Street-"St." stays the street.
+  ok("Street-'St.' guard: '123 Main St., Springfield' unchanged", cleanAddress("123 Main St., Springfield") === "123 Main St., Springfield");
+  ok("Street-'St.' key: street '123 main st', city 'springfield'",
+    normStreet("123 Main St., Springfield") === normStreet("123 Main St") && normCity("Springfield") === "springfield");
+  ok("already-correct 'Ave., St. Louis' unchanged", cleanAddress("100 Park Ave., St. Louis") === "100 Park Ave., St. Louis");
+}
+
+console.log("\n[A7] all-caps folds in the dedupe key (LOUIS == Louis)");
+{
+  ok("caps street folds", normStreet("9200 OLIVE BLVD., ST. LOUIS") === normStreet("9200 Olive Blvd., St. Louis"));
+  ok("caps city folds", normCity("ST. LOUIS") === normCity("St. Louis") && normCity("WENTZVILLE") === normCity("Wentzville"));
+  // The full mangled Sugarfire twin (phone + Saint + caps) collapses on text.
+  ok("'997-23019200 OLIVE BLVD. ST., LOUIS' keys == clean row",
+    normStreet("997-23019200 OLIVE BLVD. ST., LOUIS") === normStreet("9200 Olive Blvd., St. Louis"));
 }
 
 // ── PART 2 (A4) — phantom seed: choose which branch becomes flagship ─────────

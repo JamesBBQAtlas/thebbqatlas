@@ -19,6 +19,52 @@ export function foldDiacritics(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+/**
+ * Strip a PHONE number glued to the front of the street number (Sugarfire bug 1):
+ * "724-76013150 Elm Point…" = phone 724-7601 + street 3150 Elm Point…. Conservative:
+ * the phone needs a real separator (so a plain long number isn't touched), must be
+ * followed IMMEDIATELY by more digits (the glued street number), and is only
+ * stripped when what remains still looks like a street (a building number + a word).
+ */
+function stripGluedPhone(s: string): string {
+  const m = s.match(/^(?:\d{3}[-.\s]\d{3}[-.\s]\d{4}|\d{3}[-.\s]\d{4})(?=\d)/);
+  if (!m) return s;
+  const rest = s.slice(m[0].length).trimStart();
+  return /^\d{1,6}\s+\S/.test(rest) ? rest : s;
+}
+
+// Street-type suffix tokens (a road's own type). Used to tell a SAINT "St." from a
+// STREET "St.": a street never carries two street-types, so a "St." right after
+// one of these is Saint, not Street.
+const STREET_TYPE_TOKEN = /^(?:ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|st|street|ct|court|pl|place|way|hwy|highway|pkwy|parkway|ter|terrace|cir|circle|sq|square|trl|trail|pike|row|cres|crescent|close|walk|parade)\.?$/i;
+const SAINT_PREFIX_TOKEN = /^(?:st|ste|mt|ft)\.?$/i;
+
+/**
+ * Reunite a Saint-prefix city split into the street (Sugarfire bug 2): the mirror
+ * of A5. "605 Washington Ave. St., Louis" put the comma AFTER the "St." so only
+ * "Louis" became the city; move the trailing Saint prefix across the comma to the
+ * city → "605 Washington Ave., St. Louis". Disambiguated by POSITION + the token
+ * before it: a trailing "St./Ste./Mt./Ft." is SAINT only when a street-type token
+ * precedes it (a street has one type, not two). So "123 Main St., Springfield"
+ * (St. = Street, preceded by the NAME "Main") is left exactly as it is.
+ */
+function reuniteSaintCity(s: string): string {
+  const ci = s.indexOf(",");
+  if (ci < 0) return s;
+  const street = s.slice(0, ci).trim();
+  const rest = s.slice(ci + 1).trim();
+  if (!rest) return s;
+  const stoks = street.split(/\s+/).filter(Boolean);
+  if (stoks.length < 2) return s;
+  const last = stoks[stoks.length - 1];
+  const prev = stoks[stoks.length - 2];
+  if (SAINT_PREFIX_TOKEN.test(last) && STREET_TYPE_TOKEN.test(prev)) {
+    const saint = last.replace(/\.?$/, "."); // normalise "St" → "St." (keep case)
+    return `${stoks.slice(0, -1).join(" ")}, ${saint} ${rest}`;
+  }
+  return s;
+}
+
 /** Return the single copy when `tokens` is an EXACT adjacent repeat [U, U]
  *  (case-insensitive), else null. The one entry point for doubled-scrape collapse. */
 function halveIfDoubled(tokens: string[]): string[] | null {
@@ -73,10 +119,12 @@ function collapseDoubledAddress(s: string): string {
  * New York" and "100 100th Ave" are all left exactly as they are.
  */
 export function cleanAddress(addr: string | null | undefined): string {
-  const s = clean(addr);
+  let s = clean(addr);
   if (!s) return "";
-  const deglued = s.replace(/([A-Za-z])\.([A-Z])/g, "$1. $2");
-  return collapseDoubledAddress(deglued);
+  s = stripGluedPhone(s);                              // bug 1: phone glued to the street number
+  s = s.replace(/([A-Za-z])\.([A-Z])/g, "$1. $2");     // A5: un-glue "St.San" → "St. San"
+  s = reuniteSaintCity(s);                             // bug 2: "Ave. St., Louis" → "Ave., St. Louis"
+  return collapseDoubledAddress(s);                    // Southside: fold an exact doubled run
 }
 
 /**

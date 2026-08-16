@@ -88,6 +88,17 @@ console.log("\n[A6] doubled-address twin dedupes to one");
   ok("clean row + doubled twin → ONE record", two.length === 1, two.map((m) => m.address));
 }
 
+// ── Sugarfire twin (phone-glued + Saint split) reconciles on the street key ──
+console.log("\n[A7] mangled Sugarfire twin shares the clean row's street key");
+{
+  // The scraped city is a fragment ("Louis"), so the union (which keys on the
+  // separate city field) keeps both — but the seed reconcile matches on the STREET
+  // key alone, which the phone-strip + Saint-reunite now make identical, so it
+  // collapses to one row there.
+  ok("phone/Saint twin street key == clean row street key",
+    normStreet("797-8487605 Washington Ave. St., Louis") === normStreet("605 Washington Ave., St. Louis"));
+}
+
 // ── Different cities never merge on street alone ────────────────────────────
 console.log("\n[A] same street text, different city → distinct");
 {
