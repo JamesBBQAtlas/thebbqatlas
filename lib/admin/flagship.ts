@@ -8,6 +8,7 @@ import {
   priceBandToLevel,
   mapSocials,
   writeVenueCopy,
+  openingStyleFor,
   type VenueDossier,
 } from "@/lib/ai/enrich";
 import { normalizeHandle } from "@/lib/admin/seed-import";
@@ -95,7 +96,7 @@ export async function populateFlagship(
   let copy: Awaited<ReturnType<typeof writeVenueCopy>> | null = null;
   try {
     // Part 4E — the flagship's brand copy is chain copy: use the stronger writer.
-    copy = await writeVenueCopy(dossier, { isFlagship: true, strong: true });
+    copy = await writeVenueCopy(dossier, { isFlagship: true, strong: true, openingStyle: openingStyleFor(flagshipId) });
   } catch {
     copy = null;
   }

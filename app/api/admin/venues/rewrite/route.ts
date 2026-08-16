@@ -5,6 +5,7 @@ import { CLAUDE_ENABLED } from "@/lib/ai/claude";
 import {
   writeVenueCopy,
   buildCopyPatch,
+  openingStyleFor,
   type VenueDossier,
 } from "@/lib/ai/enrich";
 import { claudeCost, round4 } from "@/lib/ai/cost";
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
 
   let copy;
   try {
-    copy = await writeVenueCopy(row.dossier as unknown as VenueDossier);
+    copy = await writeVenueCopy(row.dossier as unknown as VenueDossier, { openingStyle: openingStyleFor(restaurantId) });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Copywriting failed." },

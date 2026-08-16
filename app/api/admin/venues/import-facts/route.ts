@@ -5,6 +5,7 @@ import { GROK_ENABLED } from "@/lib/ai/grok";
 import { CLAUDE_ENABLED } from "@/lib/ai/claude";
 import {
   writeVenueCopy,
+  openingStyleFor,
   buildCopyPatch,
   classifyStyle,
   priceBandToLevel,
@@ -30,7 +31,8 @@ async function processRow(
 ): Promise<{ created: boolean; attention: boolean }> {
   const dossier = rowToDossier(row);
   const handle = factsHandle(row);
-  const copy = await writeVenueCopy(dossier); // Claude-only — Grok skipped
+  // Anti-sameness §3 — deterministic per-venue opening type (varies across imports).
+  const copy = await writeVenueCopy(dossier, { openingStyle: openingStyleFor(`${dossier.name ?? ""}|${dossier.city ?? handle ?? ""}`) }); // Claude-only — Grok skipped
 
   let lat = dossier.lat;
   let lng = dossier.lng;

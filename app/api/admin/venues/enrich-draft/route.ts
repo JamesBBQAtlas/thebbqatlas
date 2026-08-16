@@ -6,6 +6,7 @@ import {
   researchDossier,
   researchInstagram,
   writeVenueCopy,
+  openingStyleFor,
   inheritBrandFacts,
   mergeKnownFacts,
   describeConflicts,
@@ -404,9 +405,13 @@ export async function POST(request: Request) {
   // Part 4E — any chain-context venue (a branch, a confirmed flagship, or a
   // rostered/candidate parent) gets the STRONGER writer + higher token budget.
   const isChainContext = isSiblingRow || isConfirmedFlagship || chainCandidate || alreadyRostered;
-  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean; priorCopy?: string | null; strong?: boolean } = {
+  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean; priorCopy?: string | null; strong?: boolean; openingStyle?: number } = {
     alwaysWrite: true,
     strong: isChainContext,
+    // Anti-sameness §3 — rotate the opening TYPE. Build's batch can thread an
+    // explicit sequential index (body.openingStyle); otherwise it's derived
+    // deterministically per-venue so it varies and stays stable on re-enrich.
+    openingStyle: Number.isFinite(Number(body.openingStyle)) ? Number(body.openingStyle) : openingStyleFor(restaurantId),
   };
   // Part A — carry the facts the operator wrote into the existing copy through to
   // the new copy (whether it lands live or in pending_changes).

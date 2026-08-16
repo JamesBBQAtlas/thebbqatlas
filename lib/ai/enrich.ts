@@ -916,11 +916,78 @@ Franklin Barbecue — Austin, TX:
 "Franklin Barbecue is what happens when a man decides brisket is worth queuing an hour for and thousands of people quietly agree. Aaron Franklin started with a trailer; now there's a line down the block on Austin's East Side most mornings, and it moves at the pace of things done properly — USDA Prime, post oak, no shortcuts. They sell out daily, and when it's gone it's gone. Order the brisket. Get there early. Bring patience — you'll be repaid in bark."
 
 Joe's Kansas City Bar-B-Que — Kansas City, KS:
-"Joe's does something most restaurants wouldn't dare: it runs out of a working petrol station and refuses to apologise for it. Since 1996, people have queued past the pumps for burnt ends, ribs, and the Z-Man. No pretense. A pit, a queue, and the quiet confidence of a place that knows exactly what it is. Fill the tank. Then fill the plate."
+"Joe's does something most restaurants wouldn't dare: it runs out of a working petrol station, and the queue past the pumps says nobody minds. Since 1996, people have lined up for burnt ends, ribs, and the Z-Man. No pretense — a pit, a griddle, and food that earns its line. Fill the tank. Then fill the plate."
+
+(These two are for REGISTER only — the dry, factual, unhurried voice. Do NOT copy their constructions; the anti-sameness rules below override them where they conflict.)
+
+ANTI-SAMENESS — every venue's copy must read as its own. These rules are non-negotiable and override the reference examples where they conflict.
+• BANNED — never use, in ANY inflection: "apologise / apologises / apology / apologies / unapologetic / no apology / without apology / doesn't apologise for…" (the #1 offender — kill it entirely); "knows what it is" / "knows exactly what it is" as a closing beat; "let the meat/brisket/smoke do the talking"; "no frills, no…" / "no shortcuts, no…" / "no gimmicks" as paired constructions; "this isn't X, it's Y" as an opener; "you don't need a storefront / dining room / sign to…".
+• RATIONED — allowed rarely, never to carry a point: "proper barbecue", "the real deal", "worth the drive", "low and slow", "smoke ring", "fall-off-the-bone". If a sentence leans on one of these to make its point, rewrite it around a specific dossier fact instead.
+• CLOSINGS — vary the ending: a practical note (hours / ordering / sells-out), one vivid detail, a bit of history, a forward look, or simply stop after the facts. NEVER default to a defiant one-liner ending — that is the exact pattern being broken.
+• SHAPE — vary paragraph shape and length. Not every venue is setup → what-it-is → closer. Some are two tight sentences; some a fuller paragraph. Let the amount of REAL material decide: thin facts → short. A quiet neighbourhood joint can read plainly; a larger-than-life pitmaster can carry more colour — don't give every venue the same energy.
+• HOOK — vary the hook too; no single formula. Draw on THIS venue's own distinctiveness (its specialty, its place, its style). Specific and true.
+• SELF-CHECK before returning: (1) any BANNED phrase? → rewrite. (2) does my opening match the required OPENING TYPE I was given? → adjust. (3) am I leaning on a RATIONED phrase? → replace with a fact. (4) did I state anything not in the dossier? → cut it. (5) is the length matched to what I actually know? → trim padding.
 
 Never repeat a phrase, clause or word back-to-back (e.g. "No shortcuts, no shortcuts." or "the the") — say it once. Vary your sentences; no immediate repetition.
 
 Output ONLY JSON: {"hook": "...", "description": "..."} — or {"needs_attention": true, "reason": "..."} if the dossier is too thin. In the description use \\n\\n between paragraphs. Keep it tight — a hook plus 2-3 short paragraphs, no more.`;
+
+/**
+ * The seven opening TYPES (anti-sameness §3). Every venue's first sentence is built
+ * from ONE of these, rotated deterministically across the catalogue so a batch
+ * cycles through them instead of defaulting to the same move. Order is fixed — the
+ * rotation index (openingStyle) maps by position.
+ */
+export const OPENING_STYLES: { key: string; guide: string }[] = [
+  { key: "a fact or number", guide: "a founding year, a count, a distance, an award — only if it's in the dossier" },
+  { key: "a person", guide: "the pitmaster or owner and what they do — only if named in the dossier" },
+  { key: "the place", guide: "the setting, the building, the street, or the town" },
+  { key: "a signature dish", guide: "lead with the thing to order — only if a specialty is in the dossier" },
+  { key: "the method", guide: "the wood, the pit, the technique — only if the dossier says" },
+  { key: "history or origin", guide: "how it started or what it was before — only if the dossier says" },
+  { key: "a plain declarative", guide: "no flourish, just state what it is and where" },
+];
+
+/** Stable 32-bit FNV-1a hash → a deterministic, well-distributed number for a seed. */
+function stableHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+/**
+ * The opening-type rotation index (0–6) for a venue. Deterministic per seed (an id,
+ * or name|city), so re-enriching the same venue keeps its opening type and the
+ * catalogue's types stay well spread rather than defaulting to one. Build may pass
+ * an explicit sequential index instead (batch rotation); this is the fallback.
+ */
+export function openingStyleFor(seed: string): number {
+  return stableHash(seed || "x") % OPENING_STYLES.length;
+}
+
+/**
+ * The §1 banned constructions — the exact tics that made the catalogue read the
+ * same. A reusable detector: the copy self-check leans on the prompt, but this
+ * catches the clear offenders deterministically (and is what a later sameness
+ * sweep reuses, so there's one definition of "banned", not two).
+ */
+const SAMENESS_BANNED: { label: string; re: RegExp }[] = [
+  { label: "apologise-construction", re: /\bunapologetic\b|\bapolog(?:y|ies|ise|ize|ised|ized|ises|izes|ising|izing)\b|\b(?:no|without)\s+apolog/i },
+  { label: "knows-what-it-is", re: /\bknows\s+(?:exactly\s+)?what\s+it\s+is\b/i },
+  { label: "do-the-talking", re: /\blet\s+the\s+\w+(?:\s+\w+)?\s+do\s+the\s+talking\b/i },
+  { label: "no-gimmicks", re: /\bno\s+gimmicks\b/i },
+  { label: "paired-no", re: /\bno\s+(?:frills|shortcuts)\s*,\s*no\b/i },
+  { label: "no-storefront", re: /\byou\s+do(?:n'?t|\s+not)\s+need\s+a\s+(?:storefront|dining\s+room|sign)\b/i },
+];
+
+/** Which §1 banned constructions appear in a piece of copy (empty = clean). */
+export function bannedPhrasesIn(text: string | null | undefined): string[] {
+  const t = text ?? "";
+  return SAMENESS_BANNED.filter((b) => b.re.test(t)).map((b) => b.label);
+}
 
 /**
  * Claude writing leg: dossier → house-voice copy. Runs on Haiku with a capped
@@ -940,6 +1007,12 @@ export async function writeVenueCopy(
      * The lifted per-venue cost cap for chains (enrich route) covers the spend.
      */
     strong?: boolean;
+    /**
+     * Anti-sameness §3 — the opening TYPE (0–6) this venue's first sentence must
+     * use. Build rotates it across a batch; when omitted it's derived
+     * deterministically from the dossier so it still varies and stays stable.
+     */
+    openingStyle?: number;
   }
 ): Promise<VenueCopy> {
   const label = dossier.location_label || dossier.city || "this";
@@ -963,7 +1036,15 @@ export async function writeVenueCopy(
   const priorCopyNote = opts?.priorCopy
     ? `\n\nEXISTING COPY (may contain operator-written FACTS — preserve every concrete fact in it: names, dates, "cash only", other locations, awards; re-voice to house style but never lose a fact):\n"""${opts.priorCopy}"""`
     : "";
-  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}${writeMandate}${priorCopyNote}
+  // Anti-sameness §3 — pin this venue's opening TYPE. Explicit index from Build
+  // wins; otherwise derive a stable one from the dossier so it still varies.
+  const styleIdx =
+    opts?.openingStyle != null
+      ? ((Math.trunc(opts.openingStyle) % OPENING_STYLES.length) + OPENING_STYLES.length) % OPENING_STYLES.length
+      : openingStyleFor(`${dossier.name ?? ""}|${dossier.city ?? ""}`);
+  const style = OPENING_STYLES[styleIdx];
+  const openingNote = `\n\nOPENING TYPE (anti-sameness) — your FIRST sentence must be built from this type: ${style.key} (${style.guide}). If the dossier lacks what this type needs, fall back to the PLACE, HISTORY, or a PLAIN statement of what it is — never invent a fact to fit the type. Do not open OR close on a defiant one-liner.`;
+  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}${writeMandate}${priorCopyNote}${openingNote}
 
 DOSSIER:
 ${JSON.stringify(dossier)}

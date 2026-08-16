@@ -17,6 +17,7 @@
     "test:chain-dedupe": "tsx scripts/test-chain-dedupe.mts",
     "test:country": "tsx scripts/test-country-normalize.mts",
     "test:chain-parse": "tsx scripts/test-chain-parse-phantom.mts",
+    "test:copy": "tsx scripts/test-copy-antisameness.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
     "test:geocode": "tsx scripts/test-geocode-precision.mts",
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",
