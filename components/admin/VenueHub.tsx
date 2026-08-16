@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { freshness, FRESH_DOT } from "@/lib/admin/freshness";
 import { compareVenues, SORT_KEYS, type SortKey, type SortDir } from "@/lib/admin/venue-sort";
+import { isUnrosteredChain, parentIdsWithChildren } from "@/lib/admin/unrostered";
 import {
   ITEM_CATEGORY_LABELS,
   ITEM_CATEGORY_OPTIONS,
@@ -438,14 +439,9 @@ export function VenueHub({
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    // Parents that already have at least one branch child — used by the
-    // "unrostered chains" filter to exclude chains whose roster is already built.
-    const parentsWithChildren = new Set<string>();
-    for (const v of venues) if (v.chainParentId) parentsWithChildren.add(v.chainParentId);
-    // A chain flagged/detected but not yet rostered: a candidate, top-level row,
-    // not yet rostered, with zero branch children (the Build-roster backlog).
-    const isUnrosteredChain = (v: HubVenue) =>
-      v.chainCandidate && !v.chainRostered && !v.chainSeed && !v.chainParentId && !parentsWithChildren.has(v.id);
+    // ONE predicate for the Build-roster backlog, shared with the ?unrostered=1
+    // deep-link so the chip and the deep-link can never diverge (Part B).
+    const parentsWithChildren = parentIdsWithChildren(venues);
     const list = venues.filter((v) => {
       if (statusF !== "all" && v.status !== statusF) return false;
       if (country !== "all" && v.country !== country) return false;
@@ -457,7 +453,7 @@ export function VenueHub({
       if (attnF && !v.needs_attention) return false;
       if (closedF && !v.permanentlyClosed) return false;
       if (flagshipF && !v.flagshipUnset) return false;
-      if (unrosteredF && !isUnrosteredChain(v)) return false;
+      if (unrosteredF && !isUnrosteredChain(v, parentsWithChildren)) return false;
       if (needle && !`${v.name} ${v.city ?? ""} ${v.country ?? ""}`.toLowerCase().includes(needle)) return false;
       return true;
     });
@@ -549,6 +545,28 @@ export function VenueHub({
     const qs = params.toString();
     window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
   }, [sortKey, sortDir]);
+  // Part B — keep the "Chains to roster" filter and ?unrostered=1 in sync BOTH
+  // ways: toggling the chip writes the param (so the URL is shareable and a
+  // refresh keeps it), and Back/Forward (popstate) re-reads it. On first load the
+  // filter is already initialised from the param (initialFilters.unrostered), so
+  // the deep-link applies on load — identical to clicking the chip.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (unrosteredF) params.set("unrostered", "1");
+    else params.delete("unrostered");
+    const qs = params.toString();
+    window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+  }, [unrosteredF]);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onPop = () => {
+      const active = new URLSearchParams(window.location.search).get("unrostered") === "1";
+      setUnrosteredF(active);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   const pageUnits = sortedUnits.slice((safePage - 1) * effSize, safePage * effSize);
   const grouped = pageUnits.flat();
