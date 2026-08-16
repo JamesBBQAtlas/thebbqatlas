@@ -415,7 +415,7 @@ export async function POST(request: Request) {
   // Part 4E — any chain-context venue (a branch, a confirmed flagship, or a
   // rostered/candidate parent) gets the STRONGER writer + higher token budget.
   const isChainContext = isSiblingRow || isConfirmedFlagship || chainCandidate || alreadyRostered;
-  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean; priorCopy?: string | null; strong?: boolean; openingStyle?: number } = {
+  const writeOpts: { branchOf?: string | null; isFlagship?: boolean; alwaysWrite: boolean; priorCopy?: string | null; strong?: boolean; openingStyle?: number; siblingDossiers?: VenueDossier[] } = {
     alwaysWrite: true,
     strong: isChainContext,
     // Anti-sameness §3 — rotate the opening TYPE. Build's batch can thread an
@@ -432,6 +432,25 @@ export async function POST(request: Request) {
     writeOpts.branchOf = dossier.name ?? row.name;
   } else if (isConfirmedFlagship) {
     writeOpts.isFlagship = true;
+  }
+
+  // BRAND FALLBACK (0053 follow-up) — when THIS row is a chain flagship (a parent
+  // with children), hand the writer its branches' dossiers. writeVenueCopy only
+  // uses them if the flagship's OWN dossier is too thin to write — then it borrows
+  // the brand-level facts the branches already proved (sanitized of any per-location
+  // operator) instead of holding a well-known brand for a thin auto-dossier. A
+  // standalone venue has no children, so this is a no-op there.
+  if (isParent) {
+    const { data: kids } = await ctx.db
+      .from("restaurants")
+      .select("dossier")
+      .eq("chain_parent_id", restaurantId)
+      .not("dossier", "is", null)
+      .limit(25);
+    const sibs = (kids ?? [])
+      .map((k) => (k as { dossier?: unknown }).dossier)
+      .filter((d): d is VenueDossier => Boolean(d) && typeof d === "object");
+    if (sibs.length) writeOpts.siblingDossiers = sibs;
   }
 
   let copy;

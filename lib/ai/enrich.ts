@@ -530,6 +530,51 @@ export function inheritBrandFacts(
   return sibling;
 }
 
+/**
+ * BRAND FALLBACK (flagship dossier) — a chain FLAGSHIP about to be held for a THIN
+ * own-dossier borrows the brand-level facts its OWN branches already proved. For
+ * each brand-level field the flagship is missing, take the first child that has it
+ * (grounded). This is legitimate grounding, not fabrication: the flagship and its
+ * branches are the SAME company, so a fact true of the brand is true of its
+ * flagship — and the borrowed value came from a child's real research.
+ *
+ * The 0051 poison rule stays absolute: every child is run through
+ * `sanitizePoisonedFacts` FIRST, so a per-location operator ("Chef X (this
+ * location)", "runs this branch") can NEVER cross into the flagship. A real brand
+ * founder shared across the chain (untagged) survives and grounds; a per-branch
+ * name is stripped. Returns the enriched flagship dossier + which fields were
+ * borrowed (empty → nothing to add, the caller holds honestly).
+ */
+export function borrowBrandFactsFromChildren(
+  flagship: VenueDossier,
+  children: VenueDossier[] | null | undefined
+): { dossier: VenueDossier; borrowed: string[] } {
+  const out: VenueDossier = { ...flagship };
+  const borrowed: string[] = [];
+  // Sanitize every child BEFORE any fact can cross — the 0051 guard.
+  const cleanKids = (children ?? []).filter(Boolean).map((c) => sanitizePoisonedFacts(c).dossier);
+  const isEmpty = (v: unknown): boolean =>
+    Array.isArray(v) ? v.length === 0 : v === null || v === undefined || v === "";
+  for (const field of BRAND_LEVEL_DOSSIER_FIELDS) {
+    if (!isEmpty(out[field])) continue; // keep the flagship's own value
+    for (const child of cleanKids) {
+      const v = child[field];
+      if (!isEmpty(v)) {
+        (out as unknown as Record<string, unknown>)[field] = v;
+        borrowed.push(field);
+        break;
+      }
+    }
+  }
+  // Brand facts are now known (borrowed) — drop them from "unknowns" so the writer
+  // treats them as real facts, not gaps to write around.
+  if (borrowed.length && out.unknowns.length) {
+    const brand = new Set<string>(BRAND_LEVEL_DOSSIER_FIELDS as readonly string[]);
+    out.unknowns = out.unknowns.filter((u) => !brand.has(u));
+  }
+  return { dossier: out, borrowed };
+}
+
 /** Operator-supplied authoritative structured facts (current listing state). */
 export interface KnownFacts {
   website?: string | null;
@@ -1246,6 +1291,15 @@ export async function writeVenueCopy(
      */
     openingStyle?: number;
     /**
+     * BRAND FALLBACK (flagship) — the dossiers of this flagship's OWN children. If
+     * the flagship's own dossier is too thin to write and these are present, the
+     * writer borrows the brand-level facts the branches already proved (sanitized
+     * of any per-location operator) and writes once more before holding. Only set
+     * by the caller for a chain flagship WITH children — so a standalone venue
+     * (no children) follows the existing path untouched.
+     */
+    siblingDossiers?: VenueDossier[];
+    /**
      * Test seam ONLY — inject the copy generator so the banned-phrase / grounding
      * gates can be exercised offline and deterministically. Production leaves this
      * undefined and the real Claude/Grok writer is used.
@@ -1282,12 +1336,9 @@ export async function writeVenueCopy(
       : openingStyleFor(`${dossier.name ?? ""}|${dossier.city ?? ""}`);
   const style = OPENING_STYLES[styleIdx];
   const openingNote = `\n\nOPENING TYPE (anti-sameness) — your FIRST sentence must be built from this type: ${style.key} (${style.guide}). If the dossier lacks what this type needs, fall back to the PLACE, HISTORY, or a PLAIN statement of what it is — never invent a fact to fit the type. Do not open OR close on a defiant one-liner.`;
-  const user = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}${writeMandate}${priorCopyNote}${openingNote}
-
-DOSSIER:
-${JSON.stringify(dossier)}
-
-Return ONLY the JSON described in your instructions.`;
+  const promptPrefix = `Write the on-site copy for this venue from its verified dossier. Facts only; write around any "unknowns".${branchNote}${writeMandate}${priorCopyNote}${openingNote}`;
+  const buildUserPrompt = (dsr: VenueDossier) =>
+    `${promptPrefix}\n\nDOSSIER:\n${JSON.stringify(dsr)}\n\nReturn ONLY the JSON described in your instructions.`;
 
   // Part 4E — chains use the stronger writer (Sonnet) with a higher token budget;
   // single venues stay on the cheap Haiku pass.
@@ -1303,47 +1354,67 @@ Return ONLY the JSON described in your instructions.`;
         ? claudeJSON<WriterDraft>({ system: COPY_SYSTEM, user: userPrompt, search: false, model: writerModel, maxTokens: maxWriterTokens })
         : grokJSON<WriterDraft>({ system: COPY_SYSTEM, user: userPrompt, search: false }));
 
-  // First attempt.
-  let { data, usage, model } = await generate(user);
-  let description = dedupeImmediatePhrases(asStr(data.description));
-  let hook = dedupeImmediatePhrases(asStr(data.hook));
-  let usageIn = usage?.in_tokens ?? 0;
-  let usageOut = usage?.out_tokens ?? 0;
+  let usageIn = 0;
+  let usageOut = 0;
+  let model: string | undefined;
 
-  // ANTI-SAMENESS §1 — ENFORCE the banned-phrase list at WRITE TIME, not just as
-  // prompt guidance (0047 was guidance only, so tics like "no shortcuts" / "doesn't
-  // apologise" / "knows what it is" still leaked into Roegels, SAW's, Rudy's). Same
-  // mechanism as the grounding hold: run the ONE §1 detector on the produced copy;
-  // if it trips, regenerate ONCE naming the exact offending phrase, and if it STILL
-  // trips, HOLD the venue (needs_attention) rather than publish the tic.
-  let banned = bannedPhrasesIn(`${hook ?? ""}\n${description ?? ""}`);
-  if (banned.length) {
-    const offenders = bannedExamplesIn(`${hook ?? ""}\n${description ?? ""}`)
-      .map((s) => `"${s}"`)
-      .join(", ");
-    const retryUser = `${user}\n\nREWRITE REQUIRED — your previous draft used a BANNED construction: ${offenders}. Remove it entirely and rewrite that line a DIFFERENT way, keeping every FACT identical. Do not use that phrase or any inflection of it, and re-check the §1 banned list before returning.`;
-    const retry = await generate(retryUser);
-    usageIn += retry.usage?.in_tokens ?? 0;
-    usageOut += retry.usage?.out_tokens ?? 0;
-    const rDescription = dedupeImmediatePhrases(asStr(retry.data.description));
-    const rHook = dedupeImmediatePhrases(asStr(retry.data.hook));
-    const rBanned = bannedPhrasesIn(`${rHook ?? ""}\n${rDescription ?? ""}`);
-    // Take the retry when it's clean, or when it at least trips fewer bans; a still-
-    // tripping result is held below either way (needs_attention), never published.
-    if (rBanned.length === 0 || rBanned.length < banned.length) {
-      data = retry.data;
-      model = retry.model ?? model;
-      description = rDescription;
-      hook = rHook;
-      banned = rBanned;
+  // ONE generate + the §1 banned-phrase gate. ANTI-SAMENESS §1 — ENFORCE the
+  // banned list at WRITE TIME (0047 was guidance only, so "no shortcuts" / "doesn't
+  // apologise" leaked into Roegels/SAW's/Rudy's): run the ONE detector; if it trips,
+  // regenerate ONCE naming the exact phrase; a still-tripping result is held below.
+  const runAttempt = async (userPrompt: string): Promise<{ hook: string | null; description: string | null; banned: string[] }> => {
+    const first = await generate(userPrompt);
+    usageIn += first.usage?.in_tokens ?? 0;
+    usageOut += first.usage?.out_tokens ?? 0;
+    model = first.model ?? model;
+    let desc = dedupeImmediatePhrases(asStr(first.data.description));
+    let hk = dedupeImmediatePhrases(asStr(first.data.hook));
+    let bans = bannedPhrasesIn(`${hk ?? ""}\n${desc ?? ""}`);
+    if (bans.length) {
+      const offenders = bannedExamplesIn(`${hk ?? ""}\n${desc ?? ""}`).map((s) => `"${s}"`).join(", ");
+      const retry = await generate(
+        `${userPrompt}\n\nREWRITE REQUIRED — your previous draft used a BANNED construction: ${offenders}. Remove it entirely and rewrite that line a DIFFERENT way, keeping every FACT identical. Do not use that phrase or any inflection of it, and re-check the §1 banned list before returning.`
+      );
+      usageIn += retry.usage?.in_tokens ?? 0;
+      usageOut += retry.usage?.out_tokens ?? 0;
+      const rDesc = dedupeImmediatePhrases(asStr(retry.data.description));
+      const rHook = dedupeImmediatePhrases(asStr(retry.data.hook));
+      const rBans = bannedPhrasesIn(`${rHook ?? ""}\n${rDesc ?? ""}`);
+      if (rBans.length === 0 || rBans.length < bans.length) {
+        model = retry.model ?? model;
+        desc = rDesc;
+        hk = rHook;
+        bans = rBans;
+      }
+    }
+    return { hook: hk, description: desc, banned: bans };
+  };
+
+  // First attempt on the venue's own dossier.
+  let activeDossier = dossier;
+  let r = await runAttempt(buildUserPrompt(activeDossier));
+
+  // BRAND FALLBACK — a chain flagship about to be HELD for a thin own-dossier
+  // borrows the brand-level facts its OWN branches already proved (sanitized of any
+  // per-location operator), then writes ONCE more from the richer, still-grounded
+  // dossier. Only fires when the first pass produced nothing AND the caller supplied
+  // the flagship's children — a standalone venue has none, so it's untouched. If the
+  // borrow adds nothing (children have no brand facts either), we hold, honestly.
+  if (!r.hook && !r.description && opts?.siblingDossiers?.length) {
+    const { dossier: enriched, borrowed } = borrowBrandFactsFromChildren(dossier, opts.siblingDossiers);
+    if (borrowed.length) {
+      activeDossier = enriched;
+      r = await runAttempt(buildUserPrompt(activeDossier));
     }
   }
-  // Held if the tic survives one regeneration — a human clears it before publish.
-  const tainted = banned.length > 0;
 
-  const flaggedThin = data.needs_attention === true || (!description && !hook);
+  const hook = r.hook;
+  const description = r.description;
+  // Held if the tic survives one regeneration — a human clears it before publish.
+  const tainted = r.banned.length > 0;
+
   const dossierThin =
-    !dossier.what_it_is && !dossier.website && !dossier.instagram;
+    !activeDossier.what_it_is && !activeDossier.website && !activeDossier.instagram;
   // GENUINELY EMPTY research (Fix 10): a placeholder seed where the dossier has
   // essentially nothing to write with authority from — only a name/address, none
   // of the substance that makes an honest listing. Such a venue must be HELD for
@@ -1351,15 +1422,15 @@ Return ONLY the JSON described in your instructions.`;
   // the writer was told to produce copy. This is stricter than `dossierThin`: it
   // requires the ABSENCE of every substantive signal.
   const noRealFacts =
-    !dossier.what_it_is &&
-    !dossier.bbq_style &&
-    !dossier.website &&
-    !dossier.instagram &&
-    !dossier.founders_pitmaster &&
-    !dossier.setting_vibe &&
-    !dossier.established &&
-    (dossier.specialities?.length ?? 0) === 0 &&
-    (dossier.awards_press?.length ?? 0) === 0;
+    !activeDossier.what_it_is &&
+    !activeDossier.bbq_style &&
+    !activeDossier.website &&
+    !activeDossier.instagram &&
+    !activeDossier.founders_pitmaster &&
+    !activeDossier.setting_vibe &&
+    !activeDossier.established &&
+    (activeDossier.specialities?.length ?? 0) === 0 &&
+    (activeDossier.awards_press?.length ?? 0) === 0;
   // Part A — tie the flag to the writer's REAL outcome. If copy was produced, the
   // venue is publishable, so we DON'T raise a "cannot write / dossier too thin"
   // warning — a long `unknowns` list is not, by itself, an actionable problem
@@ -1370,11 +1441,11 @@ Return ONLY the JSON described in your instructions.`;
   // calm, non-blocking `info_note`.
   const producedCopy = Boolean(description || hook);
   // NO INVENTED FACTS — the one rule that doesn't bend. Scan the produced copy for
-  // any specific claim (a named person, a year) that isn't in THIS venue's facts;
-  // if found, HOLD the venue (needs_attention) so an invented detail — the "Chef
-  // Dave Molina" case — can never reach a published page. A lie in a listing
-  // outranks tone/variety/length.
-  const ungrounded = producedCopy ? ungroundedClaims(`${hook ?? ""}\n${description ?? ""}`, dossier) : [];
+  // any specific claim (a named person, a year) that isn't in the ACTIVE facts (the
+  // venue's own, plus any brand facts borrowed from its branches); if found, HOLD
+  // the venue so an invented detail — the "Chef Dave Molina" case — can never reach
+  // a published page. A lie in a listing outranks tone/variety/length.
+  const ungrounded = producedCopy ? ungroundedClaims(`${hook ?? ""}\n${description ?? ""}`, activeDossier) : [];
   const invented = ungrounded.length > 0;
   const needs_attention = !producedCopy || invented || tainted;
   const info_note =

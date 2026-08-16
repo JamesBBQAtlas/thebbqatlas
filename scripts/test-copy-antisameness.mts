@@ -11,6 +11,7 @@ import {
   sanitizePoisonedFacts,
   poisonedFacts,
   sharedPerLocationOperators,
+  borrowBrandFactsFromChildren,
   writeVenueCopy,
   type CopyGenerator,
 } from "../lib/ai/enrich";
@@ -202,6 +203,58 @@ console.log("\n[§1 banned-phrase — ENFORCED at write time in writeVenueCopy]"
   const outC = await writeVenueCopy(dossier, { generate: genClean });
   ok("a clean first draft is not regenerated (1 call)", callsC === 1, callsC);
   ok("clean copy publishes (needs_attention false)", outC.needs_attention === false);
+}
+
+console.log("\n[BRAND FALLBACK — a thin flagship borrows its branches' facts before holding]");
+{
+  const thinFlagship = {
+    name: "Hickory's Smokehouse", city: "Rhos-on-Sea", what_it_is: null, bbq_style: null,
+    established: null, website: null, instagram: null, founders_pitmaster: null,
+    setting_vibe: null, cook_method: null, wood_fuel: null, price_band: null,
+    also_known_as: [] as string[], specialities: [] as string[], awards_press: [] as string[],
+    unknowns: ["what_it_is", "established"], is_chain: true,
+  } as unknown as VenueDossier;
+  const richChild = {
+    ...thinFlagship, location_label: "Chester",
+    what_it_is: "British barbecue smokehouse", bbq_style: "American BBQ",
+    established: "2010", founders_pitmaster: "Neil McDonnell", specialities: ["ribs"],
+  } as unknown as VenueDossier;
+
+  // Fix 3 poison rule — borrow pure function: brand facts cross, per-location does NOT.
+  const poisonChild = { ...richChild, founders_pitmaster: "Chef Dave Molina (this location)" } as unknown as VenueDossier;
+  const bPoison = borrowBrandFactsFromChildren(thinFlagship, [poisonChild]);
+  ok("a per-location operator is NOT borrowed to the flagship", !/molina/i.test(String(bPoison.dossier.founders_pitmaster ?? "")), bPoison.dossier.founders_pitmaster);
+  ok("but a real brand fact (what_it_is) IS borrowed", bPoison.dossier.what_it_is === "British barbecue smokehouse" && bPoison.borrowed.includes("what_it_is"));
+  const bReal = borrowBrandFactsFromChildren(thinFlagship, [{ ...thinFlagship, founders_pitmaster: "Aaron Franklin" } as unknown as VenueDossier]);
+  ok("a real untagged brand founder IS borrowed", bReal.dossier.founders_pitmaster === "Aaron Franklin" && bReal.borrowed.includes("founders_pitmaster"));
+  ok("nothing borrowed when children carry no brand facts", borrowBrandFactsFromChildren(thinFlagship, [{ ...thinFlagship } as unknown as VenueDossier]).borrowed.length === 0);
+
+  // Acceptance 1 — the flagship WRITES on the second pass from its branches' facts.
+  const callsA: string[] = [];
+  const genA: CopyGenerator = async (prompt) => {
+    callsA.push(prompt);
+    return /British barbecue smokehouse/.test(prompt)
+      ? { data: { hook: "Smoke over the seafront.", description: "A British barbecue smokehouse; the story runs back to 2010." }, usage: { in_tokens: 5, out_tokens: 9 }, model: "t" }
+      : { data: { needs_attention: true, reason: "thin dossier" }, usage: { in_tokens: 3, out_tokens: 0 }, model: "t" };
+  };
+  const outA = await writeVenueCopy(thinFlagship, { isFlagship: true, siblingDossiers: [richChild], generate: genA });
+  ok("a thin flagship with rich children is WRITTEN, not held", outA.needs_attention === false && Boolean(outA.description), outA.attention_reason);
+  ok("the borrow ran a second pass (2 generate calls)", callsA.length === 2, callsA.length);
+  ok("the second prompt carries the borrowed brand fact", /British barbecue smokehouse/.test(callsA[1] ?? ""));
+  ok("the borrowed year grounds the copy (no invented-fact hold)", !/not found in this venue/.test(outA.attention_reason ?? ""));
+
+  // Acceptance 2 — genuinely factless (children add nothing) still HOLDS.
+  const callsB: string[] = [];
+  const genB: CopyGenerator = async (prompt) => { callsB.push(prompt); return { data: { needs_attention: true }, usage: { in_tokens: 1, out_tokens: 0 }, model: "t" }; };
+  const outB = await writeVenueCopy(thinFlagship, { isFlagship: true, siblingDossiers: [{ ...thinFlagship } as unknown as VenueDossier], generate: genB });
+  ok("a flagship whose children have no brand facts still HOLDS", outB.needs_attention === true);
+  ok("no wasted second pass when the borrow adds nothing", callsB.length === 1, callsB.length);
+
+  // Acceptance 4 — a standalone venue (no children) is untouched: one pass, holds.
+  const callsC: string[] = [];
+  const genC: CopyGenerator = async (prompt) => { callsC.push(prompt); return { data: { needs_attention: true }, usage: { in_tokens: 1, out_tokens: 0 }, model: "t" }; };
+  const outC = await writeVenueCopy(thinFlagship, { generate: genC });
+  ok("a standalone thin venue holds with NO borrow pass", outC.needs_attention === true && callsC.length === 1, callsC.length);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
