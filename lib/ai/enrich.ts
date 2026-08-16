@@ -904,6 +904,8 @@ export interface VenueCopy {
 // (VOICE-REFERENCE-VENUES.md) are embedded for calibration.
 const COPY_SYSTEM = `You are the staff writer for The BBQ Atlas. Write in ONE house voice: dry, warm, understated and certain, with a wry, deadpan edge — a writer who reveres craft and plain things done properly, is allergic to pretense and marketing-speak, and never wastes a word. (Internal north star only: a Ron Swanson-inspired sensibility; the source is never referenced in output.) The Atlas CELEBRATES barbecue; it never ranks or scores it.
 
+NO INVENTED FACTS — THE ONE RULE THAT DOES NOT BEND. Every specific claim in your copy — a person's name, a date/year, an award, a quote, a dish, a claim of any kind — MUST come from THIS venue's own facts in the dossier below. If a fact is not in the dossier, it does not go in the copy: no guessing, no plausible-sounding invention, no "a chef named…", no borrowing a detail from another venue. NEVER name a person the dossier does not name — that is the single worst failure. If there isn't enough verified material, write LESS; a short true line always beats an invented one. When in doubt, leave it out. A lie in a listing is a failure of the whole product and outranks tone, variety, and length.
+
 Input: a verified facts dossier (JSON) for one venue. Write (1) a one-line HOOK and (2) a 2-3 short-paragraph DESCRIPTION using ONLY facts in the dossier. If \`unknowns\` lists something, write around it — never invent a fact, dish, date, or person. No ratings/scores. NEVER name Ron Swanson, the TV show he appeared in, its characters, or any of its places/features — that sensibility inspires us, but the source is never mentioned in the output. Keep proper nouns and figures accurate. Structured fields (address/phone/hours) are not yours — leave them factual. If the dossier is too thin to write with a genuine point of view, return {"needs_attention": true, "reason": "..."} instead of padding.
 
 DATES — read carefully. "established" is when the BRAND/business was founded (its origin). "opening_date" is when THIS PARTICULAR location opened. For a multi-location business these can differ: a branch may have opened years after the brand was founded. NEVER write that a specific branch has operated "since [established year]" unless that IS this location's own opening. Attribute a founding year to the business/brand ("the barbecue joint the Blacks started in 2014"), and use "opening_date" for when a given branch arrived ("this outpost opened in 2019"). If "opening_date" is null and this is a branch, don't state when this location opened at all.
@@ -926,7 +928,7 @@ ANTI-SAMENESS — every venue's copy must read as its own. These rules are non-n
 • CLOSINGS — vary the ending: a practical note (hours / ordering / sells-out), one vivid detail, a bit of history, a forward look, or simply stop after the facts. NEVER default to a defiant one-liner ending — that is the exact pattern being broken.
 • SHAPE — vary paragraph shape and length. Not every venue is setup → what-it-is → closer. Some are two tight sentences; some a fuller paragraph. Let the amount of REAL material decide: thin facts → short. A quiet neighbourhood joint can read plainly; a larger-than-life pitmaster can carry more colour — don't give every venue the same energy.
 • HOOK — vary the hook too; no single formula. Draw on THIS venue's own distinctiveness (its specialty, its place, its style). Specific and true.
-• SELF-CHECK before returning: (1) any BANNED phrase? → rewrite. (2) does my opening match the required OPENING TYPE I was given? → adjust. (3) am I leaning on a RATIONED phrase? → replace with a fact. (4) did I state anything not in the dossier? → cut it. (5) is the length matched to what I actually know? → trim padding.
+• SELF-CHECK before returning: (0) EVERY specific claim here — a name, date, award, dish, quote — is it in THIS venue's facts? If not, CUT it. Did I name any person? Only if the dossier names them. (1) any BANNED phrase? → rewrite. (2) does my opening match the required OPENING TYPE I was given? → adjust. (3) am I leaning on a RATIONED phrase? → replace with a fact. (4) did I state anything not in the dossier? → cut it. (5) is the length matched to what I actually know? → trim padding.
 
 Never repeat a phrase, clause or word back-to-back (e.g. "No shortcuts, no shortcuts." or "the the") — say it once. Vary your sentences; no immediate repetition.
 
@@ -987,6 +989,61 @@ const SAMENESS_BANNED: { label: string; re: RegExp }[] = [
 export function bannedPhrasesIn(text: string | null | undefined): string[] {
   const t = text ?? "";
   return SAMENESS_BANNED.filter((b) => b.re.test(t)).map((b) => b.label);
+}
+
+/** Lowercase + fold diacritics, for grounding copy claims against the facts. */
+function foldForMatch(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+/** A specific claim in copy that can't be traced to the venue's own facts. */
+export interface UngroundedClaim {
+  kind: "person" | "year";
+  text: string;
+}
+
+// Person-attribution constructions — a role word + a name, "run by …", or a
+// First-Last name doing a running verb. These are what invent "Chef Dave Molina".
+const PERSON_PATTERNS: RegExp[] = [
+  /\b(?:chef|pitmaster|pit master|owner|founder|co-?founder|proprietor|patriarch|matriarch)\s+(?:named\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z'’.\-]+){1,2})/g,
+  /\b(?:run|owned|founded|started|led|created|opened|helmed)\s+by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z'’.\-]+){1,2})/g,
+  /\b([A-Z][a-z]+\s+[A-Z][a-z'’.\-]+)\s+(?:runs|started|founded|owns|opened|leads|heads|helms|smokes|built|created|mans|took over)\b/g,
+];
+
+/**
+ * NO INVENTED FACTS. Return the specific claims in a piece of copy that are NOT
+ * traceable to this venue's own facts — a named PERSON whose name is nowhere in
+ * the dossier (the "Chef Dave Molina" invention), or a YEAR the dossier never
+ * states. A grounded name/year (present in the facts) is fine. This is the
+ * tripwire: reused by the writer to HOLD such copy, and by any later sameness/
+ * fact sweep — one definition, not a fork. Deliberately conservative: it only
+ * fires on an explicit person-attribution or a bare year, so honest copy passes.
+ */
+export function ungroundedClaims(copy: string | null | undefined, dossier: unknown): UngroundedClaim[] {
+  const text = copy ?? "";
+  if (!text.trim()) return [];
+  const hay = foldForMatch(JSON.stringify(dossier ?? {}));
+  const out: UngroundedClaim[] = [];
+  const seen = new Set<string>();
+
+  for (const re of PERSON_PATTERNS) {
+    for (const m of text.matchAll(re)) {
+      const name = (m[1] ?? "").trim().replace(/[.,;:'’-]+$/, "");
+      if (!name) continue;
+      // Grounded only if EVERY significant token of the name is in the facts.
+      const tokens = foldForMatch(name).split(/\s+/).map((t) => t.replace(/[^a-z0-9]/g, "")).filter((t) => t.length >= 3);
+      const grounded = tokens.length > 0 && tokens.every((t) => hay.includes(t));
+      const key = `p:${name.toLowerCase()}`;
+      if (!grounded && !seen.has(key)) { seen.add(key); out.push({ kind: "person", text: name }); }
+    }
+  }
+  // A 4-digit year in the copy must appear somewhere in the facts.
+  for (const m of text.matchAll(/\b(?:19|20)\d{2}\b/g)) {
+    const yr = m[0];
+    const key = `y:${yr}`;
+    if (!hay.includes(yr) && !seen.has(key)) { seen.add(key); out.push({ kind: "year", text: yr }); }
+  }
+  return out;
 }
 
 /**
@@ -1103,19 +1160,33 @@ Return ONLY the JSON described in your instructions.`;
   // separately by the enrich route. A thin-but-published venue instead carries a
   // calm, non-blocking `info_note`.
   const producedCopy = Boolean(description || hook);
-  const needs_attention = !producedCopy;
+  // NO INVENTED FACTS — the one rule that doesn't bend. Scan the produced copy for
+  // any specific claim (a named person, a year) that isn't in THIS venue's facts;
+  // if found, HOLD the venue (needs_attention) so an invented detail — the "Chef
+  // Dave Molina" case — can never reach a published page. A lie in a listing
+  // outranks tone/variety/length.
+  const ungrounded = producedCopy ? ungroundedClaims(`${hook ?? ""}\n${description ?? ""}`, dossier) : [];
+  const invented = ungrounded.length > 0;
+  const needs_attention = !producedCopy || invented;
   const info_note =
-    producedCopy && (noRealFacts || dossierThin)
+    !needs_attention && (noRealFacts || dossierThin)
       ? "Light on backstory — add a founding date, pitmaster, wood/method or specialities if you have them."
       : null;
+
+  const inventedReason = invented
+    ? `Copy references ${ungrounded
+        .map((c) => (c.kind === "person" ? `a person "${c.text}"` : `the year ${c.text}`))
+        .join(" and ")} not found in this venue's facts — held to avoid an invented detail. Verify against the source and add the fact, or re-enrich.`
+    : null;
 
   return {
     hook,
     description,
     needs_attention,
-    // Calm guidance, never "ERROR / cannot write" — and only when nothing was written.
+    // Calm guidance when nothing was written; a HARD hold when a fact was invented.
     attention_reason: needs_attention
-      ? "Couldn't write a page from the facts on hand yet — add a couple of details (what it is, style, a source) and re-run."
+      ? inventedReason ??
+        "Couldn't write a page from the facts on hand yet — add a couple of details (what it is, style, a source) and re-run."
       : null,
     info_note,
     usage: usage ?? { in_tokens: 0, out_tokens: 0 },

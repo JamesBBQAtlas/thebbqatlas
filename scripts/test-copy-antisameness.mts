@@ -1,7 +1,7 @@
 /* Enrichment copy — anti-sameness (ENRICHMENTPROMPTANTISAMENESS). Pure.
  * Run: node_modules/.bin/tsx scripts/test-copy-antisameness.mts
  */
-import { OPENING_STYLES, openingStyleFor, bannedPhrasesIn } from "../lib/ai/enrich";
+import { OPENING_STYLES, openingStyleFor, bannedPhrasesIn, ungroundedClaims } from "../lib/ai/enrich";
 
 let pass = 0, fail = 0;
 function ok(name: string, cond: boolean, extra?: unknown) {
@@ -43,6 +43,29 @@ ok("the word 'apology' in a real context still flags (intended)", bannedPhrasesI
 // The rewritten in-prompt Joe's example must itself be clean (no reintroduced tic).
 const joesExample = "Joe's does something most restaurants wouldn't dare: it runs out of a working petrol station, and the queue past the pumps says nobody minds. Since 1996, people have lined up for burnt ends, ribs, and the Z-Man. No pretense — a pit, a griddle, and food that earns its line. Fill the tank. Then fill the plate.";
 ok("the reference Joe's example is itself clean of banned tics", bannedPhrasesIn(joesExample).length === 0, bannedPhrasesIn(joesExample));
+
+console.log("\n[NO INVENTED FACTS — grounding tripwire]");
+{
+  const sugarfire = { name: "Sugarfire Smokehouse", city: "St. Louis", what_it_is: "barbecue joint", founders_pitmaster: null, established: null, awards_press: [] as string[] };
+  // The exact incident: an invented pitmaster named across 8 branches.
+  ok("flags an invented 'Chef Dave Molina'", ungroundedClaims("Chef Dave Molina runs the pits here.", sugarfire).some((c) => c.kind === "person" && c.text === "Dave Molina"));
+  ok("flags 'run by Dave Molina' (name cleaned, no trailing dot)", ungroundedClaims("The kitchen is run by Dave Molina.", sugarfire).some((c) => c.text === "Dave Molina"));
+  ok("flags 'Dave Molina smokes the brisket'", ungroundedClaims("Dave Molina smokes the brisket daily.", sugarfire).some((c) => c.text === "Dave Molina"));
+  ok("flags an invented year (facts have none)", ungroundedClaims("Smoking brisket since 1998.", sugarfire).some((c) => c.kind === "year" && c.text === "1998"));
+
+  // Acceptance 1 — a venue whose facts name no person → copy that names no one is clean.
+  ok("no-person copy on a no-person venue is clean", ungroundedClaims("A gravel lot, a pit, and a queue down the block.", sugarfire).length === 0);
+
+  // Grounded claims pass — a real pitmaster and a real founding year in the facts.
+  const franklin = { name: "Franklin Barbecue", city: "Austin", founders_pitmaster: "Aaron Franklin", established: "2009" };
+  ok("a grounded pitmaster + year passes", ungroundedClaims("Aaron Franklin started with a trailer in 2009.", franklin).length === 0);
+  ok("an eponymous venue name is not a person invention", ungroundedClaims("Franklin Barbecue sits on the East Side.", franklin).length === 0);
+  // A first name invented onto a known surname is still caught (strict grounding).
+  ok("an invented first name on a known surname is caught", ungroundedClaims("Chef Reginald Franklin runs it.", franklin).some((c) => c.text === "Reginald Franklin"));
+
+  // Acceptance 4 — an empty-facts venue yields zero invented claims when copy is honest.
+  ok("empty-facts venue + honest bare copy → no claims", ungroundedClaims("A barbecue spot in town.", { name: "Smoke Co" }).length === 0);
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);
