@@ -179,6 +179,20 @@ console.log("\n[FIX 2a] off-brand roster link is not a branch (Jackalope vs Jack
   ok("a null / empty name is treated as a branch, never split off", !rosterNameIsOffBrand(null, "Jack's BBQ") && !rosterNameIsOffBrand("", "Jack's BBQ"));
   ok("a weak brand token ('2M') never splits a sibling off", !rosterNameIsOffBrand("2M Smokehouse Westside", "2M Smokehouse"));
   ok("brandTokens is the shared tokeniser (keeps 'jacks', drops 'bbq')", brandTokens("Jack's BBQ").includes("jacks") && !brandTokens("Jack's BBQ").includes("bbq"));
+  // A genuine cross-linked eatery with no shared token but a clear business word.
+  ok("'Metro Diner' IS off-brand for 'Bono's Pit Bar-B-Q' (a distinct eatery)", rosterNameIsOffBrand("Metro Diner", "Bono's Pit Bar-B-Q"));
+}
+
+console.log("\n[FIX 2a] a branch named by its AREA/CITY is NOT a phantom off-brand row");
+{
+  // The live false positives: a locality label shares no brand token but is NOT a
+  // different business — it must never be split off as a standalone venue.
+  ok("'Beaumont' (Cornerstone's own city) is NOT off-brand", !rosterNameIsOffBrand("Beaumont", "Cornerstone BBQ", { selfCity: "Beaumont", parentCity: "Beaumont" }));
+  ok("'Duval Station' (a Jacksonville area) is NOT off-brand", !rosterNameIsOffBrand("Duval Station", "Bono's Pit Bar-B-Q", { selfCity: "Jacksonville", parentCity: "Jacksonville" }));
+  ok("'Bartram Oaks' (a Jacksonville area) is NOT off-brand", !rosterNameIsOffBrand("Bartram Oaks", "Bono's Pit Bar-B-Q", { selfCity: "Jacksonville", parentCity: "Jacksonville" }));
+  ok("a bare place name is not off-brand even without city context", !rosterNameIsOffBrand("Mandarin", "Bono's Pit Bar-B-Q"));
+  // …but the genuine cross-link still splits off.
+  ok("Jackalope still off-brand alongside the area-name guard", rosterNameIsOffBrand("Jackalope Tex-Mex & Cantina", "Jack's BBQ", { selfCity: "Seattle", parentCity: "Seattle" }));
 }
 
 // ── FIX 2b: a flagship must be a real, located place ─────────────────────────

@@ -78,16 +78,35 @@ export function brandToken(brand: string): string {
 }
 
 /**
- * ROSTER PROVENANCE GUARD (Fix 2a): is this locations-page link an OFF-BRAND sister
- * business rather than a branch? A candidate is a branch only if its name shares
- * the flagship brand's distinctive token — "Jack's BBQ Redmond" shares "jacks", so
- * it's a branch; "Jackalope Tex-Mex & Cantina" shares nothing with "Jack's BBQ", so
- * it is NOT — it must not be renamed to the parent or attached as a child. Reuses
- * the ONE brand tokeniser. Conservative: a name that's all generic words, or a
- * brand whose own token is too weak (< 3 chars, e.g. "2M") to judge, is treated as
- * a branch (never wrongly split off).
+ * A POSITIVE signal that a name is a distinct EATING ESTABLISHMENT — a different
+ * business — rather than a bare locality/area label. A genuine cross-linked sister
+ * restaurant advertises a cuisine/type ("Tex-Mex & Cantina", "Taqueria", "Grill");
+ * a branch named by its town or neighbourhood ("Beaumont", "Duval Station",
+ * "Bartram Oaks") does not. Deliberately EXCLUDES barbecue words — a same-cuisine
+ * name is more likely the brand itself than a rival, and must not be split off.
  */
-export function rosterNameIsOffBrand(name: string | null | undefined, brand: string): boolean {
+const DISTINCT_BUSINESS_RE =
+  /\b(?:cantina|taqueria|tacos?|cocina|grill|grille|caf[eé]|coffee|pizza|pizzeria|kitchen|saloon|diner|tavern|\bpub\b|bakery|deli|delicatessen|steakhouse|seafood|sushi|ramen|noodles?|thai|mexican|tex[\s-]?mex|italian|chinese|burgers?|wings|creamery|brewery|brewing|bistro|chophouse|eatery|restaurant|cocktail|lounge|pancake|waffle|donut|doughnut|ice\s*cream|gelato)\b/i;
+
+/**
+ * ROSTER PROVENANCE GUARD (Fix 2a): is this locations-page link an OFF-BRAND sister
+ * business rather than a branch? Catching a genuine cross-link ("Jackalope Tex-Mex
+ * & Cantina" on Jack's BBQ's page) must NOT also catch a branch named by its own
+ * area — the first cut (0053) flagged "Beaumont" (Cornerstone's own city) and
+ * "Duval Station"/"Bartram Oaks" (Jacksonville areas) as phantom businesses. So a
+ * link is off-brand ONLY when ALL hold:
+ *   • it shares NONE of the flagship's distinctive brand tokens; AND
+ *   • it is NOT the branch's own city or the flagship's city (a locality label); AND
+ *   • it POSITIVELY looks like a different eatery (a cuisine/type word) — a bare
+ *     place name never qualifies.
+ * A brand whose own token is too weak (< 3 chars, e.g. "2M") to judge, or a name
+ * that's all generic words, is treated as a branch — never wrongly split off.
+ */
+export function rosterNameIsOffBrand(
+  name: string | null | undefined,
+  brand: string,
+  opts?: { selfCity?: string | null; parentCity?: string | null }
+): boolean {
   if (!name) return false;
   const parentTok = brandToken(brand);
   if (parentTok.length < 3) return false; // brand token too weak to judge
@@ -98,7 +117,15 @@ export function rosterNameIsOffBrand(name: string | null | undefined, brand: str
   // A branch SHARES the brand's distinctive token (as a token, or as a substring
   // to catch "Jack's BBQ Seattle" whose longest token is the city).
   const shares = nameToks.some((t) => brandToks.has(t)) || nameNorm.includes(parentTok);
-  return !shares;
+  if (shares) return false;
+  // A bare LOCALITY label (the branch's own area, or the flagship's city) is never
+  // a different business — "Beaumont" is Cornerstone's town, not a rival.
+  const nc = normCity(name);
+  if (nc && (nc === normCity(opts?.selfCity ?? null) || nc === normCity(opts?.parentCity ?? null))) return false;
+  // Only split off a name that POSITIVELY reads as a different eatery. A place name
+  // ("Duval Station", "Bartram Oaks") carries no such signal → treated as a branch.
+  if (!DISTINCT_BUSINESS_RE.test(name)) return false;
+  return true;
 }
 
 interface ExistingRow {
@@ -417,7 +444,7 @@ export async function seedChainLocations(
     // BBQ's page) is NOT a branch. Never rename it to the parent or attach it as a
     // child: seed it standalone under its REAL name, flagged for a human, so the
     // real venue is preserved but not filed under the wrong brand.
-    if (rosterNameIsOffBrand(loc.name, brand)) {
+    if (rosterNameIsOffBrand(loc.name, brand, { selfCity: loc.city, parentCity: (parentRow as { city?: string | null } | null)?.city ?? null })) {
       const offCity = settlementCity(loc.city) || loc.city || "";
       const offSlug = await uniqueRestaurantSlug(db, `${loc.name} ${offCity || label}`);
       const offComposed = composeAddress({ street: loc.address, city: loc.city });
