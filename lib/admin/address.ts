@@ -19,19 +19,64 @@ export function foldDiacritics(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+/** Return the single copy when `tokens` is an EXACT adjacent repeat [U, U]
+ *  (case-insensitive), else null. The one entry point for doubled-scrape collapse. */
+function halveIfDoubled(tokens: string[]): string[] | null {
+  const n = tokens.length;
+  if (n < 2 || n % 2 !== 0) return null;
+  const h = n / 2;
+  for (let i = 0; i < h; i++) {
+    if (tokens[i].toLowerCase() !== tokens[i + h].toLowerCase()) return null;
+  }
+  return tokens.slice(0, h);
+}
+
 /**
- * Clean a raw address string for parsing/geocoding (A5 parse-robustness). Un-glues
- * an abbreviation period stuck to the next word \u2014 "510 Hull St.San Marcos" \u2192
- * "510 Hull St. San Marcos", "Ave.North" \u2192 "Ave. North" \u2014 so the address geocodes
- * to the right pin and splits street-from-city correctly instead of manufacturing
- * a "Marcos" city and a Gulf-of-Mexico pin. Conservative: only a letter + "." +
- * an upper-case letter (an abbreviation boundary), never a decimal or "St. Louis"
- * that already has its space.
+ * Collapse a DOUBLED-address scrape (Southside bug) \u2014 the same street/address run
+ * captured twice and concatenated ("534 Highway 71 534 Highway 71, Bastrop"). Folds
+ * whole-address doubling, a doubled street run before the city, and a trailing
+ * duplicate comma-segment to a single copy. CONSERVATIVE \u2014 only an EXACT adjacent
+ * repeat, and:
+ *   \u2022 a collapsed run must carry a building number (a digit), so a reduplicated
+ *     place name ("Walla Walla") and "100 100th Ave" are never touched;
+ *   \u2022 a trailing duplicate comma-part is dropped only when a street precedes it
+ *     (\u22653 parts), so "New York, New York" (city, state) is preserved.
+ */
+function collapseDoubledAddress(s: string): string {
+  // 1. Whole-string exact doubling ("X sep X" \u2192 "X"), digit-guarded.
+  const whole = halveIfDoubled(s.split(/\s+/).filter(Boolean));
+  if (whole && /\d/.test(whole.join(" "))) s = whole.join(" ");
+
+  const parts = s.split(",").map((p) => p.trim()).filter(Boolean);
+  if (!parts.length) return s;
+  // 2. Doubled street run in the first segment ("534 Hwy 71 534 Hwy 71" \u2192 one).
+  const half = halveIfDoubled(parts[0].split(/\s+/).filter(Boolean));
+  if (half && /\d/.test(half.join(" "))) parts[0] = half.join(" ");
+  // 3. Trailing duplicate comma-part ("\u2026, Bastrop, Bastrop" \u2192 "\u2026, Bastrop"), only
+  //    when a street precedes it (\u22653 parts) \u2014 "New York, New York" is preserved.
+  while (parts.length >= 3 && parts[parts.length - 1].toLowerCase() === parts[parts.length - 2].toLowerCase()) {
+    parts.pop();
+  }
+  return parts.join(", ");
+}
+
+/**
+ * Clean a raw address string for parsing/geocoding \u2014 the ONE address-cleaning
+ * entry point, upstream of the geocoder AND normStreet/dedupe. Two jobs:
+ *   \u2022 A5 de-glue: un-glue an abbreviation period stuck to the next word
+ *     ("510 Hull St.San Marcos" \u2192 "510 Hull St. San Marcos"), so the address
+ *     geocodes to the right pin and splits street-from-city correctly;
+ *   \u2022 doubled-scrape collapse: fold an exactly-repeated street/address run
+ *     ("534 Highway 71 534 Highway 71, Bastrop" \u2192 "534 Highway 71, Bastrop"), so a
+ *     doubled twin keys identically to the clean row and dedupes to one.
+ * Conservative throughout \u2014 a decimal, "St. Louis", "Walla Walla", "New York,
+ * New York" and "100 100th Ave" are all left exactly as they are.
  */
 export function cleanAddress(addr: string | null | undefined): string {
   const s = clean(addr);
   if (!s) return "";
-  return s.replace(/([A-Za-z])\.([A-Z])/g, "$1. $2");
+  const deglued = s.replace(/([A-Za-z])\.([A-Z])/g, "$1. $2");
+  return collapseDoubledAddress(deglued);
 }
 
 /**

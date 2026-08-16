@@ -78,6 +78,16 @@ console.log("\n[A] over-merge guard — different building number stays distinct
   ok("their keys differ", locationKey(mk("107 Plutarco Elías Calles", "San Pedro")) !== locationKey(mk("205 Plutarco Elías Calles", "San Pedro")));
 }
 
+// ── Doubled-address scrape (Southside) collapses in the union dedupe ─────────
+console.log("\n[A6] doubled-address twin dedupes to one");
+{
+  const two = mergeDiscovered([
+    mk("534 Highway 71", "Bastrop"),
+    mk("534 Highway 71 534 Highway 71", "Bastrop"), // the doubled scrape twin
+  ], []);
+  ok("clean row + doubled twin → ONE record", two.length === 1, two.map((m) => m.address));
+}
+
 // ── Different cities never merge on street alone ────────────────────────────
 console.log("\n[A] same street text, different city → distinct");
 {

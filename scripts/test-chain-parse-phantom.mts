@@ -46,6 +46,40 @@ console.log("\n[A5] once parsed, the branch street keys identically to the exist
     [normStreet(parsed[0]?.street ?? ""), normStreet("510 Hull St")]);
 }
 
+// ── A6 (doubled-address scrape) — collapse an exactly-repeated street run ─────
+console.log("\n[A6] doubled-address scrape (Southside) collapses to one");
+{
+  const doubled: [string, string][] = [
+    ["1212 Highway 290 1212 Highway 290, Elgin", "1212 Highway 290, Elgin"],
+    ["534 Highway 71 534 Highway 71, Bastrop", "534 Highway 71, Bastrop"],
+    ["106 Co-Op Blvd 106 Co-Op Blvd, Hutto", "106 Co-Op Blvd, Hutto"],
+    ["1420 Shimmering Lane 1420 Shimmering Lane, Leander", "1420 Shimmering Lane, Leander"],
+  ];
+  for (const [dbl, clean] of doubled) {
+    ok(`"${dbl}" → "${clean}"`, cleanAddress(dbl) === clean, cleanAddress(dbl));
+    ok(`  keys identically to the clean row`, normStreet(dbl) === normStreet(clean));
+  }
+  // Whole-address doubling (city repeated in the second copy).
+  ok("whole-address double collapses",
+    cleanAddress("534 Highway 71, Bastrop 534 Highway 71, Bastrop") === "534 Highway 71, Bastrop",
+    cleanAddress("534 Highway 71, Bastrop 534 Highway 71, Bastrop"));
+  // Trailing duplicate city segment.
+  ok("trailing duplicate city collapses",
+    cleanAddress("534 Highway 71, Bastrop, Bastrop") === "534 Highway 71, Bastrop",
+    cleanAddress("534 Highway 71, Bastrop, Bastrop"));
+}
+
+console.log("\n[A6] over-collapse guard — genuine repeats are NEVER damaged");
+{
+  ok("'100 100th Ave, City' unchanged", cleanAddress("100 100th Ave, City") === "100 100th Ave, City");
+  ok("'Walla Walla' city unchanged", cleanAddress("534 Highway 71, Walla Walla") === "534 Highway 71, Walla Walla");
+  ok("'Walla Walla' alone unchanged", cleanAddress("Walla Walla") === "Walla Walla");
+  ok("'New York, New York' (city, state) unchanged", cleanAddress("New York, New York") === "New York, New York");
+  ok("distinct suites at one street are not merged",
+    cleanAddress("100 Main St, Suite 1") === "100 Main St, Suite 1" &&
+    cleanAddress("100 Main St, Suite 2") === "100 Main St, Suite 2");
+}
+
 // ── PART 2 (A4) — phantom seed: choose which branch becomes flagship ─────────
 console.log("\n[A4] address-less seed → promote the best real branch (N real ⇒ N)");
 {
