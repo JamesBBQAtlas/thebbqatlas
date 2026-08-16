@@ -1002,6 +1002,21 @@ export function bannedPhrasesIn(text: string | null | undefined): string[] {
   return SAMENESS_BANNED.filter((b) => b.re.test(t)).map((b) => b.label);
 }
 
+/**
+ * The actual banned SUBSTRINGS present in the text — the real matched phrases (not
+ * the internal labels), so a write-time regeneration can name exactly what to
+ * remove ("you used 'no shortcuts, no'"). Reuses the ONE §1 list.
+ */
+export function bannedExamplesIn(text: string | null | undefined): string[] {
+  const t = text ?? "";
+  const out: string[] = [];
+  for (const b of SAMENESS_BANNED) {
+    const m = t.match(b.re);
+    if (m && m[0].trim()) out.push(m[0].trim());
+  }
+  return out;
+}
+
 /** Lowercase + fold diacritics, for grounding copy claims against the facts. */
 function foldForMatch(s: string): string {
   return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -1193,6 +1208,19 @@ export function ungroundedClaims(copy: string | null | undefined, dossier: unkno
   return out;
 }
 
+/** The writer model's raw JSON shape. */
+interface WriterDraft {
+  hook?: string;
+  description?: string;
+  needs_attention?: boolean;
+  reason?: string;
+}
+/** A copy generator: user prompt → one writer draft (+ usage/model). The real one
+ *  calls Claude/Grok; a test injects a deterministic stub via opts.generate. */
+export type CopyGenerator = (
+  userPrompt: string
+) => Promise<{ data: WriterDraft; usage?: { in_tokens: number; out_tokens: number }; model?: string }>;
+
 /**
  * Claude writing leg: dossier → house-voice copy. Runs on Haiku with a capped
  * output for cost (~$0.004/venue); falls back to Grok only if Claude is off.
@@ -1217,6 +1245,12 @@ export async function writeVenueCopy(
      * deterministically from the dossier so it still varies and stays stable.
      */
     openingStyle?: number;
+    /**
+     * Test seam ONLY — inject the copy generator so the banned-phrase / grounding
+     * gates can be exercised offline and deterministically. Production leaves this
+     * undefined and the real Claude/Grok writer is used.
+     */
+    generate?: CopyGenerator;
   }
 ): Promise<VenueCopy> {
   const label = dossier.location_label || dossier.city || "this";
@@ -1261,24 +1295,52 @@ Return ONLY the JSON described in your instructions.`;
   const maxWriterTokens = opts?.isFlagship
     ? opts?.strong ? 1400 : 768
     : opts?.strong ? 900 : 512;
-  const call = CLAUDE_ENABLED
-    ? claudeJSON<{ hook?: string; description?: string; needs_attention?: boolean; reason?: string }>({
-        system: COPY_SYSTEM,
-        user,
-        search: false,
-        model: writerModel,
-        maxTokens: maxWriterTokens,
-      })
-    : grokJSON<{ hook?: string; description?: string; needs_attention?: boolean; reason?: string }>({
-        system: COPY_SYSTEM,
-        user,
-        search: false,
-      });
-  const { data, usage, model } = await call;
+  // The copy generator: the injected test stub, else the real Claude/Grok writer.
+  const generate: CopyGenerator =
+    opts?.generate ??
+    ((userPrompt: string) =>
+      CLAUDE_ENABLED
+        ? claudeJSON<WriterDraft>({ system: COPY_SYSTEM, user: userPrompt, search: false, model: writerModel, maxTokens: maxWriterTokens })
+        : grokJSON<WriterDraft>({ system: COPY_SYSTEM, user: userPrompt, search: false }));
 
-  // Safety net for the immediate-repetition bug ("No shortcuts, no shortcuts.").
-  const description = dedupeImmediatePhrases(asStr(data.description));
-  const hook = dedupeImmediatePhrases(asStr(data.hook));
+  // First attempt.
+  let { data, usage, model } = await generate(user);
+  let description = dedupeImmediatePhrases(asStr(data.description));
+  let hook = dedupeImmediatePhrases(asStr(data.hook));
+  let usageIn = usage?.in_tokens ?? 0;
+  let usageOut = usage?.out_tokens ?? 0;
+
+  // ANTI-SAMENESS §1 — ENFORCE the banned-phrase list at WRITE TIME, not just as
+  // prompt guidance (0047 was guidance only, so tics like "no shortcuts" / "doesn't
+  // apologise" / "knows what it is" still leaked into Roegels, SAW's, Rudy's). Same
+  // mechanism as the grounding hold: run the ONE §1 detector on the produced copy;
+  // if it trips, regenerate ONCE naming the exact offending phrase, and if it STILL
+  // trips, HOLD the venue (needs_attention) rather than publish the tic.
+  let banned = bannedPhrasesIn(`${hook ?? ""}\n${description ?? ""}`);
+  if (banned.length) {
+    const offenders = bannedExamplesIn(`${hook ?? ""}\n${description ?? ""}`)
+      .map((s) => `"${s}"`)
+      .join(", ");
+    const retryUser = `${user}\n\nREWRITE REQUIRED — your previous draft used a BANNED construction: ${offenders}. Remove it entirely and rewrite that line a DIFFERENT way, keeping every FACT identical. Do not use that phrase or any inflection of it, and re-check the §1 banned list before returning.`;
+    const retry = await generate(retryUser);
+    usageIn += retry.usage?.in_tokens ?? 0;
+    usageOut += retry.usage?.out_tokens ?? 0;
+    const rDescription = dedupeImmediatePhrases(asStr(retry.data.description));
+    const rHook = dedupeImmediatePhrases(asStr(retry.data.hook));
+    const rBanned = bannedPhrasesIn(`${rHook ?? ""}\n${rDescription ?? ""}`);
+    // Take the retry when it's clean, or when it at least trips fewer bans; a still-
+    // tripping result is held below either way (needs_attention), never published.
+    if (rBanned.length === 0 || rBanned.length < banned.length) {
+      data = retry.data;
+      model = retry.model ?? model;
+      description = rDescription;
+      hook = rHook;
+      banned = rBanned;
+    }
+  }
+  // Held if the tic survives one regeneration — a human clears it before publish.
+  const tainted = banned.length > 0;
+
   const flaggedThin = data.needs_attention === true || (!description && !hook);
   const dossierThin =
     !dossier.what_it_is && !dossier.website && !dossier.instagram;
@@ -1314,7 +1376,7 @@ Return ONLY the JSON described in your instructions.`;
   // outranks tone/variety/length.
   const ungrounded = producedCopy ? ungroundedClaims(`${hook ?? ""}\n${description ?? ""}`, dossier) : [];
   const invented = ungrounded.length > 0;
-  const needs_attention = !producedCopy || invented;
+  const needs_attention = !producedCopy || invented || tainted;
   const info_note =
     !needs_attention && (noRealFacts || dossierThin)
       ? "Light on backstory — add a founding date, pitmaster, wood/method or specialities if you have them."
@@ -1325,19 +1387,27 @@ Return ONLY the JSON described in your instructions.`;
         .map((c) => (c.kind === "person" ? `a person "${c.text}"` : `the year ${c.text}`))
         .join(" and ")} not found in this venue's facts — held to avoid an invented detail. Verify against the source and add the fact, or re-enrich.`
     : null;
+  // ANTI-SAMENESS §1 — name the surviving tic so a reviewer can strike it fast.
+  const taintedReason = tainted
+    ? `Copy uses a banned phrase (${bannedExamplesIn(`${hook ?? ""}\n${description ?? ""}`)
+        .map((s) => `"${s}"`)
+        .join(", ")}) that survived a rewrite — held so the tic doesn't publish. Reword and re-run.`
+    : null;
 
   return {
     hook,
     description,
     needs_attention,
-    // Calm guidance when nothing was written; a HARD hold when a fact was invented.
+    // Calm guidance when nothing was written; a HARD hold on an invented fact or a
+    // surviving banned tic (invented outranks the tic if both somehow fire).
     attention_reason: needs_attention
       ? inventedReason ??
+        taintedReason ??
         "Couldn't write a page from the facts on hand yet — add a couple of details (what it is, style, a source) and re-run."
       : null,
     info_note,
-    usage: usage ?? { in_tokens: 0, out_tokens: 0 },
-    model,
+    usage: { in_tokens: usageIn, out_tokens: usageOut },
+    model: model ?? writerModel,
   };
 }
 

@@ -5,12 +5,16 @@ import {
   OPENING_STYLES,
   openingStyleFor,
   bannedPhrasesIn,
+  bannedExamplesIn,
   ungroundedClaims,
   stripPerLocationOperators,
   sanitizePoisonedFacts,
   poisonedFacts,
   sharedPerLocationOperators,
+  writeVenueCopy,
+  type CopyGenerator,
 } from "../lib/ai/enrich";
+import type { VenueDossier } from "../lib/ai/enrich";
 
 let pass = 0, fail = 0;
 function ok(name: string, cond: boolean, extra?: unknown) {
@@ -142,6 +146,62 @@ console.log("\n[NO INVENTED FACTS — part 2: poisoned-facts detector for the sw
     { label: "B", founders_pitmaster: "Aaron Franklin" },
   ]);
   ok("Aaron Franklin shared across branches (untagged) → no false flag", realShared.length === 0, realShared);
+}
+
+console.log("\n[§1 banned-phrase — the write-time detector names the real phrase]");
+{
+  ok("bannedExamplesIn returns the actual phrase, not the label",
+    bannedExamplesIn("they offer no shortcuts, no filler").some((s) => /no shortcuts, no/i.test(s)),
+    bannedExamplesIn("they offer no shortcuts, no filler"));
+  ok("case-insensitive: 'No apologies' catches", bannedPhrasesIn("No apologies here").includes("apologise-construction"));
+  ok("'doesn't apologise' catches", bannedPhrasesIn("it doesn't apologise for the wait").includes("apologise-construction"));
+  ok("examples + labels agree in count for a mixed sample",
+    bannedExamplesIn("no gimmicks, and it knows exactly what it is").length === bannedPhrasesIn("no gimmicks, and it knows exactly what it is").length);
+}
+
+console.log("\n[§1 banned-phrase — ENFORCED at write time in writeVenueCopy]");
+{
+  const dossier = {
+    name: "Smoke Yard", city: "Austin", country: "United States",
+    what_it_is: "Central Texas barbecue joint", bbq_style: "Central Texas",
+    specialities: ["brisket"], awards_press: [] as string[], unknowns: [] as string[],
+  } as unknown as VenueDossier;
+
+  // Case A — first draft trips §1 ("no shortcuts, no…"); the retry is clean → taken.
+  const promptsA: string[] = [];
+  const genThenClean: CopyGenerator = async (userPrompt) => {
+    promptsA.push(userPrompt);
+    return promptsA.length === 1
+      ? { data: { hook: "Brisket, and plenty of it.", description: "Post oak, early hours. No shortcuts, no filler." }, usage: { in_tokens: 10, out_tokens: 20 }, model: "test" }
+      : { data: { hook: "Brisket, and plenty of it.", description: "Post oak, and they open early." }, usage: { in_tokens: 5, out_tokens: 8 }, model: "test" };
+  };
+  const outA = await writeVenueCopy(dossier, { generate: genThenClean });
+  ok("a banned draft is REGENERATED (2 writer calls)", promptsA.length === 2, promptsA.length);
+  ok("the retry NAMES the offending phrase", /REWRITE REQUIRED/.test(promptsA[1]) && /no shortcuts/i.test(promptsA[1]));
+  ok("a clean retry is accepted, not held", outA.needs_attention === false, outA.attention_reason);
+  ok("the published copy carries NO §1 phrase", bannedPhrasesIn(`${outA.hook}\n${outA.description}`).length === 0, `${outA.hook} / ${outA.description}`);
+  ok("usage sums across both attempts", outA.usage.in_tokens === 15 && outA.usage.out_tokens === 28, outA.usage);
+
+  // Case B — the tic survives the one retry → the venue is HELD, never published.
+  let callsB = 0;
+  const genAlwaysBad: CopyGenerator = async () => {
+    callsB++;
+    return { data: { hook: "A place that knows exactly what it is.", description: "Brisket, and it doesn't apologise for it." }, usage: { in_tokens: 1, out_tokens: 1 }, model: "test" };
+  };
+  const outB = await writeVenueCopy(dossier, { generate: genAlwaysBad });
+  ok("a surviving tic HOLDS the venue (needs_attention)", outB.needs_attention === true);
+  ok("regenerated exactly once (2 calls total)", callsB === 2, callsB);
+  ok("the hold reason names the banned phrase", /banned phrase/i.test(outB.attention_reason ?? "") && /apolog/i.test(outB.attention_reason ?? ""), outB.attention_reason);
+
+  // Acceptance 4 — a clean first draft is untouched (no needless regeneration).
+  let callsC = 0;
+  const genClean: CopyGenerator = async () => {
+    callsC++;
+    return { data: { hook: "Brisket, and plenty of it.", description: "Post oak, and they open early." }, usage: { in_tokens: 3, out_tokens: 4 }, model: "test" };
+  };
+  const outC = await writeVenueCopy(dossier, { generate: genClean });
+  ok("a clean first draft is not regenerated (1 call)", callsC === 1, callsC);
+  ok("clean copy publishes (needs_attention false)", outC.needs_attention === false);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
