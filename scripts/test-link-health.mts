@@ -3,7 +3,14 @@
  * transient failure is NEVER a false "broken". Run: npm run test:link-health
  * (The platform fetchers hit the network and are exercised by the live checker.)
  */
-import { classifyHttp, classifyChannelHealth } from "../lib/media/link-health-util";
+import {
+  classifyHttp,
+  classifyChannelHealth,
+  isBotBlockStatus,
+  extractAsin,
+  isRetailUrl,
+  classifyRetailFormat,
+} from "../lib/media/link-health-util";
 
 let pass = 0;
 let fail = 0;
@@ -43,6 +50,36 @@ ok("page 200 with 'terminated' copy → broken", classifyChannelHealth({ kind: "
 ok("page 500 → unchecked (transient)", classifyChannelHealth({ kind: "page", status: 500, dead: false }).status === "unchecked");
 // The exact false-flag regression: a live channel that oEmbed-404s must never be broken now.
 ok("live channel is never 'broken' via the API path", classifyChannelHealth({ kind: "items", count: 2 }).status !== "broken");
+
+console.log("\n[Part 2 — bot-blocked retail is NEVER falsely 'broken']");
+{
+  // A bot block is unverified, not dead.
+  ok("classifyHttp(403) → unchecked (bot block, NOT broken)", classifyHttp(403) === "unchecked");
+  ok("classifyHttp(401) → unchecked (auth wall, NOT broken)", classifyHttp(401) === "unchecked");
+  ok("classifyHttp(999) → unchecked (CDN block code)", classifyHttp(999) === "unchecked");
+  ok("classifyHttp(404) still → broken", classifyHttp(404) === "broken");
+  ok("isBotBlockStatus flags 401/403/429/999, not 404", isBotBlockStatus(403) && isBotBlockStatus(429) && !isBotBlockStatus(404));
+
+  // ASIN extraction.
+  ok("extractAsin /dp/ASIN", extractAsin("https://www.amazon.com/dp/0399580960") === "0399580960");
+  ok("extractAsin /gp/product/ASIN with query", extractAsin("https://www.amazon.com/gp/product/0307452347?tag=x-20") === "0307452347");
+  ok("extractAsin returns null when no ASIN", extractAsin("https://www.amazon.com/s?k=bbq+book") === null);
+  ok("isRetailUrl matches amazon.* and amzn.to", isRetailUrl("https://www.amazon.co.uk/dp/0399580960") && isRetailUrl("https://amzn.to/abc") && !isRetailUrl("https://example.com/book"));
+
+  // The exact live symptom: Franklin Steak (0399580960) + Big Bob Gibson (0307452347)
+  // are valid affiliate books; Amazon blocks the checker → they must be format-verified
+  // OK, never broken, never in the alert email.
+  const franklin = classifyRetailFormat("https://www.amazon.com/dp/0399580960?tag=thebbqatlasus-20");
+  ok("valid-ASIN Amazon link → ok (format-verified), NOT broken", franklin.status === "ok");
+  ok("format-verified note explains why it wasn't fetched", /format-verified/.test(franklin.note ?? ""));
+  const bob = classifyRetailFormat("https://www.amazon.com/gp/product/0307452347");
+  ok("second real book also format-verified ok", bob.status === "ok");
+
+  // A genuinely malformed link IS still broken.
+  ok("malformed Amazon (no ASIN) → broken", classifyRetailFormat("https://www.amazon.com/some/marketing/page").status === "broken");
+  // A short-link we can't parse → unchecked, never falsely broken.
+  ok("Amazon short-link (no ASIN in path) → unchecked, not broken", classifyRetailFormat("https://amzn.to/3xyzABC").status === "unchecked");
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);

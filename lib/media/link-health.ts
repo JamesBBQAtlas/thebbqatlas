@@ -1,7 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { affiliateUrlEarns } from "@/lib/affiliate";
-import { classifyHttp, classifyChannelHealth, type LinkStatus } from "@/lib/media/link-health-util";
+import { classifyHttp, classifyChannelHealth, classifyRetailFormat, isRetailUrl, type LinkStatus } from "@/lib/media/link-health-util";
 import { extractYouTubeVideoId, extractYouTubeHandle, extractYouTubeChannelId } from "@/lib/media/wrl-url";
 
 export { classifyHttp, type LinkStatus };
@@ -51,9 +51,6 @@ async function timedFetch(
     clearTimeout(t);
   }
 }
-
-/** Amazon soft-404 body markers (a dead ASIN returns 200 with these). */
-const AMAZON_DEAD = /(Looking for something\?|we couldn't find that page|Page Not Found|The Web address you entered is not a functioning page|dogs of amazon|Sorry! We couldn't find that page)/i;
 
 /** YouTube "channel gone" body markers as a fallback to the oEmbed check. */
 const YT_DEAD = /(This channel does not exist|has been terminated|account associated with this video has been terminated|isn't available)/i;
@@ -109,14 +106,18 @@ async function checkYouTubeChannel(url: string): Promise<LinkHealth> {
   return classifyChannelHealth({ kind: "page", status: page.status, dead: YT_DEAD.test(body) });
 }
 
-async function checkAmazon(url: string): Promise<LinkHealth> {
-  const res = await timedFetch(url, { method: "GET", timeoutMs: 12_000 });
-  if (res === null) return { status: "unchecked", code: null, note: "network error — will retry" };
-  if (res.status >= 500) return { status: "unchecked", code: res.status, note: "Amazon 5xx — will retry" };
-  if (res.status >= 400) return { status: "broken", code: res.status, note: "ASIN not found" };
-  const body = await res.text().catch(() => "");
-  if (AMAZON_DEAD.test(body)) return { status: "broken", code: 200, note: "ASIN not found (soft 404)" };
-  return { status: "ok", code: res.status, note: null };
+/**
+ * A bot-protected RETAIL link (Amazon): validate by FORMAT, never by fetch. Amazon
+ * blocks automated requests, so a datacenter fetch returns a 403 / CAPTCHA / soft-404
+ * that reveals nothing about whether the product exists — that naive fetch is exactly
+ * what false-flagged 15 valid affiliate books as "broken · ASIN not found". A valid
+ * 10-char ASIN in the path ⇒ OK (format-verified); a malformed link ⇒ broken. The
+ * affiliate-EARNS check (in checkMediaLink) is also format-only, so a mistagged link is
+ * still caught — without ever hitting Amazon. (PA-API can add authoritative existence
+ * later if Associates access allows.)
+ */
+function checkRetail(url: string): LinkHealth {
+  return classifyRetailFormat(url);
 }
 
 async function checkGeneric(url: string): Promise<LinkHealth> {
@@ -134,9 +135,11 @@ async function checkGeneric(url: string): Promise<LinkHealth> {
   };
 }
 
-/** Check a single library item, platform-aware. */
+/** Check a single library item, platform-aware — a per-domain STRATEGY map: YouTube
+ *  channels → Data API, videos → oEmbed, bot-protected retail → format-verify, generic
+ *  → fetch. One place, so the checker never treats a platform's bot-protection or quirks
+ *  as breakage (the same class of bug as the YouTube-channel oEmbed false-positive). */
 export async function checkMediaLink(pick: CheckablePick): Promise<LinkHealth> {
-  const isAmazon = (u: string | null | undefined) => Boolean(u && /(^|\.)amazon\./i.test(u));
   try {
     if (pick.kind === "youtube" || pick.kind === "video") {
       // Dispatch by what the URL actually IS, not just the stored kind, so a
@@ -151,10 +154,17 @@ export async function checkMediaLink(pick: CheckablePick): Promise<LinkHealth> {
     }
     if (pick.kind === "book") {
       // The affiliate/buy link is what visitors click; check that. A dead book
-      // link is BOTH a link-health and an earn problem.
+      // link is BOTH a link-health and an earn problem — but a bot-protected retail
+      // link is validated by FORMAT (never bot-fetched), so Amazon blocking us can
+      // never mark a valid book "broken".
       const buy = pick.gear_link || pick.url;
-      const health = isAmazon(buy) ? await checkAmazon(buy) : await checkGeneric(buy);
-      if (health.status === "ok" && isAmazon(buy) && !affiliateUrlEarns(buy)) {
+      const retail = isRetailUrl(buy);
+      const health = retail ? checkRetail(buy) : await checkGeneric(buy);
+      // The EARN check is format-only (does the URL carry our affiliate tag) — still
+      // enforced on a format-verified link, so a mistagged Amazon link is caught
+      // without ever hitting Amazon. (Only on an OK/ASIN link; a short-link we couldn't
+      // format-verify stays `unchecked`, never falsely "earns $0".)
+      if (retail && health.status === "ok" && !affiliateUrlEarns(buy)) {
         return { status: "broken", code: health.code, note: "book link earns $0 — fix the affiliate URL" };
       }
       return health;
