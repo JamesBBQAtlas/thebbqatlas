@@ -9,6 +9,7 @@ import { seedChainLocations, resolvePhantomFlagship, type SeedLocation } from "@
 import { discoverChainLocations } from "@/lib/chains/discoverLocations";
 import { discoverViaEngine, cloudflareRenderer, engineConfigured } from "@/lib/web-engine/read-page";
 import { discoverViaProviders, providerCrossCheck, providersConfigured } from "@/lib/web-engine/providers";
+import { selectChainSeeds, toSeed, crawlOwnFeed, webOnly } from "@/lib/admin/chain-tiers";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
 import { hasStreetAddress } from "@/lib/admin/chain-discovery/normalize";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
@@ -39,6 +40,11 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "");
   if (!restaurantId) return NextResponse.json({ error: "restaurantId required." }, { status: 400 });
+  // 0068 — "Roster from providers": force the sanctioned provider tier (OSM/Places)
+  // regardless of what the crawl / render engine / Grok found. The control for a
+  // bot-protected chain (City Barbeque, Mission) where a model's web guesses must not
+  // stand in for real provider records.
+  const forceProviders = String(body.source ?? "") === "providers";
 
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
@@ -167,9 +173,17 @@ export async function POST(request: Request) {
   // WEB_ENGINE_URL — inert until the Cloudflare Browser Rendering Worker is deployed,
   // so the current pipeline is unchanged until ops enables it. Pure fallback: only
   // runs when the crawl found nothing and a locator URL exists.
+  // 0068 SPINE — separate the chain's OWN-SITE crawl results (authoritative) from the
+  // Grok WEB pass (a hint). The render engine + provider tiers gate on the CRAWL being
+  // empty, NOT on the crawl∪web union — so a handful of web snippets can never pre-empt
+  // the real tiers. `forceProviders` skips straight to the provider tier.
+  const crawlLocations = crawlOwnFeed(discovery.locations);
+  const webOnlyLocations = webOnly(discovery.locations);
+  const crawlEmpty = crawlLocations.length === 0;
+
   let engineSeeds: SeedLocation[] = [];
   let engineDebug: Record<string, unknown> | null = null;
-  if (engineConfigured() && discovery.locations.length === 0 && discovery.locatorUrl) {
+  if (engineConfigured() && !forceProviders && crawlEmpty && discovery.locatorUrl) {
     try {
       const eng = await discoverViaEngine({
         url: discovery.locatorUrl,
@@ -194,7 +208,7 @@ export async function POST(request: Request) {
   // until GOOGLE_PLACES_API_KEY (or PROVIDER_TIER_OSM=on) is set.
   let providerSeeds: SeedLocation[] = [];
   let providerDebug: Record<string, unknown> | null = null;
-  if (providersConfigured() && discovery.locations.length === 0 && engineSeeds.length === 0 && brand) {
+  if (providersConfigured() && brand && (forceProviders || (crawlEmpty && engineSeeds.length === 0))) {
     try {
       const prov = await discoverViaProviders({
         brand,
@@ -208,13 +222,26 @@ export async function POST(request: Request) {
     }
   }
 
+  // 0068 — pick the authoritative seed set (own feed → engine → provider → web hint).
+  // A model's web guesses are demoted below every real tier and, when used at all, gated.
+  const tierPick = selectChainSeeds({
+    crawlSeeds: crawlLocations.map((l) => toSeed(l)),
+    webSeeds: webOnlyLocations.map((l) => toSeed(l)),
+    engineSeeds,
+    providerSeeds,
+    forceProviders,
+  });
+
   // The shared module reports an array of source types (e.g. ["crawl:hierarchical",
   // "web"]); collapse to one label for the debug record + operator message.
-  const sourceType = engineSeeds.length
-    ? `${discovery.sourceTypes.join("+") || "engine"}+engine`
-    : providerSeeds.length
-      ? `provider${providerDebug && (providerDebug as { fromPlaces?: number }).fromPlaces ? ":osm+places" : ":osm"}`
-      : (discovery.sourceTypes.join("+") || "none");
+  const sourceType =
+    tierPick.tier === "engine"
+      ? `${discovery.sourceTypes.join("+") || "engine"}+engine`
+      : tierPick.tier === "provider"
+        ? `provider${providerDebug && (providerDebug as { fromPlaces?: number }).fromPlaces ? ":osm+places" : ":osm"}`
+        : tierPick.tier === "web"
+          ? "web-research"
+          : (discovery.sourceTypes.join("+") || "none");
 
   const anchoredCountry = discovery.country ?? row.country ?? null;
   // Was this asserted to be a chain (by enrichment or the operator, OR by the web
@@ -227,7 +254,7 @@ export async function POST(request: Request) {
   // fix). Finding exactly ONE real location is a VALID result — a single venue, or
   // a chain whose other branches have closed — so it is LINKED/deduped below, not
   // errored. The hard failure is reserved for a genuine extraction miss (0 found).
-  if (discovery.locations.length === 0 && engineSeeds.length === 0 && providerSeeds.length === 0) {
+  if (tierPick.seeds.length === 0) {
     const urlList = discovery.crawledUrls.slice(0, 20);
     const rawList = discovery.rawAddresses.slice(0, 20);
     if (knownChain) {
@@ -285,28 +312,16 @@ export async function POST(request: Request) {
   }
 
   // One real location is a valid single-venue outcome (not a multi-location chain).
-  const singleLocation = discovery.locations.length < 2;
+  const singleLocation = tierPick.seeds.length < 2;
 
   // ── Step 5 — seed/reconcile every branch (idempotent, deduped). Runs even for a
   // single location, so a found address LINKS to an existing record (no duplicate,
   // no error). ────────────────────────────────────────────────────────────────
-  // Prefer the engine's structured feed seeds when the render tier produced them; then
-  // the provider tier's gated seeds (bot-protected chains); otherwise the fetch-only
-  // crawl's locations. ALL flow through the SAME seedChainLocations (Part A naming,
-  // normStreet dedupe, attach-under-one-flagship) — no fork.
-  const seedInput: SeedLocation[] = engineSeeds.length
-    ? engineSeeds
-    : providerSeeds.length
-    ? providerSeeds
-    : discovery.locations.map((l) => ({
-        name: l.location_label ?? l.name,
-        address: l.address,
-        city: l.city,
-        region: l.region,
-        postcode: l.postcode,
-        country: l.country,
-        source_url: l.source_url,
-      }));
+  // 0068 — the authoritative seed set chosen by the tier spine (own feed → engine →
+  // provider → gated web hint). A model's web guesses never outrank a real tier. ALL
+  // flow through the SAME seedChainLocations (Part A naming, normStreet dedupe,
+  // attach-under-one-flagship, per-seed gating) — no fork.
+  const seedInput: SeedLocation[] = tierPick.seeds;
   const result = await seedChainLocations(ctx.db, restaurantId, brand, anchoredCountry, seedInput);
 
   // Part 4D — identify the flagship from research signals (the dossier's own
@@ -424,6 +439,10 @@ export async function POST(request: Request) {
         decisions: result.decisions.slice(0, 60),
         low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
         source_types: discovery.sourceTypes,
+        tier: tierPick.tier,
+        forced_providers: forceProviders,
+        demoted_web: tierPick.demotedWeb,
+        web_fallback: tierPick.webFallback,
         engine: engineDebug,
         provider: providerDebug,
         cross_check: crossCheckRecord,

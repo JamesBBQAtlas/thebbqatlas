@@ -33,6 +33,12 @@ export interface SeedLocation {
    *  enrichment_sources + never auto-published (status stays pending). Own-feed/render
    *  seeds leave this undefined, so their behaviour is unchanged. */
   provider_refs?: string[] | null;
+  /** A generic "this seed is not authoritative — verify before publish" reason (patch
+   *  0068). Set for Grok WEB-research branches, which are a hint/cross-check, never the
+   *  authoritative source. Like provider_refs it FORCE-GATES the row (needs_attention +
+   *  this reason + never auto-published), but carries no provider id. Own-site (crawl /
+   *  render-engine) seeds leave it undefined and stay ungated. */
+  gate_reason?: string | null;
 }
 
 export interface SeedResult {
@@ -709,14 +715,17 @@ export async function seedChainLocations(
     // so a gated lead is auditable back to the exact provider record.
     const provenance = [...(loc.source_url ? [loc.source_url] : []), ...(loc.provider_refs ?? [])];
     if (provenance.length) insertRow.enrichment_sources = provenance;
-    // PROVIDER TIER GATE (patch 0061) — a provider-sourced branch NEVER auto-publishes:
-    // it lands needs_attention with a "provider-sourced — verify" reason so a human
-    // confirms before publish (third-party data can be stale/wrong). status is already
-    // "pending", so it is never live without review. Belt-and-braces.
-    if (loc.provider_refs?.length) {
+    // NON-AUTHORITATIVE GATE (0061 provider tier + 0068 Grok web hint) — a branch that
+    // did NOT come from the chain's own site (a provider record, or a model's web-research
+    // guess) NEVER auto-publishes: it lands needs_attention with a "verify" reason so a
+    // human confirms before publish. status is already "pending", so it's never live
+    // without review. Own-site (crawl / render-engine) seeds are ungated here.
+    const gateReason = loc.provider_refs?.length
+      ? `Provider-sourced (${providerLabel(loc.provider_refs)}) — verify before publish.`
+      : loc.gate_reason || null;
+    if (gateReason) {
       insertRow.needs_attention = true;
-      const provReason = `Provider-sourced (${providerLabel(loc.provider_refs)}) — verify before publish.`;
-      insertRow.attention_reason = insertRow.attention_reason ? `${provReason} ${insertRow.attention_reason}` : provReason;
+      insertRow.attention_reason = insertRow.attention_reason ? `${gateReason} ${insertRow.attention_reason}` : gateReason;
     }
     if (possibleDupOf) {
       // Part 4C — never silently create a twin. Insert FLAGGED with a link to the

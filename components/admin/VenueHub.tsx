@@ -927,17 +927,24 @@ export function VenueHub({
 
   // Step 2 — Build roster: read the brand's /locations page and add every branch
   // as a seed in the "flagship not set" state. Claims nothing; nothing re-sorts.
-  async function buildRoster(v: HubVenue) {
+  async function buildRoster(v: HubVenue, opts?: { source?: "providers" }) {
     keepScroll();
     markActed(v.id);
     // Live feedback so the operator never stares at an unchanged screen.
-    setRowResult((p) => ({ ...p, [v.id]: { msg: `Scanning ${v.name} locations…` } }));
+    setRowResult((p) => ({
+      ...p,
+      [v.id]: { msg: opts?.source === "providers" ? `Sourcing ${v.name} from providers (OSM / Google Places)…` : `Scanning ${v.name} locations…` },
+    }));
     setState(v.id, "running");
     let res: Response;
     try {
       res = await fetchWithTimeout(
         "/api/admin/venues/chain-roster",
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurantId: v.id }) },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ restaurantId: v.id, ...(opts?.source ? { source: opts.source } : {}) }),
+        },
         290_000
       );
     } catch (e) {
@@ -1596,6 +1603,15 @@ export function VenueHub({
                             className="inline-flex items-center gap-1 rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2 py-0.5 text-xs font-bold uppercase tracking-[0.03em] text-emerald-400 transition-colors hover:bg-emerald-500/20 disabled:opacity-40"
                           >
                             <Store className="h-3 w-3" />Build roster
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => buildRoster(v, { source: "providers" })}
+                            disabled={busy}
+                            title="Bot-protected chain? Source every branch from sanctioned providers (OpenStreetMap + Google Places) as gated leads — never a model's guess"
+                            className="inline-flex items-center gap-1 rounded-md border border-sky-500/50 bg-sky-500/10 px-2 py-0.5 text-xs font-bold uppercase tracking-[0.03em] text-sky-400 transition-colors hover:bg-sky-500/20 disabled:opacity-40"
+                          >
+                            <MapPin className="h-3 w-3" />From providers
                           </button>
                           <button
                             type="button"
