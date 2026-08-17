@@ -3,25 +3,35 @@
 import { useRef, useState } from "react";
 import { ImagePlus, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-
-const MAX_BYTES = 25 * 1024 * 1024; // 25MB
-const MAX_FILES = 5;
+import {
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_FILES,
+  selectUploadableFiles,
+  rejectionMessage,
+} from "@/lib/media/upload-limits";
 
 /**
  * Upload photos/videos for a venue. Files go to the `media` storage bucket
  * under the user's own folder, then a `media` row is registered as PENDING —
- * nothing shows publicly until an admin approves it.
+ * nothing shows publicly until an admin approves it. Limits are props so the
+ * community "Add your photos" flow can be images-only with its own caps (Part 5).
  */
 export function MediaUpload({
   restaurantId,
   source = "upload",
   label = "Add photos",
   onUploaded,
+  maxFiles = DEFAULT_MAX_FILES,
+  maxBytes = DEFAULT_MAX_BYTES,
+  imagesOnly = false,
 }: {
   restaurantId: string;
   source?: string;
   label?: string;
   onUploaded?: (count: number) => void;
+  maxFiles?: number;
+  maxBytes?: number;
+  imagesOnly?: boolean;
 }) {
   const supabase = createClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -45,15 +55,18 @@ export function MediaUpload({
       return;
     }
 
+    // Enforce the count / type / size caps up front (pure, shared with the server rail).
+    const sel = selectUploadableFiles(files, { maxFiles, maxBytes, imagesOnly });
+    const skipped = rejectionMessage(sel, maxFiles);
+    if (skipped) setError(skipped);
+    if (!sel.accepted.length) {
+      setBusy(false);
+      return;
+    }
+
     let count = 0;
-    for (const file of files.slice(0, MAX_FILES)) {
+    for (const file of sel.accepted) {
       const isVideo = file.type.startsWith("video/");
-      const isImage = file.type.startsWith("image/");
-      if (!isVideo && !isImage) continue;
-      if (file.size > MAX_BYTES) {
-        setError("Each file must be under 25MB.");
-        continue;
-      }
       const ext = file.name.split(".").pop()?.toLowerCase() || (isVideo ? "mp4" : "jpg");
       const path = `${user.id}/${crypto.randomUUID()}.${ext}`;
       const { error: upErr } = await supabase.storage
@@ -91,7 +104,7 @@ export function MediaUpload({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*,video/*"
+        accept={imagesOnly ? "image/*" : "image/*,video/*"}
         multiple
         onChange={onChange}
         className="hidden"
@@ -109,7 +122,7 @@ export function MediaUpload({
       {msg && <p className="mt-2 text-xs text-brand-gold">{msg}</p>}
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
       <p className="mt-1.5 text-[0.6875rem] text-text-muted">
-        Photos &amp; videos are reviewed before they appear.
+        Up to {maxFiles} {imagesOnly ? "photos" : "photos & videos"} ({Math.round(maxBytes / (1024 * 1024))}MB each) · reviewed before they appear.
       </p>
     </div>
   );

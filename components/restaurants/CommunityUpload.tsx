@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Link } from "@/i18n/navigation";
 import { ImagePlus } from "lucide-react";
 import { MediaUpload } from "@/components/media/MediaUpload";
+import { COMMUNITY_MAX_FILES, COMMUNITY_MAX_BYTES } from "@/lib/media/upload-limits";
 
 /**
  * Auth-gated photo upload for the community gallery (Fable H-1) — resolves the
@@ -28,7 +29,16 @@ export function CommunityUpload({ restaurantId }: { restaurantId: string }) {
 
   if (authed === null) return null; // resolving — avoid a flash
   if (authed) {
-    return <MediaUpload restaurantId={restaurantId} source="venue" label="Add your photos" />;
+    return (
+      <MediaUpload
+        restaurantId={restaurantId}
+        source="venue"
+        label="Add your photos"
+        imagesOnly
+        maxFiles={COMMUNITY_MAX_FILES}
+        maxBytes={COMMUNITY_MAX_BYTES}
+      />
+    );
   }
   return (
     <Link

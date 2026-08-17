@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { MAX_PENDING_PER_VENUE_PER_DAY } from "@/lib/media/upload-limits";
 
 /**
  * Register an uploaded file as a PENDING media row. The bytes are already in
@@ -25,6 +26,24 @@ export async function POST(request: Request) {
 
   if (!restaurantId || !url || !storagePath) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 });
+  }
+
+  // Abuse rail (Part 5) — the client caps a single upload at 15, but that's
+  // bypassable, so bound how many PENDING photos one user can stack on one venue per
+  // day server-side. Everything still lands pending → moderation regardless.
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count: recentPending } = await supabase
+    .from("media")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id)
+    .eq("restaurant_id", restaurantId)
+    .eq("status", "pending")
+    .gte("created_at", dayAgo);
+  if ((recentPending ?? 0) >= MAX_PENDING_PER_VENUE_PER_DAY) {
+    return NextResponse.json(
+      { error: "You've reached today's photo limit for this venue — thanks! Your earlier uploads are awaiting review." },
+      { status: 429 }
+    );
   }
 
   const { error } = await supabase.from("media").insert({
