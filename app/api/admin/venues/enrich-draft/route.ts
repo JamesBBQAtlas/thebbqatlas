@@ -453,11 +453,35 @@ export async function POST(request: Request) {
     if (sibs.length) writeOpts.siblingDossiers = sibs;
   }
 
-  let copy;
-  try {
-    copy = await writeVenueCopy(dossier, writeOpts);
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Copywriting failed." }, { status: 502 });
+  // #213 — copy is DECOUPLED from geocoding/facts. A protected hand-written row
+  // skips the copy model entirely (don't spend a call, don't risk a throw, never
+  // overwrite); a copy failure holds for manual copy but still lets geocode + facts
+  // commit below — it never aborts enrichment or surfaces a raw error.
+  let copy: Awaited<ReturnType<typeof writeVenueCopy>>;
+  if (protectCopy) {
+    copy = {
+      hook: null,
+      description: null,
+      needs_attention: false,
+      attention_reason: null,
+      info_note: null,
+      usage: { in_tokens: 0, out_tokens: 0 },
+      model: "manual (skipped)",
+    };
+  } else {
+    try {
+      copy = await writeVenueCopy(dossier, writeOpts);
+    } catch (err) {
+      copy = {
+        hook: null,
+        description: null,
+        needs_attention: true,
+        attention_reason: `enrichment: copy step failed (${err instanceof Error ? err.message : "unknown error"}) — geocode/facts saved; add copy manually or re-run`,
+        info_note: null,
+        usage: { in_tokens: 0, out_tokens: 0 },
+        model: CLAUDE_WRITER_MODEL,
+      };
+    }
   }
   const claudeModel = copy.model ?? CLAUDE_WRITER_MODEL;
 
@@ -720,7 +744,12 @@ export async function POST(request: Request) {
     const finalName = (dossier.name as string) || row.name;
     const finalCity = (storedCity as string) || row.city || null;
     const newSlug = await desiredVenueSlug(ctx.db, restaurantId, finalName, finalCity, row.slug);
-    if (row.slug && newSlug !== row.slug) {
+    // #213 (B2.4) — never CHURN a slug on a pure de-collision ("…-montgomery" →
+    // "…-montgomery-2"): a silent suffix change mid-batch broke a slug-keyed PM
+    // update. Only re-slug on a real BASE change (name/city actually moved); the
+    // slug_redirects row is the durable log of any change that does happen.
+    const slugBase = (s: string) => s.replace(/-\d+$/, "");
+    if (row.slug && newSlug !== row.slug && slugBase(newSlug) !== slugBase(row.slug)) {
       proposed.slug = newSlug;
       await ctx.db
         .from("slug_redirects")

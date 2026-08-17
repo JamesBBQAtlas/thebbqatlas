@@ -1390,9 +1390,32 @@ export async function writeVenueCopy(
     return { hook: hk, description: desc, banned: bans };
   };
 
-  // First attempt on the venue's own dossier.
+  // First attempt on the venue's own dossier. RESILIENCE (#213) — a malformed /
+  // unreadable model response must NEVER surface as a raw parser error or half-write
+  // the row. Retry ONCE with a strict "JSON only" nudge; if it STILL fails, return a
+  // clean needs_attention hold so the caller can still geocode and flag for manual
+  // copy, rather than aborting the whole enrichment.
   let activeDossier = dossier;
-  let r = await runAttempt(buildUserPrompt(activeDossier));
+  let r: { hook: string | null; description: string | null; banned: string[] };
+  try {
+    r = await runAttempt(buildUserPrompt(activeDossier));
+  } catch {
+    try {
+      r = await runAttempt(
+        `${buildUserPrompt(activeDossier)}\n\nIMPORTANT: reply with ONLY a single valid JSON object — no prose, no markdown, no code fences.`
+      );
+    } catch {
+      return {
+        hook: null,
+        description: null,
+        needs_attention: true,
+        attention_reason: "enrichment: model returned no usable JSON — needs a fuller dossier or manual copy",
+        info_note: null,
+        usage: { in_tokens: usageIn, out_tokens: usageOut },
+        model: writerModel,
+      };
+    }
+  }
 
   // BRAND FALLBACK — a chain flagship about to be HELD for a thin own-dossier
   // borrows the brand-level facts its OWN branches already proved (sanitized of any

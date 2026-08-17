@@ -257,5 +257,32 @@ console.log("\n[BRAND FALLBACK — a thin flagship borrows its branches' facts b
   ok("a standalone thin venue holds with NO borrow pass", outC.needs_attention === true && callsC.length === 1, callsC.length);
 }
 
+console.log("\n[#213 — writer resilience: a malformed model response retries once, then holds]");
+{
+  const dossier = {
+    name: "Smoke Yard", city: "Austin", country: "United States",
+    what_it_is: "Central Texas barbecue joint", bbq_style: "Central Texas",
+    specialities: ["brisket"], awards_press: [] as string[], unknowns: [] as string[],
+  } as unknown as VenueDossier;
+
+  // A first response that throws (malformed JSON) → retried once → succeeds.
+  let n = 0;
+  const throwThenOk: CopyGenerator = async () => {
+    n++;
+    if (n === 1) throw new Error("Claude returned no usable JSON.");
+    return { data: { hook: "Brisket, and plenty of it.", description: "Post oak, and they open early." }, usage: { in_tokens: 2, out_tokens: 3 }, model: "t" };
+  };
+  const out1 = await writeVenueCopy(dossier, { generate: throwThenOk });
+  ok("a malformed first response is retried and then succeeds", out1.needs_attention === false && Boolean(out1.description) && n === 2, { na: out1.needs_attention, n });
+
+  // A persistently malformed response → held with a readable reason (never raw).
+  let m = 0;
+  const alwaysThrow: CopyGenerator = async () => { m++; throw new Error("Claude returned no usable JSON."); };
+  const out2 = await writeVenueCopy(dossier, { generate: alwaysThrow });
+  ok("a persistently malformed response HOLDS (needs_attention)", out2.needs_attention === true);
+  ok("the hold reason is readable, not a raw parser error", /no usable JSON/i.test(out2.attention_reason ?? "") && !/undefined|SyntaxError/.test(out2.attention_reason ?? ""), out2.attention_reason);
+  ok("retried exactly once before holding (2 attempts)", m === 2, m);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);

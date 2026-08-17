@@ -7,6 +7,8 @@
  * so Claude genuinely hunts the live web rather than guessing.
  */
 
+import { tryParseModelJson } from "./json";
+
 const ANTHROPIC_BASE = process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1";
 export const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5";
 // The house-voice WRITING step runs on Haiku by default — lean + cheap (~$0.004
@@ -119,18 +121,11 @@ export async function claudeJSON<T>({
   const { text, urls } = collectText(json?.content);
   const cleaned = text.replace(/\[\[\d+\]\]\([^)]*\)/g, "").trim();
 
-  let parsed: T;
-  try {
-    parsed = JSON.parse(cleaned) as T;
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) throw new ClaudeError("Claude returned no parseable JSON.");
-    try {
-      parsed = JSON.parse(match[0]) as T;
-    } catch {
-      throw new ClaudeError("Claude returned malformed JSON.");
-    }
-  }
+  // Tolerant parse (#213) — recover JSON wrapped in ``` fences / prose / a balanced
+  // object before a truncation, brace- and string-aware. Only throw when nothing is
+  // recoverable; the writer then retries once and holds rather than surfacing this.
+  const parsed = tryParseModelJson<T>(cleaned);
+  if (parsed === null) throw new ClaudeError("Claude returned no usable JSON.");
 
   return {
     data: parsed,

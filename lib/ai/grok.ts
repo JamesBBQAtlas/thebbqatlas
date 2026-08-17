@@ -16,6 +16,8 @@
  * `search_parameters` / "Live Search", which xAI has deprecated (HTTP 410).
  */
 
+import { tryParseModelJson } from "./json";
+
 const XAI_BASE = process.env.XAI_BASE_URL ?? "https://api.x.ai/v1";
 // Cost-efficient default (COST-EFFICIENT-ENRICHMENT): grok-4-fast keeps a bounded
 // per-venue research call cheap (~$0.02). Override with XAI_MODEL if needed.
@@ -194,21 +196,14 @@ export async function grokJSON<T>({
   // Strip inline citation markers like [[1]](https://…) the tools inject.
   const cleaned = raw.replace(/\[\[\d+\]\]\([^)]*\)/g, "").trim();
 
-  let parsed: T;
-  try {
-    parsed = JSON.parse(cleaned) as T;
-  } catch {
-    const match = cleaned.match(/\{[\s\S]*\}/);
-    if (!match) {
-      throw new GrokError("Grok returned a response we couldn't parse as JSON.");
-    }
-    try {
-      parsed = JSON.parse(match[0]) as T;
-    } catch {
-      throw new GrokError(
-        "Grok returned malformed JSON (its answer was likely cut off). Try again, or narrow the search with a city."
-      );
-    }
+  // Tolerant parse (#213) — recover JSON wrapped in ``` fences / prose / a balanced
+  // object before a truncation, brace- and string-aware. Only throw when nothing is
+  // recoverable, so the caller can retry or hold cleanly.
+  const parsed = tryParseModelJson<T>(cleaned);
+  if (parsed === null) {
+    throw new GrokError(
+      "Grok returned malformed JSON (its answer was likely cut off). Try again, or narrow the search with a city."
+    );
   }
 
   return {
