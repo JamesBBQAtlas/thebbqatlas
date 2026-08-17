@@ -5,6 +5,7 @@ import { Link } from "@/i18n/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { AdminNav } from "@/components/admin/AdminNav";
+import { moderationQueueCounts } from "@/lib/admin/moderation-counts";
 
 export const dynamic = "force-dynamic";
 
@@ -86,20 +87,15 @@ export default async function AdminLayout({
     ? createAdminClient()
     : supabase;
 
-  const [
-    mediaPending,
-    subsPending,
-    reviewsPending,
-    photosPending,
-    draftsPending,
-  ] = await Promise.all([
+  // Part 8 — the Moderation Queue badge is the SUM of its tab counts (submissions +
+  // corrections + claims + reviews + photos), where photos = review_photos + pending
+  // `media` images (0064). One shared helper, so the badge can't disagree with the queue.
+  const [mediaPending, draftsPending, moderation] = await Promise.all([
     count(db, "media", { col: "status", val: "pending" }),
-    count(db, "submissions", { col: "moderation_status", val: "pending" }),
-    count(db, "reviews", { col: "status", val: "pending" }),
-    count(db, "review_photos", { col: "status", val: "pending" }),
     count(db, "restaurants", { col: "status", val: "pending" }),
+    moderationQueueCounts(db),
   ]);
-  const pendingTotal = subsPending + reviewsPending + photosPending;
+  const pendingTotal = moderation.total;
 
   return (
     <div className="admin-shell min-h-screen">

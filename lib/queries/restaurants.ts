@@ -3,6 +3,7 @@ import { createAnonClient } from "@/lib/supabase/anon";
 import type { Restaurant, SignatureDish, Review } from "@/lib/types/database";
 import { FALLBACK_RESTAURANTS } from "@/lib/data/fallback-restaurants";
 import { LIST_COLUMNS } from "@/lib/queries/list-columns";
+import { isLiveVenue } from "@/lib/venues/live-count";
 
 export { LIST_COLUMNS } from "@/lib/queries/list-columns";
 
@@ -31,8 +32,9 @@ async function getSupabaseRestaurants(): Promise<Restaurant[] | null> {
     // map, directory, Featured, "nearby", and the public spot count all read
     // through here (Fix 7). The individual venue page uses getRestaurantBySlug
     // (below), which does NOT filter, so a closed venue still renders with its
-    // "Permanently closed" banner rather than 404-ing.
-    return rows.filter((r) => !r.permanently_closed);
+    // "Permanently closed" banner rather than 404-ing. The ONE live-venue predicate
+    // (Part 9) so the public count can never diverge from the admin breakdown.
+    return rows.filter(isLiveVenue);
   } catch (e) {
     console.error("[queries.restaurants] unexpected read error — serving seed fallback:", e);
     return null;

@@ -11,6 +11,7 @@ import { summarizeCosts, getAiUsageReport } from "@/lib/admin/cost-summary";
 import { fmtUsd } from "@/lib/constants/enrichment-cost";
 import { isRealPhoto } from "@/lib/constants/hero";
 import type { Restaurant, MapItemCategory } from "@/lib/types/database";
+import { liveVenueBreakdown } from "@/lib/venues/live-count";
 
 export const metadata = { title: "Listings" };
 export const dynamic = "force-dynamic";
@@ -165,6 +166,9 @@ export default async function ListingsPage({
   const all = (venueData ?? []) as Restaurant[];
   const approved = all.filter((r) => r.status === "approved");
   const A = approved.length || 1; // avoid /0
+  // Part 9 — the ONE live-venue definition (approved AND not permanently closed), so the
+  // admin headline matches the public site (529) and reconciles the raw approved figure.
+  const venueCounts = liveVenueBreakdown(all);
 
   // Freshness distribution
   const freshCount = { green: 0, amber: 0, red: 0 };
@@ -251,7 +255,7 @@ export default async function ListingsPage({
 
       {/* Headline */}
       <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6">
-        <Stat label="Venues live" value={approved.length} tone="gold" sub={`${all.length - approved.length} pending`} />
+        <Stat label="Venues live" value={venueCounts.live} tone="gold" sub={`${venueCounts.closed} permanently closed · ${venueCounts.approved} approved`} />
         <Stat label="Countries" value={countries.size} />
         <Stat label="Cities" value={cities.size} />
         <Stat label="Brands" value={brands.size} />
