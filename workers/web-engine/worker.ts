@@ -48,7 +48,12 @@ export default {
     try {
       browser = await puppeteer.launch(env.MYBROWSER);
       const page = await browser.newPage();
-      await page.setUserAgent("TheBBQAtlas-WebEngine/1.0 (+https://thebbqatlas.com)");
+      // A REAL Chrome UA — a custom/bot UA gets served an empty shell or a challenge
+      // by many sites, so the SPA never hydrates and fires no data XHRs.
+      await page.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+      );
+      await page.setViewport({ width: 1280, height: 900 });
 
       // Intercept every JSON/GraphQL response — the primary data source.
       page.on("response", async (resp: any) => {
@@ -69,15 +74,20 @@ export default {
         }
       });
 
-      const waitUntil =
-        req.waitFor === "networkidle" || req.waitFor == null ? "networkidle0" : "domcontentloaded";
-      await page.goto(url, { waitUntil, timeout: budgetMs });
-
-      // Extra waitFor: a selector, or a bounded delay.
+      // Load the shell, then let a client-rendered SPA HYDRATE and fire its data XHRs.
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: budgetMs });
       if (typeof req.waitFor === "string" && req.waitFor !== "networkidle") {
-        await page.waitForSelector(req.waitFor, { timeout: 8000 }).catch(() => {});
+        await page.waitForSelector(req.waitFor, { timeout: 10_000 }).catch(() => {});
       } else if (typeof req.waitFor === "number") {
-        await sleep(Math.min(req.waitFor, 8000));
+        await sleep(Math.min(req.waitFor, 10_000));
+      } else {
+        // Default: wait for the app to settle after its XHRs, capped by the budget.
+        const idleDeadline = Math.min(18_000, budgetMs - (Date.now() - started));
+        if (typeof page.waitForNetworkIdle === "function") {
+          await page.waitForNetworkIdle({ idleTime: 2500, timeout: Math.max(4000, idleDeadline) }).catch(() => {});
+        } else {
+          await sleep(Math.min(8000, Math.max(2000, idleDeadline)));
+        }
       }
 
       // Ordered interactions — broaden a search, load-all, paginate, scroll.
@@ -102,7 +112,7 @@ export default {
       }
 
       // A short settle so late XHRs (per-store follow-ups) land in the capture.
-      await sleep(1200);
+      await sleep(2000);
 
       const cap = req.capture ?? {};
       const dom = cap.dom ? await page.content() : null;
