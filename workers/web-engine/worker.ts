@@ -6,14 +6,17 @@
  * runs any declarative interactions to broaden the dataset, and returns the
  * `ReadPageResult` the app-side client (lib/web-engine/read-page.ts) expects.
  *
- * NOTE: this file runs on Cloudflare Workers (not in the Next.js/Vercel bundle) and is
- * NOT exercised by the repo's `tsx` test suite — it needs the Browser Rendering binding
- * at runtime. The app-side engine (types, adapters, feed→seeds, orchestrator, budget)
- * IS fully unit-tested; this Worker is the deploy artifact. See README.md to enable the
- * binding, deploy, and smoke-test. Keep it thin — render + intercept + interact + extract.
+ * Uses `@cloudflare/puppeteer` — the mature Browser Rendering SDK. (An earlier draft
+ * used `@cloudflare/playwright`, which hit `fs.mkdtemp not implemented` on the Workers
+ * runtime; puppeteer avoids it.)
+ *
+ * NOTE: runs on Cloudflare Workers (not the Next/Vercel bundle) and is NOT exercised by
+ * the repo's tsx suite — it needs the Browser Rendering binding at runtime. The app-side
+ * engine (types, adapters, feed→seeds, orchestrator, budget) IS fully unit-tested; this
+ * Worker is the deploy artifact. See README.md to deploy + smoke-test.
  */
-// @ts-nocheck — Workers runtime + @cloudflare/playwright types are not in the Next tsconfig.
-import { launch } from "@cloudflare/playwright";
+// @ts-nocheck — Workers runtime + @cloudflare/puppeteer types are not in the Next tsconfig.
+import puppeteer from "@cloudflare/puppeteer";
 
 export interface Env {
   MYBROWSER: Fetcher; // the Browser Rendering binding (wrangler.toml: [browser])
@@ -21,6 +24,7 @@ export interface Env {
 }
 
 const MAX_BUDGET_MS = 30_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -42,14 +46,14 @@ export default {
     let browser: any = null;
 
     try {
-      browser = await launch(env.MYBROWSER);
+      browser = await puppeteer.launch(env.MYBROWSER);
       const page = await browser.newPage();
-      await page.setExtraHTTPHeaders({ "user-agent": "TheBBQAtlas-WebEngine/1.0 (+https://thebbqatlas.com)" });
+      await page.setUserAgent("TheBBQAtlas-WebEngine/1.0 (+https://thebbqatlas.com)");
 
       // Intercept every JSON/GraphQL response — the primary data source.
       page.on("response", async (resp: any) => {
         try {
-          const ct = resp.headers()["content-type"] || "";
+          const ct = (resp.headers()["content-type"] || "") as string;
           if (!/json|graphql/i.test(ct)) return;
           if (networkResponses.length > 200) return; // safety cap
           const text = await resp.text();
@@ -65,14 +69,15 @@ export default {
         }
       });
 
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: budgetMs });
-      // waitFor: selector | ms | "networkidle"
+      const waitUntil =
+        req.waitFor === "networkidle" || req.waitFor == null ? "networkidle0" : "domcontentloaded";
+      await page.goto(url, { waitUntil, timeout: budgetMs });
+
+      // Extra waitFor: a selector, or a bounded delay.
       if (typeof req.waitFor === "string" && req.waitFor !== "networkidle") {
         await page.waitForSelector(req.waitFor, { timeout: 8000 }).catch(() => {});
       } else if (typeof req.waitFor === "number") {
-        await page.waitForTimeout(Math.min(req.waitFor, 8000));
-      } else {
-        await page.waitForLoadState?.("networkidle", { timeout: 8000 }).catch(() => {});
+        await sleep(Math.min(req.waitFor, 8000));
       }
 
       // Ordered interactions — broaden a search, load-all, paginate, scroll.
@@ -80,21 +85,24 @@ export default {
         if (Date.now() - started > budgetMs) break;
         try {
           if (step.type === "click") await page.click(step.selector, { timeout: 5000 });
-          else if (step.type === "type") await page.fill(step.selector, step.text, { timeout: 5000 });
+          else if (step.type === "type") await page.type(step.selector, step.text, { delay: 10 });
           else if (step.type === "press") await page.keyboard.press(step.key);
           else if (step.type === "waitFor") {
             if (step.selector) await page.waitForSelector(step.selector, { timeout: step.ms ?? 5000 }).catch(() => {});
-            else await page.waitForTimeout(Math.min(step.ms ?? 1000, 8000));
+            else await sleep(Math.min(step.ms ?? 1000, 8000));
           } else if (step.type === "scroll") {
             for (let i = 0; i < (step.times ?? 3); i++) {
               await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
-              await page.waitForTimeout(400);
+              await sleep(500);
             }
           }
         } catch {
           /* a failed interaction is not fatal — capture what we have */
         }
       }
+
+      // A short settle so late XHRs (per-store follow-ups) land in the capture.
+      await sleep(1200);
 
       const cap = req.capture ?? {};
       const dom = cap.dom ? await page.content() : null;

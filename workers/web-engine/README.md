@@ -16,7 +16,7 @@ daily allowance on Workers; usage-based beyond that is ~$0.09/browser-hour.
 
 ```
 cd workers/web-engine
-npm i -D wrangler @cloudflare/playwright
+npm i -D wrangler @cloudflare/puppeteer
 npx wrangler secret put WEB_ENGINE_SECRET      # paste a long random string
 npx wrangler deploy
 ```
