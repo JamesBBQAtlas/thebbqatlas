@@ -21,6 +21,19 @@ const nextConfig = {
   // To make the apex canonical, set thebbqatlas.com as the primary domain in
   // Vercel (so Vercel redirects www→apex). The canonical <link> tags already
   // point at the apex via metadataBase.
+  async redirects() {
+    return [
+      // Part 6 (SEO) — consolidate the default-locale PREFIX duplicate. With
+      // localePrefix "as-needed", the canonical form of every URL is UNPREFIXED
+      // (/directory/…), but the prefixed form (/en-US/directory/…) can still resolve
+      // and Google flagged the pair as "Duplicate without user-selected canonical".
+      // A permanent redirect collapses the prefixed form onto the canonical one.
+      // next.config redirects run BEFORE the next-intl middleware, and the destination
+      // is unprefixed, so there is no loop (the target never re-matches the source).
+      { source: "/en-US", destination: "/", permanent: true },
+      { source: "/en-US/:path*", destination: "/:path*", permanent: true },
+    ];
+  },
 };
 
 export default withNextIntl(nextConfig);
