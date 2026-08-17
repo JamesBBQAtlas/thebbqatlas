@@ -22,6 +22,7 @@
     "test:web-engine": "tsx scripts/test-web-engine.mts",
     "test:provider": "tsx scripts/test-provider-tier.mts",
     "test:directory-perf": "tsx scripts/test-directory-perf.mts",
+    "test:photo-mod": "tsx scripts/test-photo-moderation.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
     "test:geocode": "tsx scripts/test-geocode-precision.mts",
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",

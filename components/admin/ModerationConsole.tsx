@@ -36,6 +36,11 @@ export type PhotoItem = {
   created_at: string;
   restaurantName?: string;
   restaurantSlug?: string;
+  /** Which table this pending photo lives in — a community venue upload sits in
+   *  `media`, a review attachment in `review_photos`. Decides where approve/reject
+   *  writes the status back (Part 3 — the tab used to read only review_photos, so the
+   *  22 pending `media` venue photos never showed). Defaults to review for back-compat. */
+  source?: "media" | "review";
 };
 
 export type CorrectionItem = {
@@ -203,14 +208,17 @@ export function ModerationConsole({
     id: string,
     action: "approve" | "reject" | "merge",
     bucket: Bucket,
-    notes?: string
+    notes?: string,
+    // Part 3 — a photo can live in `media` (venue upload) or `review_photos`; pass the
+    // source so the moderate route writes the status back to the right table.
+    photoSource?: "media" | "review"
   ) {
     setBusy(id);
     try {
       const res = await fetch("/api/admin/moderate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: apiType, id, action, notes }),
+        body: JSON.stringify({ type: apiType, id, action, notes, source: photoSource }),
       });
       if (res.ok) {
         if (bucket === "subs") setSubs((p) => p.filter((s) => s.id !== id));
@@ -581,8 +589,8 @@ export function ModerationConsole({
                   </div>
                   <Actions
                     busy={busy === p.id}
-                    onApprove={() => act("photo", p.id, "approve", "photos")}
-                    onReject={(reason) => act("photo", p.id, "reject", "photos", `Rejected — ${reason}`)}
+                    onApprove={() => act("photo", p.id, "approve", "photos", undefined, p.source)}
+                    onReject={(reason) => act("photo", p.id, "reject", "photos", `Rejected — ${reason}`, p.source)}
                   />
                 </div>
               </div>

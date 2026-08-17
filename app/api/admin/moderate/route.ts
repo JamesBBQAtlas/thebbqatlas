@@ -8,6 +8,7 @@ import { checkDuplicate } from "@/lib/venues/dedupe-server";
 import { sendModerationOutcome } from "@/lib/email/senders";
 import { emailFirstName } from "@/lib/email/recipient";
 import { auditField, auditCreated } from "@/lib/admin/content-audit";
+import { normalizePhotoSource, photoModerationTable } from "@/lib/admin/photo-moderation";
 
 type ModType = "submission" | "review" | "photo";
 type Action = "approve" | "reject" | "merge";
@@ -66,6 +67,9 @@ export async function POST(request: Request) {
   const id: string = body.id ?? body.submissionId;
   const action: Action = body.action;
   const notes: string | undefined = body.notes;
+  // Part 3 — a pending photo can live in `media` (community venue upload) or
+  // `review_photos` (review attachment). The client passes which; default review.
+  const photoSource = normalizePhotoSource(body.source);
   // Explicit operator override to publish a needs_attention (thin-data) venue.
   const override: boolean = Boolean(body.override);
 
@@ -330,10 +334,17 @@ export async function POST(request: Request) {
     }
 
     if (type === "photo") {
+      const nextStatus = action === "approve" ? "approved" : "rejected";
+      if (photoModerationTable(photoSource) === "media") {
+        // A community venue upload lives in `media`, which has no moderation-audit
+        // columns — only flip its status (mirrors app/api/admin/media approve/reject).
+        await admin.from("media").update({ status: nextStatus }).eq("id", id);
+        return NextResponse.json({ ok: true });
+      }
       await admin
         .from("review_photos")
         .update({
-          status: action === "approve" ? "approved" : "rejected",
+          status: nextStatus,
           moderated_by: ctx.userId,
           moderated_at: new Date().toISOString(),
           moderation_note: notes ?? null,

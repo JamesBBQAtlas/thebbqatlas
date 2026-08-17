@@ -45,7 +45,7 @@ export default async function ModerationPage() {
     ? createAdminClient()
     : supabase;
 
-  const [subsRes, reviewsRes, photosRes, claimsRes] = await Promise.all([
+  const [subsRes, reviewsRes, photosRes, claimsRes, mediaPhotosRes] = await Promise.all([
     db
       .from("submissions")
       .select("*")
@@ -65,6 +65,15 @@ export default async function ModerationPage() {
       .from("restaurant_claims")
       .select("*, restaurants(name, slug)")
       .eq("status", "pending")
+      .order("created_at", { ascending: true }),
+    // Part 3 — community venue photos land in `media` (kind='image'), NOT
+    // `review_photos`, so they never reached this tab. Read the real pending images so
+    // Moderation → Photos matches the Media tab's pending count.
+    db
+      .from("media")
+      .select("id, url, created_at, restaurant_id, source")
+      .eq("status", "pending")
+      .eq("kind", "image")
       .order("created_at", { ascending: true }),
   ]);
 
@@ -160,13 +169,44 @@ export default async function ModerationPage() {
     reviewer: nameById.get(r.user_id) ?? "Member",
   }));
 
-  const photos: PhotoItem[] = (photosRes.data ?? []).map((p) => ({
+  const reviewPhotos: PhotoItem[] = (photosRes.data ?? []).map((p) => ({
     id: p.id,
     url: p.url,
     created_at: p.created_at,
     restaurantName: p.reviews?.restaurants?.name,
     restaurantSlug: p.reviews?.restaurants?.slug,
+    source: "review" as const,
   }));
+
+  // Part 3 — resolve each community `media` photo's venue name in one query, then map
+  // to the same PhotoItem shape (tagged source:"media" so approve/reject writes back to
+  // `media`). This is what makes Moderation → Photos show the 22 pending venue uploads.
+  const rawMediaPhotos = (mediaPhotosRes.data ?? []) as Array<{
+    id: string; url: string; created_at: string; restaurant_id: string | null; source: string | null;
+  }>;
+  const mediaVenueIds = [...new Set(rawMediaPhotos.map((m) => m.restaurant_id).filter(Boolean))] as string[];
+  const venueById = new Map<string, { name: string; slug: string }>();
+  if (mediaVenueIds.length) {
+    const { data: venues } = await db
+      .from("restaurants")
+      .select("id, name, slug")
+      .in("id", mediaVenueIds);
+    for (const v of venues ?? []) venueById.set(v.id, { name: v.name, slug: v.slug });
+  }
+  const mediaPhotos: PhotoItem[] = rawMediaPhotos.map((m) => ({
+    id: m.id,
+    url: m.url,
+    created_at: m.created_at,
+    restaurantName: m.restaurant_id ? venueById.get(m.restaurant_id)?.name : undefined,
+    restaurantSlug: m.restaurant_id ? venueById.get(m.restaurant_id)?.slug : undefined,
+    source: "media" as const,
+  }));
+
+  // One unified Photos queue — community venue uploads + review attachments — newest
+  // first, so the tab count equals the true pending-photo total (Media tab parity).
+  const photos: PhotoItem[] = [...mediaPhotos, ...reviewPhotos].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
 
   const claims: ClaimModItem[] = (claimsRes.data ?? []).map((c) => ({
     id: c.id,
