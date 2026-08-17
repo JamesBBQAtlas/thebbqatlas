@@ -128,6 +128,24 @@ export function rosterNameIsOffBrand(
   return true;
 }
 
+/**
+ * Is this "name" actually a bare LOCATION label, not a real venue name? A venue
+ * name must never be its own city or a per-location heading ("Beaumont", "The
+ * Original") — that is the orphan-flagship shape (#214). True when the name is
+ * empty, or equals the branch's own city or the flagship's city. The insert-time
+ * tripwire (A3.5): a bare-location name is a MISLABELLED BRANCH, never seeded under
+ * that label — it re-brands to the flagship name and attaches, or holds.
+ */
+export function nameIsBareLocation(
+  name: string | null | undefined,
+  opts?: { city?: string | null; parentCity?: string | null }
+): boolean {
+  if (!name || !name.trim()) return true;
+  const nc = normCity(name);
+  if (!nc) return true;
+  return nc === normCity(opts?.city ?? null) || nc === normCity(opts?.parentCity ?? null);
+}
+
 interface ExistingRow {
   id: string;
   address: string | null;
@@ -444,7 +462,22 @@ export async function seedChainLocations(
     // BBQ's page) is NOT a branch. Never rename it to the parent or attach it as a
     // child: seed it standalone under its REAL name, flagged for a human, so the
     // real venue is preserved but not filed under the wrong brand.
-    if (rosterNameIsOffBrand(loc.name, brand, { selfCity: loc.city, parentCity: (parentRow as { city?: string | null } | null)?.city ?? null })) {
+    const parentCityHint = (parentRow as { city?: string | null } | null)?.city ?? null;
+    if (
+      rosterNameIsOffBrand(loc.name, brand, { selfCity: loc.city, parentCity: parentCityHint }) &&
+      // TRIPWIRE (A3.5) — a bare LOCATION label ("Beaumont") is never a rival
+      // business: it's a mislabelled branch, so let it fall through to the normal
+      // branch path (name = brand, attached under the flagship), never an orphan.
+      !nameIsBareLocation(loc.name, { city: loc.city, parentCity: parentCityHint })
+    ) {
+      // DEDUPE (A3.4) — never create a parallel off-brand copy of a row we already
+      // have, and collapse a brand-node/orphan that shares this address. If it
+      // matches an existing member/near row, note and skip rather than duplicate.
+      const offDup = existing.find((e) => !consumed.has(e.id) && matches(c, e));
+      if (offDup) {
+        note(loc.address ?? loc.name ?? "", "off_brand_duplicate", `off-brand link "${loc.name}" already exists at this address — skipped`);
+        continue;
+      }
       const offCity = settlementCity(loc.city) || loc.city || "";
       const offSlug = await uniqueRestaurantSlug(db, `${loc.name} ${offCity || label}`);
       const offComposed = composeAddress({ street: loc.address, city: loc.city });

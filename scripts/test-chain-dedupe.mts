@@ -16,7 +16,7 @@ import {
   type DiscoveredLocation,
 } from "../lib/chains/discoverLocations";
 import { findDuplicates } from "../lib/venues/dedupe";
-import { rosterNameIsOffBrand, brandTokens, addressHasStreet } from "../lib/admin/chain-seed";
+import { rosterNameIsOffBrand, brandTokens, addressHasStreet, nameIsBareLocation } from "../lib/admin/chain-seed";
 import { coherentGeoConfidence, flagshipUnlocatable, hasRealPoint } from "../lib/geo/geocode";
 import {
   isUnrosteredChain,
@@ -193,6 +193,19 @@ console.log("\n[FIX 2a] a branch named by its AREA/CITY is NOT a phantom off-bra
   ok("a bare place name is not off-brand even without city context", !rosterNameIsOffBrand("Mandarin", "Bono's Pit Bar-B-Q"));
   // …but the genuine cross-link still splits off.
   ok("Jackalope still off-brand alongside the area-name guard", rosterNameIsOffBrand("Jackalope Tex-Mex & Cantina", "Jack's BBQ", { selfCity: "Seattle", parentCity: "Seattle" }));
+}
+
+// ── PART A: name==city tripwire — a bare location is never a standalone venue ──
+console.log("\n[PART A] nameIsBareLocation — a heading/city is not a venue name (#214 orphan guard)");
+{
+  ok("'Beaumont' == its own city → bare location", nameIsBareLocation("Beaumont", { city: "Beaumont" }));
+  ok("'Beaumont' == the flagship's city → bare location", nameIsBareLocation("Beaumont", { city: "Somewhere", parentCity: "Beaumont" }));
+  ok("an empty / whitespace name is not a real venue name", nameIsBareLocation("", {}) && nameIsBareLocation("   ", {}) && nameIsBareLocation(null, {}));
+  ok("a real business name is NOT a bare location", !nameIsBareLocation("Jackalope Tex-Mex & Cantina", { city: "Seattle" }));
+  ok("a branch name that isn't the city is not bare", !nameIsBareLocation("Bono's Pit Bar-B-Q", { city: "Jacksonville" }));
+  // Invariant (A4.4): a bare-location name is never split off as an off-brand orphan —
+  // even if it somehow carried a business word, the city-match tripwire stops it.
+  ok("a city-named link is not orphaned as off-brand", nameIsBareLocation("Beaumont", { city: "Beaumont", parentCity: "Beaumont" }));
 }
 
 // ── FIX 2b: a flagship must be a real, located place ─────────────────────────
