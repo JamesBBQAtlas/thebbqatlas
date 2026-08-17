@@ -1,0 +1,15 @@
+# Cloudflare Browser Rendering Worker — the Web-Read Engine browser tier.
+# Deploy separately from the Next app:  cd workers/web-engine && npx wrangler deploy
+name = "thebbqatlas-web-engine"
+main = "worker.ts"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+# The Browser Rendering binding — this is the toggle ops enables on the account.
+# (Dashboard: Workers & Pages → the Worker → Settings → Bindings → Browser Rendering,
+#  or it is provisioned by this [browser] block on deploy.)
+[browser]
+binding = "MYBROWSER"
+
+# WEB_ENGINE_SECRET is a shared secret the Next app sends in `x-engine-secret`.
+# Set it as a secret, never in this file:  npx wrangler secret put WEB_ENGINE_SECRET

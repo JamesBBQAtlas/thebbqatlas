@@ -5,8 +5,9 @@ import { resolveChainSite } from "@/lib/ai/enrich";
 import { grokCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage } from "@/lib/ai/usage-log";
 import { auditField } from "@/lib/admin/content-audit";
-import { seedChainLocations, resolvePhantomFlagship } from "@/lib/admin/chain-seed";
+import { seedChainLocations, resolvePhantomFlagship, type SeedLocation } from "@/lib/admin/chain-seed";
 import { discoverChainLocations } from "@/lib/chains/discoverLocations";
+import { discoverViaEngine, cloudflareRenderer, engineConfigured } from "@/lib/web-engine/read-page";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
 import { hasStreetAddress } from "@/lib/admin/chain-discovery/normalize";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
@@ -157,9 +158,34 @@ export async function POST(request: Request) {
     });
   }
 
+  // ── WEB-READ ENGINE tier (WEB-ENGINE) — a modern SPA locator (City Barbeque,
+  // Mission, Toast/Yext maps) renders entirely client-side, so the fetch-only crawl
+  // above reads an empty shell (0 addresses) even though it DID find the locator URL
+  // from the static nav. When that happens, render the locator in a real browser and
+  // read its intercepted data feed (Olo/Yext/Toast/Algolia/generic). GATED on
+  // WEB_ENGINE_URL — inert until the Cloudflare Browser Rendering Worker is deployed,
+  // so the current pipeline is unchanged until ops enables it. Pure fallback: only
+  // runs when the crawl found nothing and a locator URL exists.
+  let engineSeeds: SeedLocation[] = [];
+  let engineDebug: Record<string, unknown> | null = null;
+  if (engineConfigured() && discovery.locations.length === 0 && discovery.locatorUrl) {
+    try {
+      const eng = await discoverViaEngine({
+        url: discovery.locatorUrl,
+        brand,
+        renderer: cloudflareRenderer(process.env.WEB_ENGINE_URL as string, process.env.WEB_ENGINE_SECRET as string),
+        interactions: [{ type: "scroll", to: "bottom", times: 4 }],
+      });
+      engineSeeds = eng.seeds;
+      engineDebug = { ...eng.debug, locator_url: discovery.locatorUrl };
+    } catch (e) {
+      engineDebug = { tier: "none", error: e instanceof Error ? e.message : String(e), locator_url: discovery.locatorUrl };
+    }
+  }
+
   // The shared module reports an array of source types (e.g. ["crawl:hierarchical",
   // "web"]); collapse to one label for the debug record + operator message.
-  const sourceType = discovery.sourceTypes.join("+") || "none";
+  const sourceType = engineSeeds.length ? `${discovery.sourceTypes.join("+") || "engine"}+engine` : (discovery.sourceTypes.join("+") || "none");
 
   const anchoredCountry = discovery.country ?? row.country ?? null;
   // Was this asserted to be a chain (by enrichment or the operator, OR by the web
@@ -172,7 +198,7 @@ export async function POST(request: Request) {
   // fix). Finding exactly ONE real location is a VALID result — a single venue, or
   // a chain whose other branches have closed — so it is LINKED/deduped below, not
   // errored. The hard failure is reserved for a genuine extraction miss (0 found).
-  if (discovery.locations.length === 0) {
+  if (discovery.locations.length === 0 && engineSeeds.length === 0) {
     const urlList = discovery.crawledUrls.slice(0, 20);
     const rawList = discovery.rawAddresses.slice(0, 20);
     if (knownChain) {
@@ -233,21 +259,21 @@ export async function POST(request: Request) {
   // ── Step 5 — seed/reconcile every branch (idempotent, deduped). Runs even for a
   // single location, so a found address LINKS to an existing record (no duplicate,
   // no error). ────────────────────────────────────────────────────────────────
-  const result = await seedChainLocations(
-    ctx.db,
-    restaurantId,
-    brand,
-    anchoredCountry,
-    discovery.locations.map((l) => ({
-      name: l.location_label ?? l.name,
-      address: l.address,
-      city: l.city,
-      region: l.region,
-      postcode: l.postcode,
-      country: l.country,
-      source_url: l.source_url,
-    }))
-  );
+  // Prefer the engine's structured feed seeds when the render tier produced them;
+  // otherwise the fetch-only crawl's locations. Both flow through the SAME
+  // seedChainLocations (Part A naming, normStreet dedupe, attach-under-one-flagship).
+  const seedInput: SeedLocation[] = engineSeeds.length
+    ? engineSeeds
+    : discovery.locations.map((l) => ({
+        name: l.location_label ?? l.name,
+        address: l.address,
+        city: l.city,
+        region: l.region,
+        postcode: l.postcode,
+        country: l.country,
+        source_url: l.source_url,
+      }));
+  const result = await seedChainLocations(ctx.db, restaurantId, brand, anchoredCountry, seedInput);
 
   // Part 4D — identify the flagship from research signals (the dossier's own
   // flagship_location, a name cue like "The Original", or the earliest founding
@@ -338,6 +364,7 @@ export async function POST(request: Request) {
         decisions: result.decisions.slice(0, 60),
         low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
         source_types: discovery.sourceTypes,
+        engine: engineDebug,
         ran_web: discovery.ranWeb,
         ran_crawl: discovery.ranCrawl,
         // How each rostered location was found — crawl-only, web-only, or both.
