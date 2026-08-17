@@ -24,6 +24,7 @@
     "test:directory-perf": "tsx scripts/test-directory-perf.mts",
     "test:photo-mod": "tsx scripts/test-photo-moderation.mts",
     "test:upload-limits": "tsx scripts/test-upload-limits.mts",
+    "test:dir-paginate": "tsx scripts/test-directory-paginate.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
     "test:geocode": "tsx scripts/test-geocode-precision.mts",
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",

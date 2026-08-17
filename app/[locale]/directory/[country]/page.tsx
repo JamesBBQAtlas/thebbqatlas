@@ -17,10 +17,13 @@ import { groupByCountry, groupByCity } from "@/lib/seo/hubs";
 import { countryIntro, countryFaqs, countryMetaDescription } from "@/lib/seo/hub-content";
 import { HubFaq } from "@/components/seo/HubFaq";
 import { SearchImpressionBeacon } from "@/components/seo/SearchImpressionBeacon";
+import { DirectoryPagination } from "@/components/directory/DirectoryPagination";
+import { paginate, parsePageParam, pagePath } from "@/lib/directory/paginate";
 import { routing } from "@/i18n/routing";
 
 interface Props {
   params: { locale: string; country: string };
+  searchParams?: { page?: string };
 }
 
 export const revalidate = 3600;
@@ -33,25 +36,34 @@ export async function generateStaticParams() {
   );
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
   if (!country) return { title: "Not Found", robots: { index: false } };
   const cityCount = groupByCity(country.venues).size;
+  // Part 6/7 — each page self-canonicals to its own clean URL (page 1 = bare path, no
+  // ?page=1 duplicate); the page number is in the title so paginated pages aren't seen
+  // as duplicates of page 1.
+  const { page, totalPages } = paginate(country.venues, parsePageParam(searchParams?.page));
+  const suffix = page > 1 ? ` (page ${page} of ${totalPages})` : "";
   return {
-    title: `Barbecue in ${country.name}`,
+    title: `Barbecue in ${country.name}${suffix}`,
     description: countryMetaDescription(country.name, country.venues, cityCount),
-    alternates: { canonical: `/directory/${params.country}` },
+    alternates: { canonical: pagePath(`/directory/${params.country}`, page) },
   };
 }
 
-export default async function CountryHubPage({ params }: Props) {
+export default async function CountryHubPage({ params, searchParams }: Props) {
   setRequestLocale(params.locale);
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
   // Part 6 — an unknown/emptied country hub returns a clean 404 (correct SEO for
   // a removed page; Google de-indexes it). Keeps real hubs statically cached.
   if (!country) notFound();
+
+  // Part 7 — bound the rendered list to one page (fast first paint on mobile even as a
+  // country grows to hundreds); numbered links below keep every venue crawlable.
+  const pageData = paginate(country.venues, parsePageParam(searchParams?.page));
 
   const cities = [...groupByCity(country.venues).values()].sort(
     (a, b) => b.venues.length - a.venues.length
@@ -124,10 +136,16 @@ export default async function CountryHubPage({ params }: Props) {
       )}
 
       <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {country.venues.map((r) => (
+        {pageData.items.map((r) => (
           <RestaurantCard key={r.id} restaurant={r} />
         ))}
       </div>
+
+      <DirectoryPagination
+        basePath={`/directory/${country.slug}`}
+        page={pageData.page}
+        totalPages={pageData.totalPages}
+      />
 
       <HubFaq faqs={faqs} heading={`Barbecue in ${country.name} — FAQ`} />
 

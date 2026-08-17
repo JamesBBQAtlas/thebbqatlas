@@ -17,12 +17,15 @@ import { groupByCountry, groupByCity } from "@/lib/seo/hubs";
 import { cityIntro, cityFaqs, cityMetaDescription } from "@/lib/seo/hub-content";
 import { HubFaq } from "@/components/seo/HubFaq";
 import { SearchImpressionBeacon } from "@/components/seo/SearchImpressionBeacon";
+import { DirectoryPagination } from "@/components/directory/DirectoryPagination";
+import { paginate, parsePageParam, pagePath } from "@/lib/directory/paginate";
 import { type BbqStyle } from "@/lib/constants/styles";
 import { StyleChip } from "@/components/restaurants/StyleChip";
 import { routing } from "@/i18n/routing";
 
 interface Props {
   params: { locale: string; country: string; city: string };
+  searchParams?: { page?: string };
 }
 
 export const revalidate = 3600;
@@ -46,23 +49,26 @@ export async function generateStaticParams() {
   );
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
   const city = country && groupByCity(country.venues).get(params.city);
   // A missing hub 404s (see below); its metadata is noindex either way.
   if (!country || !city) return { title: "Not Found", robots: { index: false } };
   const thin = city.venues.length < HUB_INDEX_MIN_VENUES;
+  // Part 6/7 — self-canonical per page (page 1 = bare path, no ?page=1 duplicate).
+  const { page, totalPages } = paginate(city.venues, parsePageParam(searchParams?.page));
+  const suffix = page > 1 ? ` (page ${page} of ${totalPages})` : "";
   return {
-    title: `Barbecue in ${city.name}, ${country.name}`,
+    title: `Barbecue in ${city.name}, ${country.name}${suffix}`,
     description: cityMetaDescription(city.name, country.name, city.venues),
-    alternates: { canonical: `/directory/${params.country}/${params.city}` },
+    alternates: { canonical: pagePath(`/directory/${params.country}/${params.city}`, page) },
     // Thin single-venue hubs are noindex (but still followed) — the venue page ranks.
     ...(thin ? { robots: { index: false, follow: true } } : {}),
   };
 }
 
-export default async function CityHubPage({ params }: Props) {
+export default async function CityHubPage({ params, searchParams }: Props) {
   setRequestLocale(params.locale);
   const all = await getRestaurants();
   const country = groupByCountry(all).get(params.country);
@@ -79,6 +85,8 @@ export default async function CityHubPage({ params }: Props) {
   const styles = [...new Set(city.venues.map((r) => r.style))] as BbqStyle[];
   const intro = cityIntro(city.name, country.name, city.venues);
   const faqs = cityFaqs(city.name, country.name, city.venues);
+  // Part 7 — paginate the city's venues too (a big city can carry many branches).
+  const pageData = paginate(city.venues, parsePageParam(searchParams?.page));
 
   return (
     <div className="mx-auto max-w-7xl px-6 py-16 sm:px-10">
@@ -142,10 +150,16 @@ export default async function CityHubPage({ params }: Props) {
       )}
 
       <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {city.venues.map((r) => (
+        {pageData.items.map((r) => (
           <RestaurantCard key={r.id} restaurant={r} />
         ))}
       </div>
+
+      <DirectoryPagination
+        basePath={`/directory/${country.slug}/${city.slug}`}
+        page={pageData.page}
+        totalPages={pageData.totalPages}
+      />
 
       <HubFaq faqs={faqs} heading={`Barbecue in ${city.name} — FAQ`} />
 
