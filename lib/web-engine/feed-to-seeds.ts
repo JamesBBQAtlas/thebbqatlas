@@ -23,9 +23,11 @@ export interface FeedToSeeds {
   dropped: number;
 }
 
-/** The dedupe identity discovery already uses: normalised street | normalised city. */
-function locationKey(address: string | null, city: string | null): string {
-  return `${normStreet(address)}|${normCity(city ?? "")}`;
+/** The dedupe identity discovery already uses: normalised street | normalised city.
+ *  Exported so the provider tier keys cross-source dedupe and the cross-check on the
+ *  SAME identity — one dedupe key across every tier, never a fork. */
+export function locationKey(address: string | null | undefined, city: string | null | undefined): string {
+  return `${normStreet(address ?? null)}|${normCity(city ?? "")}`;
 }
 
 /**
@@ -33,8 +35,16 @@ function locationKey(address: string | null, city: string | null): string {
  * name (from the flagship, cross-checked against the feed's own brand_name upstream) —
  * NOT written here into a name; `seedChainLocations` owns that. A branch label equal to
  * its city is dropped so it can't become a `name == city` row (the Part A tripwire).
+ *
+ * `opts.carryProvider` (provider tier only): also carry the branch's own lat/long and
+ * its `provider_refs` onto the seed, so seedChainLocations prefers the provider pin and
+ * force-gates the row. Render/own-feed callers omit it — their seeds are unchanged.
  */
-export function feedBranchesToSeeds(branches: LocatorBranch[], brand: string): FeedToSeeds {
+export function feedBranchesToSeeds(
+  branches: LocatorBranch[],
+  brand: string,
+  opts?: { carryProvider?: boolean }
+): FeedToSeeds {
   const seeds: SeedLocation[] = [];
   const seen = new Set<string>();
   let deduped = 0;
@@ -72,6 +82,13 @@ export function feedBranchesToSeeds(branches: LocatorBranch[], brand: string): F
       postcode: b.postcode ?? null,
       country: b.country ?? null,
       source_url: b.source_url ?? null,
+      ...(opts?.carryProvider
+        ? {
+            lat: b.lat ?? null,
+            lng: b.lng ?? null,
+            provider_refs: b.provider_refs ?? null,
+          }
+        : {}),
     });
   }
 

@@ -20,6 +20,7 @@
     "test:copy": "tsx scripts/test-copy-antisameness.mts",
     "test:model-json": "tsx scripts/test-model-json.mts",
     "test:web-engine": "tsx scripts/test-web-engine.mts",
+    "test:provider": "tsx scripts/test-provider-tier.mts",
     "test:sort": "tsx scripts/test-venue-sort.mts",
     "test:geocode": "tsx scripts/test-geocode-precision.mts",
     "test:enrich-gate": "tsx scripts/test-enrich-gate.mts",

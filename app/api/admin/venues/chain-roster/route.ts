@@ -8,6 +8,7 @@ import { auditField } from "@/lib/admin/content-audit";
 import { seedChainLocations, resolvePhantomFlagship, type SeedLocation } from "@/lib/admin/chain-seed";
 import { discoverChainLocations } from "@/lib/chains/discoverLocations";
 import { discoverViaEngine, cloudflareRenderer, engineConfigured } from "@/lib/web-engine/read-page";
+import { discoverViaProviders, providerCrossCheck, providersConfigured } from "@/lib/web-engine/providers";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
 import { hasStreetAddress } from "@/lib/admin/chain-discovery/normalize";
 import { uniqueRestaurantSlug } from "@/lib/admin/venues";
@@ -183,9 +184,37 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── LOCATION-DATA PROVIDER tier (patch 0061) — discovery TIER 3. Some big chains
+  // (City Barbeque, Mission) sit behind Cloudflare bot protection that blocks the
+  // render engine's datacenter IPs. We do NOT evade it — instead we source those chains
+  // from SANCTIONED provider APIs (OpenStreetMap/Overpass + Google Places), which return
+  // REAL records with provider ids, never a model's invention. Runs ONLY when both the
+  // crawl and the render engine found nothing, and every branch it produces lands GATED
+  // (needs_attention + never auto-published). GATED on providersConfigured() — inert
+  // until GOOGLE_PLACES_API_KEY (or PROVIDER_TIER_OSM=on) is set.
+  let providerSeeds: SeedLocation[] = [];
+  let providerDebug: Record<string, unknown> | null = null;
+  if (providersConfigured() && discovery.locations.length === 0 && engineSeeds.length === 0 && brand) {
+    try {
+      const prov = await discoverViaProviders({
+        brand,
+        fetchImpl: fetch,
+        placesKey: process.env.GOOGLE_PLACES_API_KEY ?? null,
+      });
+      providerSeeds = prov.seeds;
+      providerDebug = { ...prov.debug };
+    } catch (e) {
+      providerDebug = { tier: "none", error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   // The shared module reports an array of source types (e.g. ["crawl:hierarchical",
   // "web"]); collapse to one label for the debug record + operator message.
-  const sourceType = engineSeeds.length ? `${discovery.sourceTypes.join("+") || "engine"}+engine` : (discovery.sourceTypes.join("+") || "none");
+  const sourceType = engineSeeds.length
+    ? `${discovery.sourceTypes.join("+") || "engine"}+engine`
+    : providerSeeds.length
+      ? `provider${providerDebug && (providerDebug as { fromPlaces?: number }).fromPlaces ? ":osm+places" : ":osm"}`
+      : (discovery.sourceTypes.join("+") || "none");
 
   const anchoredCountry = discovery.country ?? row.country ?? null;
   // Was this asserted to be a chain (by enrichment or the operator, OR by the web
@@ -198,7 +227,7 @@ export async function POST(request: Request) {
   // fix). Finding exactly ONE real location is a VALID result — a single venue, or
   // a chain whose other branches have closed — so it is LINKED/deduped below, not
   // errored. The hard failure is reserved for a genuine extraction miss (0 found).
-  if (discovery.locations.length === 0 && engineSeeds.length === 0) {
+  if (discovery.locations.length === 0 && engineSeeds.length === 0 && providerSeeds.length === 0) {
     const urlList = discovery.crawledUrls.slice(0, 20);
     const rawList = discovery.rawAddresses.slice(0, 20);
     if (knownChain) {
@@ -219,6 +248,8 @@ export async function POST(request: Request) {
             raw_addresses: rawList,
             low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
             source_types: discovery.sourceTypes,
+            engine: engineDebug,
+            provider: providerDebug,
             ran_web: discovery.ranWeb,
             ran_crawl: discovery.ranCrawl,
             notes: discovery.notes,
@@ -259,11 +290,14 @@ export async function POST(request: Request) {
   // ── Step 5 — seed/reconcile every branch (idempotent, deduped). Runs even for a
   // single location, so a found address LINKS to an existing record (no duplicate,
   // no error). ────────────────────────────────────────────────────────────────
-  // Prefer the engine's structured feed seeds when the render tier produced them;
-  // otherwise the fetch-only crawl's locations. Both flow through the SAME
-  // seedChainLocations (Part A naming, normStreet dedupe, attach-under-one-flagship).
+  // Prefer the engine's structured feed seeds when the render tier produced them; then
+  // the provider tier's gated seeds (bot-protected chains); otherwise the fetch-only
+  // crawl's locations. ALL flow through the SAME seedChainLocations (Part A naming,
+  // normStreet dedupe, attach-under-one-flagship) — no fork.
   const seedInput: SeedLocation[] = engineSeeds.length
     ? engineSeeds
+    : providerSeeds.length
+    ? providerSeeds
     : discovery.locations.map((l) => ({
         name: l.location_label ?? l.name,
         address: l.address,
@@ -325,6 +359,32 @@ export async function POST(request: Request) {
   const alreadyPresent = result.updated.length + result.matchedParent;
   const distinctRostered = result.added.length + result.linked + alreadyPresent;
 
+  // CROSS-CHECK (patch 0061) — a cheap, FREE (OSM-only) second opinion on EVERY chain
+  // that rostered from its OWN feed. The own feed stays authoritative; this only records
+  // where a sanctioned provider disagrees (a branch the locator may have missed, or a
+  // possibly-stale own row) so a human can look — it never overwrites. Skipped when the
+  // roster ITSELF came from the provider tier (nothing independent to compare against).
+  // Best-effort — never fails a roster. Gated on providersConfigured() (inert until set).
+  let crossCheckRecord: Record<string, unknown> | null = null;
+  if (providersConfigured() && providerSeeds.length === 0 && seedInput.length > 0) {
+    try {
+      const xc = await providerCrossCheck({ brand, ownSeeds: seedInput, fetchImpl: fetch });
+      crossCheckRecord = xc.check
+        ? {
+            ran: xc.ran,
+            own_count: xc.check.ownCount,
+            provider_count: xc.check.providerCount,
+            agree: xc.check.agree,
+            missing_from_own: xc.check.missingFromOwn.slice(0, 20),
+            extra_in_own: xc.check.extraInOwn.slice(0, 20),
+            osm_error: xc.osmError,
+          }
+        : { ran: false, osm_error: xc.osmError };
+    } catch (e) {
+      crossCheckRecord = { ran: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   const nowIso = new Date().toISOString();
   // Item 4 — a SUCCESSFUL discovery run (addresses extracted / branches linked)
   // must clear a STALE extraction/geocode flag left by an earlier 0-result run,
@@ -365,6 +425,8 @@ export async function POST(request: Request) {
         low_confidence: discovery.lowConfidence.map((l) => ({ address: l.address, reason: l.reason })),
         source_types: discovery.sourceTypes,
         engine: engineDebug,
+        provider: providerDebug,
+        cross_check: crossCheckRecord,
         ran_web: discovery.ranWeb,
         ran_crawl: discovery.ranCrawl,
         // How each rostered location was found — crawl-only, web-only, or both.

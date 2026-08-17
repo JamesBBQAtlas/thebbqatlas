@@ -22,6 +22,17 @@ export interface SeedLocation {
   country?: string | null;
   /** The page this branch was read from (stored as provenance). */
   source_url?: string | null;
+  /** A pin the SOURCE already carries (provider tier: OSM/Places lat/long). When
+   *  present with provider_refs, seedChainLocations PREFERS it and only geocodes when
+   *  it's missing ("prefer the provider's lat/long; only geocode what's missing"). */
+  lat?: number | null;
+  lng?: number | null;
+  /** Location-data provider provenance ids ("osm:node/123", "places:ChIJ…"), set ONLY
+   *  by the provider tier (patch 0061). Their presence FORCE-GATES the seeded row:
+   *  needs_attention + a "provider-sourced — verify" reason + these ids recorded in
+   *  enrichment_sources + never auto-published (status stays pending). Own-feed/render
+   *  seeds leave this undefined, so their behaviour is unchanged. */
+  provider_refs?: string[] | null;
 }
 
 export interface SeedResult {
@@ -176,6 +187,19 @@ function hasCoords(lat: number | null | undefined, lng: number | null | undefine
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Human-readable provider names from a row's provider_refs ("osm:…","places:…") →
+ *  "OpenStreetMap + Google Places". For the gated-lead attention reason (patch 0061). */
+function providerLabel(refs: string[]): string {
+  const names: Record<string, string> = { osm: "OpenStreetMap", places: "Google Places" };
+  const seen: string[] = [];
+  for (const r of refs) {
+    const src = (r.split(":")[0] || "").toLowerCase();
+    const label = names[src] ?? src;
+    if (label && !seen.includes(label)) seen.push(label);
+  }
+  return seen.join(" + ") || "provider";
+}
 
 /** Settlement-normalised city identity key ("City of Westminster" → "london"). */
 function cityKeyOf(city: string | null): string {
@@ -335,37 +359,55 @@ export async function seedChainLocations(
     let country_code: string | null = null;
     let geoCity: string | null = null;
     let attentionReason: string | null = null;
-    if (i > 0) await sleep(200); // light courtesy throttle
-    // Geocode with the BRANCH's declared country as context (falls back to the
-    // chain-anchored country), so a place name resolves in the right country.
     const declaredCountry = canonicalCountry(loc.country ?? country);
-    // geocode-fix — the bulk chain path now runs through the SAME gated geocoder
-    // as the single-venue path (country-constrained, confidence-scored), and
-    // PERSISTS geo_precision/geo_confidence/geo_source on each seeded row. A branch
-    // that only resolves weakly is left unpinned and flagged, never planted.
-    const geo = await geocodeStructured({ address: loc.address, city: loc.city, region: loc.region, postcode: loc.postcode, country: declaredCountry || country, name: loc.name });
-    let geoPrecision: string | null = geo.precision;
-    let geoConfidence: number | null = geo.confidence;
-    const geoSource: string | null = geo.source;
-    if (geo.result && hasCoords(geo.result.lat, geo.result.lng)) {
-      // Hard write-guard (§3.3): if the geocoded country ≠ the declared country,
-      // DO NOT store the pin — flag it. This kills the cross-country mis-pin bug
-      // (real overseas branches geocoded into random US states).
-      const declaredCode = declaredCountry ? resolveCountryCode(null, declaredCountry) : null;
-      const geoCode = geo.result.country_code ? geo.result.country_code.toUpperCase() : null;
-      if (declaredCode && geoCode && declaredCode !== geoCode) {
-        attentionReason = `Geocoded outside ${declaredCountry} (got ${geoCode}) — verify address / set pin`;
-        geoPrecision = "none";
-        geoConfidence = 0;
-      } else {
-        lat = geo.result.lat;
-        lng = geo.result.lng;
-        country_code = geo.result.country_code;
-        geoCity = geo.result.city;
-      }
+    let geoPrecision: string | null = null;
+    let geoConfidence: number | null = null;
+    let geoSource: string | null = null;
+    // PROVIDER TIER (patch 0061) — prefer the provider's OWN lat/long. When a seed
+    // carries provider_refs AND a real pin (OSM centre / Places geometry), trust that
+    // pin and DO NOT geocode ("prefer the provider's lat/long; only geocode what's
+    // missing"). The row is force-gated below regardless, so a wrong provider pin is
+    // caught by a human — never auto-published.
+    const providerPin = Boolean(loc.provider_refs?.length) && hasCoords(loc.lat ?? null, loc.lng ?? null);
+    if (providerPin) {
+      lat = loc.lat as number;
+      lng = loc.lng as number;
+      country_code = declaredCountry ? resolveCountryCode(null, declaredCountry) : null;
+      geoPrecision = "provider";
+      geoConfidence = 0.6; // a provider pin is a lead, not a confirmed geocode
+      geoSource = loc.provider_refs && loc.provider_refs[0] ? loc.provider_refs[0].split(":")[0] : "provider";
     } else {
-      // Flagged — nothing confident resolved; surface the specific reason.
-      attentionReason = geo.reason ?? GEOCODE_COARSE_REASON;
+      if (i > 0) await sleep(200); // light courtesy throttle
+      // Geocode with the BRANCH's declared country as context (falls back to the
+      // chain-anchored country), so a place name resolves in the right country.
+      // geocode-fix — the bulk chain path runs through the SAME gated geocoder as the
+      // single-venue path (country-constrained, confidence-scored), and PERSISTS
+      // geo_precision/geo_confidence/geo_source on each seeded row. A branch that only
+      // resolves weakly is left unpinned and flagged, never planted.
+      const geo = await geocodeStructured({ address: loc.address, city: loc.city, region: loc.region, postcode: loc.postcode, country: declaredCountry || country, name: loc.name });
+      geoPrecision = geo.precision;
+      geoConfidence = geo.confidence;
+      geoSource = geo.source;
+      if (geo.result && hasCoords(geo.result.lat, geo.result.lng)) {
+        // Hard write-guard (§3.3): if the geocoded country ≠ the declared country,
+        // DO NOT store the pin — flag it. This kills the cross-country mis-pin bug
+        // (real overseas branches geocoded into random US states).
+        const declaredCode = declaredCountry ? resolveCountryCode(null, declaredCountry) : null;
+        const geoCode = geo.result.country_code ? geo.result.country_code.toUpperCase() : null;
+        if (declaredCode && geoCode && declaredCode !== geoCode) {
+          attentionReason = `Geocoded outside ${declaredCountry} (got ${geoCode}) — verify address / set pin`;
+          geoPrecision = "none";
+          geoConfidence = 0;
+        } else {
+          lat = geo.result.lat;
+          lng = geo.result.lng;
+          country_code = geo.result.country_code;
+          geoCity = geo.result.city;
+        }
+      } else {
+        // Flagged — nothing confident resolved; surface the specific reason.
+        attentionReason = geo.reason ?? GEOCODE_COARSE_REASON;
+      }
     }
     // Scraped-blob guard — the address was a page-text dump with no confidently
     // extractable street. Never trust a geocode of prose: drop any pin and flag it
@@ -662,8 +704,20 @@ export async function seedChainLocations(
       geo_source: seedGeo.geo_source,
     };
     if (located && c.country_code) insertRow.country_code = c.country_code;
-    // Provenance — every pin traces back to the page it was read from (§3.4).
-    if (loc.source_url) insertRow.enrichment_sources = [loc.source_url];
+    // Provenance — every pin traces back to the page it was read from (§3.4). The
+    // provider tier ALSO records each source id ("osm:node/123", "places:ChIJ…") here,
+    // so a gated lead is auditable back to the exact provider record.
+    const provenance = [...(loc.source_url ? [loc.source_url] : []), ...(loc.provider_refs ?? [])];
+    if (provenance.length) insertRow.enrichment_sources = provenance;
+    // PROVIDER TIER GATE (patch 0061) — a provider-sourced branch NEVER auto-publishes:
+    // it lands needs_attention with a "provider-sourced — verify" reason so a human
+    // confirms before publish (third-party data can be stale/wrong). status is already
+    // "pending", so it is never live without review. Belt-and-braces.
+    if (loc.provider_refs?.length) {
+      insertRow.needs_attention = true;
+      const provReason = `Provider-sourced (${providerLabel(loc.provider_refs)}) — verify before publish.`;
+      insertRow.attention_reason = insertRow.attention_reason ? `${provReason} ${insertRow.attention_reason}` : provReason;
+    }
     if (possibleDupOf) {
       // Part 4C — never silently create a twin. Insert FLAGGED with a link to the
       // record it may duplicate, so the operator can merge or dismiss in the queue.

@@ -95,6 +95,28 @@ export interface LocatorBranch {
   /** Which adapter produced this ("olo" | "yext" | "toast" | "algolia" | "generic" …). */
   platform?: string | null;
   source_url?: string | null;
+  /** Provider-tier provenance ids ("osm:node/123", "places:ChIJ…"). Set ONLY by the
+   *  location-data provider tier (patch 0061); a branch that carries these is
+   *  force-gated downstream (needs_attention + never auto-published). Undefined for
+   *  render/own-feed branches — so their behaviour is unchanged. */
+  provider_refs?: string[] | null;
+}
+
+/**
+ * A location record sourced from a SANCTIONED DATA PROVIDER (OpenStreetMap via
+ * Overpass, or Google Places) rather than the chain's own — possibly bot-protected —
+ * site. Extends LocatorBranch: same domain-agnostic facts, plus which provider is the
+ * authority for THIS record and the full set of provider ids that back it (kept for
+ * provenance/audit after a cross-source merge). These are REAL database records with
+ * real ids — never a model's guess at whether a branch exists (the no-invented-facts
+ * line). Everything derived from these lands GATED for human review.
+ */
+export interface ProviderBranch extends LocatorBranch {
+  /** The authoritative provider for this record after merge ("osm" | "places"). */
+  provider: "osm" | "places";
+  /** All source ids backing this location — one per provider that carried it
+   *  ("osm:node/123", "places:ChIJ…"). Recorded on the row's enrichment_sources. */
+  provider_refs: string[];
 }
 
 /** The result of reading a locator feed — branches + which platform/tier, LOUD debug. */
