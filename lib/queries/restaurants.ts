@@ -2,6 +2,9 @@ import { unstable_cache } from "next/cache";
 import { createAnonClient } from "@/lib/supabase/anon";
 import type { Restaurant, SignatureDish, Review } from "@/lib/types/database";
 import { FALLBACK_RESTAURANTS } from "@/lib/data/fallback-restaurants";
+import { LIST_COLUMNS } from "@/lib/queries/list-columns";
+
+export { LIST_COLUMNS } from "@/lib/queries/list-columns";
 
 /** Cache tag for every public read of approved venues — busted on any admin
  *  edit that changes live data (publish, approve, enrich commit, set-flagship,
@@ -14,7 +17,7 @@ async function getSupabaseRestaurants(): Promise<Restaurant[] | null> {
     const supabase = createAnonClient();
     const { data, error } = await supabase
       .from("restaurants")
-      .select("*")
+      .select(LIST_COLUMNS)
       .eq("status", "approved")
       .order("avg_rating", { ascending: false });
 
@@ -23,12 +26,13 @@ async function getSupabaseRestaurants(): Promise<Restaurant[] | null> {
       return null;
     }
     if (!data?.length) return null;
+    const rows = data as unknown as Restaurant[];
     // Permanently-closed venues are excluded from every public listing surface —
     // map, directory, Featured, "nearby", and the public spot count all read
     // through here (Fix 7). The individual venue page uses getRestaurantBySlug
     // (below), which does NOT filter, so a closed venue still renders with its
     // "Permanently closed" banner rather than 404-ing.
-    return (data as Restaurant[]).filter((r) => !r.permanently_closed);
+    return rows.filter((r) => !r.permanently_closed);
   } catch (e) {
     console.error("[queries.restaurants] unexpected read error — serving seed fallback:", e);
     return null;
@@ -113,10 +117,10 @@ async function getClosedRestaurantsUncached(): Promise<Restaurant[]> {
     const supabase = createAnonClient();
     const { data } = await supabase
       .from("restaurants")
-      .select("*")
+      .select(LIST_COLUMNS)
       .eq("status", "approved")
       .eq("permanently_closed", true);
-    return ((data ?? []) as Restaurant[]).filter(
+    return ((data ?? []) as unknown as Restaurant[]).filter(
       (r) => Number.isFinite(r.lat) && Number.isFinite(r.lng)
     );
   } catch {

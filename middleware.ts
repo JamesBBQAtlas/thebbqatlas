@@ -38,8 +38,22 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh the session if it has expired (safe no-op when logged out).
-  await supabase.auth.getUser();
+  // Refresh the session if it has expired (safe no-op when logged out) — but NEVER
+  // let a slow or unreachable auth service hang the page. The 17 Aug incident included
+  // `/middleware` 504s (function >25s) clustered with the DB-timeout window: every
+  // matched page request awaits this auth round-trip, so when Supabase auth is slow the
+  // middleware itself stalls the whole page. Bound it: on timeout/error we proceed with
+  // the cookies we have (an unrefreshed session just refreshes on the next request —
+  // far better than a 504). This is per-request work made resilient, not removed.
+  const AUTH_REFRESH_TIMEOUT_MS = 2500;
+  try {
+    await Promise.race([
+      supabase.auth.getUser(),
+      new Promise<void>((resolve) => setTimeout(resolve, AUTH_REFRESH_TIMEOUT_MS)),
+    ]);
+  } catch {
+    /* auth refresh failed — serve the page as-is; the next request retries */
+  }
 
   return response;
 }
