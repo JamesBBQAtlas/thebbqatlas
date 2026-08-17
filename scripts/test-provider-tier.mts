@@ -5,8 +5,8 @@
  * a pin (so the geocoder is never called) with a fake Supabase client.
  * Run: node_modules/.bin/tsx scripts/test-provider-tier.mts
  */
-import { overpassQuery, parseOverpass, fetchOverpass } from "../lib/web-engine/providers/overpass";
-import { parsePlacesResult, fetchPlaces } from "../lib/web-engine/providers/places";
+import { overpassQuery, parseOverpass, fetchOverpass, OVERPASS_USER_AGENT, OVERPASS_MIRRORS } from "../lib/web-engine/providers/overpass";
+import { parsePlacesResult, fetchPlaces, buildSearchTextRequest, PLACES_SEARCHTEXT_URL, PLACES_FIELD_MASK } from "../lib/web-engine/providers/places";
 import { sharesBrand } from "../lib/web-engine/providers/match";
 import {
   mergeProviderBranches,
@@ -64,50 +64,88 @@ console.log("\n[parseOverpass — addr:* → branch, osm ref, brand guard, drops
   ok("a venue with neither street nor city+coords is dropped", !b.some((x) => x.external_id === "node/5005"));
 }
 
-console.log("\n[fetchOverpass — injected fetch, never throws]");
+console.log("\n[fetchOverpass — request shape (UA + form-encoded), never throws]");
 {
-  const stub: typeof fetch = (async () => ({ ok: true, status: 200, json: async () => OVERPASS_BODY })) as unknown as typeof fetch;
-  const r = await fetchOverpass("City Barbeque", { fetchImpl: stub });
+  // Capture the request the adapter actually makes.
+  let seenInit: RequestInit | undefined;
+  const stub: typeof fetch = (async (_url: string, init: RequestInit) => {
+    seenInit = init;
+    return { ok: true, status: 200, json: async () => OVERPASS_BODY };
+  }) as unknown as typeof fetch;
+  const r = await fetchOverpass("City Barbeque", { fetchImpl: stub, endpoint: "https://ov.test/api" });
   ok("returns parsed branches + raw element count", r.branches.length === 3 && r.rawElements === 5 && r.error === null, { n: r.branches.length, raw: r.rawElements });
+  const headers = (seenInit?.headers ?? {}) as Record<string, string>;
+  ok("POST is form-encoded (not JSON)", seenInit?.method === "POST" && /x-www-form-urlencoded/.test(headers["content-type"]));
+  ok("sends a descriptive User-Agent (the 406 fix)", headers["user-agent"] === OVERPASS_USER_AGENT && /thebbqatlas/.test(headers["user-agent"]));
+  ok("body is data=<url-encoded QL>", typeof seenInit?.body === "string" && (seenInit!.body as string).startsWith("data=") && /out%20center%20tags/.test(seenInit!.body as string));
+
+  // A 406 on the first mirror falls back to the next and logs the BODY.
+  let call = 0;
+  const mirrorStub: typeof fetch = (async () => {
+    call++;
+    if (call === 1) return { ok: false, status: 406, text: async () => "Not Acceptable: set a User-Agent" };
+    return { ok: true, status: 200, json: async () => OVERPASS_BODY };
+  }) as unknown as typeof fetch;
+  const rm = await fetchOverpass("City Barbeque", { fetchImpl: mirrorStub, endpoints: OVERPASS_MIRRORS });
+  ok("a 406 retries on the next mirror → 200", call === 2 && rm.branches.length === 3 && rm.error === null, { call, n: rm.branches.length });
+
+  const allFail: typeof fetch = (async () => ({ ok: false, status: 406, text: async () => "blocked: anonymous UA" })) as unknown as typeof fetch;
+  const rf = await fetchOverpass("City Barbeque", { fetchImpl: allFail, endpoints: ["https://a.test", "https://b.test"] });
+  ok("all mirrors 406 → structured empty, body logged in error", rf.branches.length === 0 && /406/.test(rf.error ?? "") && /blocked/.test(rf.error ?? ""), rf.error);
+
   const bad: typeof fetch = (async () => { throw new Error("network down"); }) as unknown as typeof fetch;
-  const rb = await fetchOverpass("City Barbeque", { fetchImpl: bad });
-  ok("a transport error is a structured empty, not a throw", rb.branches.length === 0 && rb.error === "network down");
+  const rb = await fetchOverpass("City Barbeque", { fetchImpl: bad, endpoint: "https://ov.test/api" });
+  ok("a transport error is a structured empty, not a throw", rb.branches.length === 0 && /network down/.test(rb.error ?? ""));
 }
 
-console.log("\n[parsePlacesResult — place_id → branch, city via canonical parser]");
+console.log("\n[buildSearchTextRequest — Places API (New): POST, header key, field mask]");
 {
-  const raw = { place_id: "ChIJabc", name: "City Barbeque", formatted_address: "2111 W Henderson Rd, Columbus, OH 43220, USA", geometry: { location: { lat: 40.057, lng: -83.076 } } };
+  const { url, init } = buildSearchTextRequest("SECRET_KEY", { textQuery: "City Barbeque", pageSize: 20 });
+  const h = (init.headers ?? {}) as Record<string, string>;
+  ok("hits places:searchText (New), not the legacy endpoint", url === PLACES_SEARCHTEXT_URL && /places\.googleapis\.com\/v1\/places:searchText/.test(url) && !/maps\/api\/place\/textsearch/.test(url));
+  ok("POST with JSON body", init.method === "POST" && /application\/json/.test(h["Content-Type"]));
+  ok("key is in X-Goog-Api-Key header, NOT a ?key= param", h["X-Goog-Api-Key"] === "SECRET_KEY" && !url.includes("key="));
+  ok("field mask is present + minimal (New-shape fields)", h["X-Goog-FieldMask"] === PLACES_FIELD_MASK && /places\.id/.test(h["X-Goog-FieldMask"]) && /places\.displayName/.test(h["X-Goog-FieldMask"]));
+  ok("textQuery + pageSize in the JSON body", /"textQuery":"City Barbeque"/.test(String(init.body)) && /"pageSize":20/.test(String(init.body)));
+}
+
+console.log("\n[parsePlacesResult — New shapes: place.id / displayName.text / location]");
+{
+  const raw = { id: "ChIJabc", displayName: { text: "City Barbeque" }, formattedAddress: "2111 W Henderson Rd, Columbus, OH 43220, USA", location: { latitude: 40.057, longitude: -83.076 }, nationalPhoneNumber: "(614) 538-8890" };
   const p = parsePlacesResult(raw)!;
-  ok("provider is places + ref is places:<place_id>", p.provider === "places" && p.provider_refs[0] === "places:ChIJabc" && p.external_id === "ChIJabc");
-  ok("city parsed from formatted_address", p.city === "Columbus", p.city);
-  ok("geometry → lat/long", p.lat === 40.057 && p.lng === -83.076);
-  ok("a result with no place_id is dropped", parsePlacesResult({ name: "x", formatted_address: "y" }) === null);
+  ok("provider is places + ref is places:<id> (New id field)", p.provider === "places" && p.provider_refs[0] === "places:ChIJabc" && p.external_id === "ChIJabc");
+  ok("displayName.text → name", p.location_label === "City Barbeque" && p.brand_name === "City Barbeque");
+  ok("city parsed from formattedAddress", p.city === "Columbus", p.city);
+  ok("location.latitude/longitude → lat/long", p.lat === 40.057 && p.lng === -83.076);
+  ok("nationalPhoneNumber → phone", p.phone === "(614) 538-8890");
+  ok("a result with no id is dropped", parsePlacesResult({ displayName: { text: "x" }, formattedAddress: "y" }) === null);
+  ok("legacy shape (place_id) no longer parses (New-only)", parsePlacesResult({ place_id: "L1", formatted_address: "z" }) === null);
 }
 
-console.log("\n[fetchPlaces — pagination, dedupe, brand guard, COST CAP]");
+console.log("\n[fetchPlaces — New API: pageToken sweep, dedupe, brand guard, COST CAP]");
 {
-  const page0 = { results: [
-    { place_id: "P1", name: "City Barbeque", formatted_address: "123 Main St, Columbus, OH 43220, USA", geometry: { location: { lat: 40.05, lng: -83.07 } } },
-    { place_id: "PX", name: "Dave's Smoke Shack", formatted_address: "9 Other St, Columbus, OH, USA", geometry: { location: { lat: 40.06, lng: -83.08 } } },
-  ], next_page_token: "TOK1", status: "OK" };
-  const page1 = { _token: "TOK1", results: [
-    { place_id: "P2", name: "City Barbeque", formatted_address: "500 Oak Ave, Dublin, OH 43017, USA", geometry: { location: { lat: 40.10, lng: -83.13 } } },
-    { place_id: "P1", name: "City Barbeque", formatted_address: "123 Main St, Columbus, OH 43220, USA", geometry: { location: { lat: 40.05, lng: -83.07 } } },
-  ], status: "OK" };
-  const pages = [page0, page1];
+  // New response shape: { places: [...], nextPageToken } — pageToken travels in the POST body.
+  const P = (id: string, name: string, addr: string, lat: number, lng: number) => ({ id, displayName: { text: name }, formattedAddress: addr, location: { latitude: lat, longitude: lng } });
+  const page0 = { places: [
+    P("P1", "City Barbeque", "123 Main St, Columbus, OH 43220, USA", 40.05, -83.07),
+    P("PX", "Dave's Smoke Shack", "9 Other St, Columbus, OH, USA", 40.06, -83.08),
+  ], nextPageToken: "TOK1" };
+  const page1 = { places: [
+    P("P2", "City Barbeque", "500 Oak Ave, Dublin, OH 43017, USA", 40.10, -83.13),
+    P("P1", "City Barbeque", "123 Main St, Columbus, OH 43220, USA", 40.05, -83.07),
+  ] };
   const placesStub = (calls: { n: number }): typeof fetch =>
-    (async (url: string) => {
+    (async (_url: string, init: RequestInit) => {
       calls.n++;
-      const u = new URL(url);
-      const token = u.searchParams.get("pagetoken");
-      const pg = !token ? pages[0] : pages.find((p) => (p as { _token?: string })._token === token) ?? { results: [], status: "OK" };
+      const body = JSON.parse(String(init.body)) as { pageToken?: string };
+      const pg = body.pageToken === "TOK1" ? page1 : page0;
       return { ok: true, status: 200, json: async () => pg };
     }) as unknown as typeof fetch;
 
   const c1 = { n: 0 };
   const full = await fetchPlaces("City Barbeque", { key: "k", fetchImpl: placesStub(c1), budget: { maxCalls: 10, maxUsd: 1 }, sleep: async () => {} });
-  ok("paginates both pages (2 billable calls)", full.calls === 2, full.calls);
-  ok("dedupes by place_id across pages (P1 once)", full.branches.length === 2, full.branches.map((b) => b.external_id));
+  ok("paginates both pages via nextPageToken (2 billable calls)", full.calls === 2, full.calls);
+  ok("dedupes by place id across pages (P1 once)", full.branches.length === 2, full.branches.map((b) => b.external_id));
   ok("brand guard drops the unrelated 'Dave's Smoke Shack'", !full.branches.some((b) => b.external_id === "PX"));
   ok("spend logged = calls × SKU", Math.abs(full.spendUsd - 0.064) < 1e-6, full.spendUsd);
   ok("not capped when inside budget", full.capped === false);
@@ -115,6 +153,11 @@ console.log("\n[fetchPlaces — pagination, dedupe, brand guard, COST CAP]");
   const c2 = { n: 0 };
   const capped = await fetchPlaces("City Barbeque", { key: "k", fetchImpl: placesStub(c2), budget: { maxCalls: 1, maxUsd: 1 }, sleep: async () => {} });
   ok("COST CAP stops the sweep + reports capped:true", capped.capped === true && capped.calls === 1, { calls: capped.calls, capped: capped.capped });
+
+  // A New-API error body { error: { status, message } } surfaces, never throws.
+  const denied: typeof fetch = (async () => ({ ok: false, status: 403, json: async () => ({ error: { code: 403, status: "PERMISSION_DENIED", message: "legacy API not enabled" } }) })) as unknown as typeof fetch;
+  const rd = await fetchPlaces("City Barbeque", { key: "k", fetchImpl: denied, budget: { maxCalls: 3, maxUsd: 1 }, sleep: async () => {} });
+  ok("an API error surfaces status+message, no branches, no throw", rd.branches.length === 0 && rd.status === "PERMISSION_DENIED" && /legacy/.test(rd.error ?? ""), { s: rd.status, e: rd.error });
 }
 
 console.log("\n[mergeProviderBranches — cross-source dedupe, prefer Places, keep both refs]");

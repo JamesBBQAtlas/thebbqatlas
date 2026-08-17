@@ -19,6 +19,18 @@ import { sharesBrand } from "./match";
 /** Public Overpass endpoint (overridable via env for a self-hosted instance at scale). */
 export const DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
 
+/** Mirror fallback order (patch 0070) — a 406/429/5xx on one is retried on the next. */
+export const OVERPASS_MIRRORS = [
+  DEFAULT_OVERPASS_ENDPOINT,
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://lz4.overpass-api.de/api/interpreter",
+];
+
+/** A DESCRIPTIVE User-Agent — Overpass etiquette REQUIRES this; many mirrors 406/429 an
+ *  anonymous datacenter request without it (the live 406 bug in patch 0070). */
+export const OVERPASS_USER_AGENT =
+  "TheBBQAtlas/1.0 (+https://thebbqatlas.com; contact: james@thebbqatlas.com)";
+
 /** Escape a brand for use inside an Overpass (PCRE) regex literal. */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -136,38 +148,68 @@ export interface OverpassResult {
   error: string | null;
 }
 
+/** A status worth retrying on the next mirror: 403/406 (politeness/UA), 429 (rate), 5xx.
+ *  A 400 is a bad QL — the same everywhere, so we don't waste mirrors on it. */
+function overpassRetryable(status: number): boolean {
+  return status === 403 || status === 406 || status === 429 || status >= 500;
+}
+
 /**
  * Query Overpass for a brand and return parsed branches. `fetchImpl` is injected (the
- * global fetch in production, a stub in tests). One call per chain — polite by default.
- * Never throws: a transport/HTTP error comes back as a structured empty with the reason.
+ * global fetch in production, a stub in tests). Never throws.
+ *
+ * Patch 0070 — the live call was returning **406**. The fixes, per Overpass etiquette:
+ *   • a DESCRIPTIVE `User-Agent` (mirrors 406/429 anonymous datacenter traffic without it);
+ *   • form-encoded POST (`application/x-www-form-urlencoded`, body `data=<QL>`) — never JSON;
+ *   • `Accept: application/json` to match `[out:json]`;
+ *   • on 403/406/429/5xx (or a network error) retry on the next MIRROR; the response BODY
+ *     (not just the status) is logged into `error` so any residual failure is diagnosable.
+ * Polite: one call per chain per endpoint, stops at the first 200.
  */
 export async function fetchOverpass(
   brand: string,
   opts: {
     fetchImpl: typeof fetch;
+    /** Single endpoint override (tests / self-host). Omit to use the mirror list. */
     endpoint?: string;
+    endpoints?: string[];
     timeoutSec?: number;
   }
 ): Promise<OverpassResult> {
-  const endpoint = opts.endpoint ?? DEFAULT_OVERPASS_ENDPOINT;
+  const endpoints = opts.endpoint ? [opts.endpoint] : opts.endpoints ?? OVERPASS_MIRRORS;
   const ql = overpassQuery(brand, { timeoutSec: opts.timeoutSec });
-  try {
-    const res = await opts.fetchImpl(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: `data=${encodeURIComponent(ql)}`,
-    });
-    const status = res.status;
-    if (!res.ok) {
-      return { branches: [], rawElements: 0, status, error: `overpass ${status}` };
+  let lastError = "no endpoint reached";
+  let lastStatus = 0;
+
+  for (const endpoint of endpoints) {
+    try {
+      const res = await opts.fetchImpl(endpoint, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          accept: "application/json",
+          "user-agent": OVERPASS_USER_AGENT,
+        },
+        body: `data=${encodeURIComponent(ql)}`,
+      });
+      lastStatus = res.status;
+      if (!res.ok) {
+        // Log the BODY, not just the status — that's what makes a 406/429 diagnosable.
+        const bodyText = await res.text().catch(() => "");
+        lastError = `overpass ${res.status} @ ${endpoint}: ${bodyText.replace(/\s+/g, " ").trim().slice(0, 300)}`;
+        if (overpassRetryable(res.status)) continue; // try the next mirror
+        return { branches: [], rawElements: 0, status: res.status, error: lastError };
+      }
+      const body = (await res.json()) as unknown;
+      const rawElements =
+        body && typeof body === "object" && Array.isArray((body as { elements?: unknown }).elements)
+          ? (body as { elements: unknown[] }).elements.length
+          : 0;
+      return { branches: parseOverpass(body, brand), rawElements, status: res.status, error: null };
+    } catch (e) {
+      lastError = `overpass @ ${endpoint}: ${e instanceof Error ? e.message : String(e)}`;
+      // network error — try the next mirror
     }
-    const body = (await res.json()) as unknown;
-    const rawElements =
-      body && typeof body === "object" && Array.isArray((body as { elements?: unknown }).elements)
-        ? (body as { elements: unknown[] }).elements.length
-        : 0;
-    return { branches: parseOverpass(body, brand), rawElements, status, error: null };
-  } catch (e) {
-    return { branches: [], rawElements: 0, status: 0, error: e instanceof Error ? e.message : String(e) };
   }
+  return { branches: [], rawElements: 0, status: lastStatus, error: lastError };
 }
