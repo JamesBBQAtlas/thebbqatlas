@@ -13,7 +13,19 @@
  */
 import type { ProviderBranch } from "../types";
 import { localityFromAddress } from "@/lib/admin/address";
-import { sharesBrand } from "./match";
+import { matchesBrandIdentity } from "./match";
+
+/**
+ * Does this Places result carry a REAL street address (patch 0073 — confidence gate)?
+ * The New API's `formattedAddress` for a rooftop result leads with a house number and a
+ * street name ("2111 W Henderson Rd, Columbus, OH …"); a city/state centroid does not
+ * ("Moab, UT 84532", "Texas 78624"). We reject the centroids — an address-less lead is
+ * not a branch. Kept local (a leading-number check) so the adapter stays pure + testable.
+ */
+function hasStreetPin(b: { address?: string | null }): boolean {
+  const first = (b.address ?? "").trim().split(",")[0]?.trim() ?? "";
+  return /^\d/.test(first) && first.replace(/\d/g, "").trim().length >= 3;
+}
 
 /** Places API (New) Text Search — POST, key in a header, field mask REQUIRED. */
 export const PLACES_SEARCHTEXT_URL = "https://places.googleapis.com/v1/places:searchText";
@@ -238,14 +250,24 @@ export async function fetchPlaces(
       const res = await searchTextPage(brand, opts.key, opts.fetchImpl, { pageToken, locationRestriction: region.locationRestriction });
       calls++;
       if (res.status !== "OK") { lastStatus = res.status; lastError = res.error; }
+      let pageAccepted = 0;
       for (const raw of res.results) {
         const branch = parsePlacesResult(raw);
-        // Brand guard — a text search can return a nearby different eatery.
-        if (branch && sharesBrand(branch.brand_name, brand) && branch.external_id) {
-          if (!byPlaceId.has(branch.external_id)) { byPlaceId.set(branch.external_id, branch); regionCount++; }
+        // 0073 — STRICT brand-identity gate: a generic text search ("City Barbeque")
+        // pulls in loosely-related BBQ joints in every region. Accept ONLY when the
+        // result's OWN returned name equals the chain's canonical name (exact,
+        // normalized), AND it has a real street address (reject city/state centroids).
+        // The venue's name is evidence — we never rename a non-match to the brand.
+        if (branch && matchesBrandIdentity(branch.brand_name, brand) && hasStreetPin(branch) && branch.external_id) {
+          if (!byPlaceId.has(branch.external_id)) { byPlaceId.set(branch.external_id, branch); regionCount++; pageAccepted++; }
         }
       }
       if (!res.nextPageToken) break;
+      // 0073 — don't pay for deeper pages in a region where page 1 surfaced NO real
+      // brand match: a generic query returns endless loosely-related results, so we
+      // only dig where the chain actually appears. Caps an absent-brand region to one
+      // billable call, so the sweep spends on real branches — never floods to the cap.
+      if (page === 0 && pageAccepted === 0) break;
       pageToken = res.nextPageToken;
     }
     perRegion.push({ key: region.key, count: regionCount });

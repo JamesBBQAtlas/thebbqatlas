@@ -14,7 +14,7 @@
  * `fetch` so the network is stubbed in tests (the established engine seam).
  */
 import type { ProviderBranch } from "../types";
-import { sharesBrand } from "./match";
+import { matchesBrandIdentity } from "./match";
 
 /** Public Overpass endpoint (overridable via env for a self-hosted instance at scale). */
 export const DEFAULT_OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
@@ -138,19 +138,25 @@ interface OverpassElement {
  * (b) plausibly belong to `brand` (the regex union can pull a near-name; `sharesBrand`
  * filters it). Every kept branch carries `osm:<type>/<id>` as its provider ref.
  */
-export function parseOverpass(body: unknown, brand: string): ProviderBranch[] {
+export function parseOverpass(body: unknown, brand: string, opts?: { wikidataId?: string | null }): ProviderBranch[] {
   const elements =
     body && typeof body === "object" && Array.isArray((body as { elements?: unknown }).elements)
       ? ((body as { elements: unknown[] }).elements as OverpassElement[])
       : [];
+  const wikidataId = opts?.wikidataId ?? null;
   const out: ProviderBranch[] = [];
   for (const el of elements) {
     if (!el || typeof el !== "object") continue;
     const tags = (el.tags && typeof el.tags === "object" ? el.tags : {}) as Record<string, unknown>;
     const brandTag = tagStr(tags, "brand") ?? tagStr(tags, "brand:en");
     const nameTag = tagStr(tags, "name") ?? tagStr(tags, "name:en");
-    // Brand guard — the record's own brand/name must plausibly be the chain.
-    if (!sharesBrand(brandTag ?? nameTag, brand)) continue;
+    // Brand guard (0073) — a `brand:wikidata` id match is the HARD signal and is
+    // accepted outright. Otherwise the record's own brand/name must EXACTLY be the
+    // chain (strict identity), not a loose token overlap: a generic name like "City
+    // Barbeque" reduces to the token "city", which the old loose guard let match
+    // "Park City BBQ", "…City…", etc. Exact identity keeps real branches, drops the rest.
+    const wikidataMatch = Boolean(wikidataId && tagStr(tags, "brand:wikidata") === wikidataId);
+    if (!wikidataMatch && !matchesBrandIdentity(brandTag, brand) && !matchesBrandIdentity(nameTag, brand)) continue;
 
     const lat = toNum(el.lat) ?? toNum(el.center?.lat);
     const lng = toNum(el.lon) ?? toNum(el.center?.lon);
@@ -286,7 +292,7 @@ export async function fetchOverpass(
           ? (body as { elements: unknown[] }).elements.length
           : 0;
       return {
-        branches: parseOverpass(body, brand),
+        branches: parseOverpass(body, brand, { wikidataId: opts.wikidataId }),
         rawElements,
         variants: overpassVariantCounts(body, brand, opts.wikidataId),
         status: res.status,

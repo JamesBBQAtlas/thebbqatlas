@@ -58,3 +58,42 @@ export function sharesBrand(candidate: string | null | undefined, brand: string)
   const candNorm = cand.toLowerCase().replace(/[^a-z0-9]+/g, "");
   return candNorm.includes(parentTok);
 }
+
+/**
+ * Normalize a name to a brand-IDENTITY key for an EXACT match (patch 0073). Unlike
+ * `sharesBrand` (a deliberately loose token/substring guard), this is the strict
+ * identity used to ACCEPT a provider result as a real branch. It lowercases, drops
+ * ®/™, unifies every BBQ spelling (barbeque / barbecue / bar-b-q / bar-b-que / b-b-q
+ * → "bbq"), strips punctuation, and collapses whitespace. So "City Barbeque",
+ * "City Barbecue", "City Bar-B-Que" and "City BBQ" all normalize to "city bbq".
+ */
+export function brandIdentityKey(name: string | null | undefined): string {
+  if (!name) return "";
+  let t = ` ${name.toLowerCase()} `;
+  t = t.replace(/[®™]/g, " ");
+  t = t.replace(/[^a-z0-9]+/g, " ");             // punctuation → space (bar-b-que → "bar b que")
+  t = ` ${t.trim()} `;
+  t = t.replace(/\bbarbe[qc]ue\b/g, " bbq ");    // barbeque / barbecue
+  t = t.replace(/\bbar b q(?:ue)?\b/g, " bbq "); // "bar b q" / "bar b que"
+  t = t.replace(/\bbar b cue\b/g, " bbq ");
+  t = t.replace(/\bb b q\b/g, " bbq ");          // "b b q"
+  return t.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * STRICT brand-identity gate (patch 0073). True ONLY when the candidate's own name,
+ * normalized, EQUALS the chain's canonical name — never a loose/partial/substring
+ * match. This is what a provider result must pass to become a branch.
+ *
+ * Why it exists: a state-by-state Places text search for a GENERIC brand phrase
+ * ("City Barbeque") returns loosely-related BBQ places in every region, and
+ * `sharesBrand` let them through because the distinctive token of "City Barbeque"
+ * collapses to just "city" — which matches "Park City BBQ", "Salt Lake City …",
+ * "City BBQ Express", etc. Exact identity rejects those while still accepting real
+ * "City Barbeque" / "City BBQ" outlets. An empty/blank candidate never matches.
+ */
+export function matchesBrandIdentity(candidate: string | null | undefined, brand: string): boolean {
+  const c = brandIdentityKey(candidate);
+  const b = brandIdentityKey(brand);
+  return b.length > 0 && c === b;
+}

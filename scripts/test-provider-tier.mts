@@ -8,7 +8,7 @@
 import { overpassQuery, parseOverpass, fetchOverpass, OVERPASS_USER_AGENT, OVERPASS_MIRRORS, tolerantBrandRegex, overpassVariantCounts, resolveWikidataId } from "../lib/web-engine/providers/overpass";
 import { parsePlacesResult, fetchPlaces, buildSearchTextRequest, PLACES_SEARCHTEXT_URL, PLACES_FIELD_MASK, type PlacesRegion } from "../lib/web-engine/providers/places";
 import { usStateRegions } from "../lib/web-engine/providers/us-regions";
-import { sharesBrand } from "../lib/web-engine/providers/match";
+import { sharesBrand, matchesBrandIdentity, brandIdentityKey } from "../lib/web-engine/providers/match";
 import {
   mergeProviderBranches,
   discoverViaProviders,
@@ -231,7 +231,7 @@ console.log("\n[fetchPlaces — geographic sweep: per-region locationRestriction
       log.regions.push(body.locationRestriction);
       const lat = body.locationRestriction?.rectangle?.low.latitude ?? 0;
       const id = `S${lat}`;
-      return { ok: true, status: 200, json: async () => ({ places: [P(id, "City Barbeque", `${id} Main St, Town, ST, USA`, lat, -83)] }) };
+      return { ok: true, status: 200, json: async () => ({ places: [P(id, "City Barbeque", `100 Main St ${id}, Town, ST, USA`, lat, -83)] }) };
     }) as unknown as typeof fetch;
 
   const regions: PlacesRegion[] = [
@@ -344,7 +344,7 @@ console.log("\n[discoverViaProviders — OSM-only resolves; loud empty when noth
       const lat = body.locationRestriction?.rectangle?.low.latitude;
       const key = lat != null ? `S${lat}` : "national";
       placesHits.push(key);
-      return { ok: true, status: 200, json: async () => ({ places: [{ id: `PL_${key}`, displayName: { text: "City Barbeque" }, formattedAddress: `${key} Rd, Town, ST, USA`, location: { latitude: lat ?? 39, longitude: -83 } }] }) };
+      return { ok: true, status: 200, json: async () => ({ places: [{ id: `PL_${key}`, displayName: { text: "City Barbeque" }, formattedAddress: `100 Main St ${key}, Town, ST, USA`, location: { latitude: lat ?? 39, longitude: -83 } }] }) };
     }
     // Overpass — assert the wikidata union made it into the QL, return the fixture.
     const qlBody = String(init?.body ?? "");
@@ -408,6 +408,84 @@ console.log("\n[sharesBrand — the provider brand guard]");
   ok("brand-as-substring matches ('City Barbeque Dublin')", sharesBrand("City Barbeque Dublin", "City Barbeque"));
   ok("an unrelated eatery does not match", !sharesBrand("Dave's Smoke Shack", "City Barbeque"));
   ok("an empty candidate never matches", !sharesBrand("", "City Barbeque"));
+}
+
+console.log("\n[brandIdentityKey / matchesBrandIdentity — the STRICT gate (0073)]");
+{
+  // Normalisation folds every BBQ spelling to one identity key.
+  ok("'City Barbeque' → 'city bbq'", brandIdentityKey("City Barbeque") === "city bbq", brandIdentityKey("City Barbeque"));
+  ok("'City Barbecue' folds to the same key", brandIdentityKey("City Barbecue") === "city bbq");
+  ok("'City BBQ' folds to the same key", brandIdentityKey("City BBQ") === "city bbq");
+  ok("'City Bar-B-Que' folds to the same key", brandIdentityKey("City Bar-B-Que") === "city bbq", brandIdentityKey("City Bar-B-Que"));
+  ok("® / punctuation stripped", brandIdentityKey("City Barbeque®") === "city bbq");
+
+  // EXACT identity accepts the real chain, however it's spelled…
+  ok("exact brand accepted", matchesBrandIdentity("City Barbeque", "City Barbeque"));
+  ok("'City BBQ' accepted for 'City Barbeque'", matchesBrandIdentity("City BBQ", "City Barbeque"));
+  ok("'Mission BBQ' accepted for 'Mission BBQ'", matchesBrandIdentity("Mission BBQ", "Mission BBQ"));
+  // …and REJECTS the loose matches that flooded 0072 (all passed sharesBrand).
+  ok("REJECTS 'Park City BBQ'", !matchesBrandIdentity("Park City BBQ", "City Barbeque"));
+  ok("REJECTS 'Salt Lake City BBQ'", !matchesBrandIdentity("Salt Lake City BBQ", "City Barbeque"));
+  ok("REJECTS 'City BBQ Express' (extra token)", !matchesBrandIdentity("City BBQ Express", "City Barbeque"));
+  ok("REJECTS 'Gatlin's BBQ'", !matchesBrandIdentity("Gatlin's BBQ", "City Barbeque"));
+  ok("REJECTS a bare city name", !matchesBrandIdentity("Moab", "City Barbeque"));
+  ok("empty candidate never matches", !matchesBrandIdentity("", "City Barbeque") && !matchesBrandIdentity(null, "City Barbeque"));
+  // The exact loose cases sharesBrand WOULD have let through — proof the gate is stricter.
+  ok("sharesBrand let 'Park City BBQ' through; identity does not", sharesBrand("Park City BBQ", "City Barbeque") && !matchesBrandIdentity("Park City BBQ", "City Barbeque"));
+}
+
+console.log("\n[fetchPlaces — 0073 identity gate + street gate + pagination stop]");
+{
+  const mk = (id: string, name: string, addr: string) => ({ id, displayName: { text: name }, formattedAddress: addr, location: { latitude: 40, longitude: -83 } });
+  // A generic-query region page: one real City Barbeque + loosely-matched noise +
+  // a centroid-only "City BBQ" (no street). Only the real branch must survive.
+  const noisyPage = { places: [
+    mk("REAL", "City Barbeque", "2111 W Henderson Rd, Columbus, OH 43220, USA"),
+    mk("LOOSE1", "Park City BBQ", "10 Resort Dr, Park City, UT 84060, USA"),
+    mk("LOOSE2", "Salt Lake City BBQ", "5 State St, Salt Lake City, UT 84101, USA"),
+    mk("CENTROID", "City Barbeque", "Moab, UT 84532, USA"),          // right name, NO street → drop
+    mk("GATLINS", "Gatlin's BBQ", "1221 19th St, Houston, TX 77008, USA"),
+  ], nextPageToken: "N2" };
+  const onlyNoise = { places: [
+    mk("N1", "Kansas City Barbeque", "5 Any St, Kansas City, MO, USA"),
+    mk("N2", "Bubba's BBQ", "9 Rib Ln, Austin, TX, USA"),
+  ], nextPageToken: "N3" };
+
+  // Region 1 returns the noisy page then would paginate; region "empty" returns only noise.
+  let calls1 = 0;
+  const stub1: typeof fetch = (async (_u: string, init: RequestInit) => {
+    calls1++;
+    const b = JSON.parse(String(init.body)) as { pageToken?: string };
+    return { ok: true, status: 200, json: async () => (b.pageToken ? { places: [] } : noisyPage) };
+  }) as unknown as typeof fetch;
+  const r1 = await fetchPlaces("City Barbeque", { key: "k", fetchImpl: stub1, budget: { maxCalls: 10, maxUsd: 1 }, sleep: async () => {} });
+  ok("keeps ONLY the exact-name branch with a street (1 of 5)", r1.branches.length === 1 && r1.branches[0].external_id === "REAL", r1.branches.map((b) => b.external_id));
+  ok("drops the right-name-but-centroid result (no street)", !r1.branches.some((b) => b.external_id === "CENTROID"));
+  ok("drops the loose 'Park City BBQ' / 'Salt Lake City BBQ' / 'Gatlin's'", !r1.branches.some((b) => ["LOOSE1", "LOOSE2", "GATLINS"].includes(b.external_id!)));
+
+  // PAGINATION STOP — a region whose FIRST page has zero real matches must not
+  // paginate (one billable call), so a generic query never floods to the cap.
+  let calls2 = 0;
+  const stubNoise: typeof fetch = (async () => { calls2++; return { ok: true, status: 200, json: async () => onlyNoise }; }) as unknown as typeof fetch;
+  const r2 = await fetchPlaces("City Barbeque", { key: "k", fetchImpl: stubNoise, budget: { maxCalls: 10, maxUsd: 1 }, sleep: async () => {} });
+  ok("a 0-match region stops after ONE call (no flood)", calls2 === 1 && r2.branches.length === 0, { calls: calls2, n: r2.branches.length });
+}
+
+console.log("\n[parseOverpass — 0073 strict identity + brand:wikidata hard signal]");
+{
+  const body = { elements: [
+    { type: "node", id: 1, lat: 40, lon: -83, tags: { brand: "City Barbeque", name: "City Barbeque", "addr:housenumber": "1", "addr:street": "A St", "addr:city": "Columbus" } },
+    { type: "node", id: 2, lat: 41, lon: -84, tags: { "brand:wikidata": "Q5124505", name: "CityBBQ Downtown", "addr:housenumber": "2", "addr:street": "B St", "addr:city": "Dublin" } }, // no brand tag, odd name — accepted on the wikidata hard signal
+    { type: "node", id: 3, lat: 42, lon: -85, tags: { brand: "Park City BBQ", name: "Park City BBQ", "addr:housenumber": "3", "addr:street": "C St", "addr:city": "Park City" } }, // loose — REJECTED
+  ] };
+  const strict = parseOverpass(body, "City Barbeque", { wikidataId: "Q5124505" });
+  ok("exact-brand element kept", strict.some((b) => b.external_id === "node/1"));
+  ok("brand:wikidata hard-signal element kept despite an off-name", strict.some((b) => b.external_id === "node/2"));
+  ok("loose 'Park City BBQ' element REJECTED", !strict.some((b) => b.external_id === "node/3"));
+  ok("exactly the 2 real branches", strict.length === 2, strict.map((b) => b.external_id));
+  // Without the wikidata id, the odd-named node/2 is no longer hard-signalled → dropped.
+  const noWd = parseOverpass(body, "City Barbeque");
+  ok("no wikidata id → the odd-named node is dropped (strict identity only)", !noWd.some((b) => b.external_id === "node/2") && noWd.length === 1, noWd.map((b) => b.external_id));
 }
 
 // ── seedChainLocations gating (fake Supabase; provider pins skip the geocoder) ──
