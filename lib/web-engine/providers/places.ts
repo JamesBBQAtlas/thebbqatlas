@@ -112,6 +112,13 @@ export interface PlacesBudget {
   costPerCallUsd?: number;
 }
 
+/** One region of a geographic sweep — a key (e.g. a state code) + an optional
+ *  `locationRestriction` (omit for the bare national query). */
+export interface PlacesRegion {
+  key: string;
+  locationRestriction?: LocationRestriction;
+}
+
 export interface PlacesResult {
   branches: ProviderBranch[];
   /** Billable requests made. */
@@ -123,6 +130,12 @@ export interface PlacesResult {
   /** The last non-OK status seen (the New API's `error.status`, or an HTTP code). */
   status: string | null;
   error: string | null;
+  /** How many branches each swept region returned (for the receipt + diagnosis). */
+  perRegion: { key: string; count: number }[];
+  /** Region keys fully swept this run (+ any passed as already-swept for a resume). */
+  regionsSwept: string[];
+  /** Region keys NOT swept because the cap tripped — the resume cursor. */
+  regionsRemaining: string[];
 }
 
 interface PlacesPage {
@@ -184,7 +197,11 @@ export async function fetchPlaces(
   opts: {
     key: string;
     fetchImpl: typeof fetch;
-    regions?: string[];
+    /** Sweep regions (default: one bare national query). Each may carry a
+     *  `locationRestriction` so the New API returns that region's branches. */
+    regions?: PlacesRegion[];
+    /** Region keys already swept on a prior run — skipped here (resume). */
+    skipRegionKeys?: string[];
     budget: PlacesBudget;
     sleep?: (ms: number) => Promise<void>;
     pageDelayMs?: number;
@@ -195,35 +212,48 @@ export async function fetchPlaces(
   const sleep = opts.sleep ?? defaultSleep;
   const pageDelayMs = opts.pageDelayMs ?? 1500;
   const maxPages = Math.max(1, Math.min(opts.maxPagesPerQuery ?? 3, 3));
-  const queries = [brand, ...(opts.regions ?? []).map((r) => `${brand} ${r}`)];
+  const allRegions: PlacesRegion[] = opts.regions?.length ? opts.regions : [{ key: "national" }];
+  const skip = new Set(opts.skipRegionKeys ?? []);
+  const regions = allRegions.filter((r) => !skip.has(r.key));
 
   const byPlaceId = new Map<string, ProviderBranch>();
+  const perRegion: { key: string; count: number }[] = [];
+  const regionsSwept: string[] = [...(opts.skipRegionKeys ?? [])];
   let calls = 0;
   let capped = false;
   let lastStatus: string | null = null;
   let lastError: string | null = null;
+  let i = 0;
 
   const budgetLeft = () => calls < opts.budget.maxCalls && (calls + 1) * costPerCall <= opts.budget.maxUsd + 1e-9;
 
-  outer: for (const query of queries) {
+  for (; i < regions.length; i++) {
+    if (!budgetLeft()) { capped = true; break; }
+    const region = regions[i];
+    let regionCount = 0;
     let pageToken: string | undefined;
     for (let page = 0; page < maxPages; page++) {
-      if (!budgetLeft()) { capped = true; break outer; }
+      if (page > 0 && !budgetLeft()) { capped = true; break; }
       if (page > 0 && pageToken) await sleep(pageDelayMs);
-      const res = await searchTextPage(query, opts.key, opts.fetchImpl, { pageToken });
+      const res = await searchTextPage(brand, opts.key, opts.fetchImpl, { pageToken, locationRestriction: region.locationRestriction });
       calls++;
       if (res.status !== "OK") { lastStatus = res.status; lastError = res.error; }
       for (const raw of res.results) {
         const branch = parsePlacesResult(raw);
         // Brand guard — a text search can return a nearby different eatery.
         if (branch && sharesBrand(branch.brand_name, brand) && branch.external_id) {
-          if (!byPlaceId.has(branch.external_id)) byPlaceId.set(branch.external_id, branch);
+          if (!byPlaceId.has(branch.external_id)) { byPlaceId.set(branch.external_id, branch); regionCount++; }
         }
       }
       if (!res.nextPageToken) break;
       pageToken = res.nextPageToken;
     }
+    perRegion.push({ key: region.key, count: regionCount });
+    regionsSwept.push(region.key);
+    if (capped) { i++; break; }
   }
+  // Anything we never reached (cap tripped) is the resume cursor.
+  const regionsRemaining = regions.slice(i).map((r) => r.key);
 
   return {
     branches: [...byPlaceId.values()],
@@ -232,6 +262,9 @@ export async function fetchPlaces(
     capped,
     status: lastStatus,
     error: lastError,
+    perRegion,
+    regionsSwept,
+    regionsRemaining,
   };
 }
 

@@ -31,31 +31,76 @@ export const OVERPASS_MIRRORS = [
 export const OVERPASS_USER_AGENT =
   "TheBBQAtlas/1.0 (+https://thebbqatlas.com; contact: james@thebbqatlas.com)";
 
-/** Escape a brand for use inside an Overpass (PCRE) regex literal. */
+/** Escape a brand for use inside a (PCRE / JS) regex literal. */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
- * Build the Overpass QL for a brand. Unions two ways a chain is tagged:
- *   • `brand` = the canonical chain tag (the reliable one) — case-insensitive; and
- *   • `name` starting with the brand on an eating amenity — catches branches a mapper
- *     labelled by name but never brand-tagged.
- * `nwr` = nodes+ways+relations; `out center tags` returns each element's tags plus a
- * single representative lat/long (the node's own, or a way/relation's centre).
+ * A SPELLING-TOLERANT, case-insensitive regex body for a brand (patch 0071). The 0070
+ * live run matched 0 in OSM because the free-text tags spell it inconsistently — most
+ * often "Barbecue" (-cue) where the brand is "Barbeque" (-que). We fold `barbeque` /
+ * `barbecue` to `Barbe[qc]ue` so either OSM spelling matches, and escape every other
+ * metachar. e.g. "City Barbeque" → "City Barbe[qc]ue". Valid as both an Overpass and a
+ * JS regex body.
  */
-export function overpassQuery(brand: string, opts?: { timeoutSec?: number }): string {
-  const b = escapeRegex(brand.trim());
+export function tolerantBrandRegex(brand: string): string {
+  const escaped = escapeRegex(brand.trim());
+  return escaped.replace(/barbe[qc]ue/gi, "Barbe[qc]ue");
+}
+
+/**
+ * Build the Overpass QL for a brand. Unions, most-reliable first:
+ *   • `brand:wikidata=Q…` — the GOLD STANDARD chain tag (spelling-independent), when the
+ *     brand's Wikidata id is known (resolved from its Wikipedia page, cached on dossier);
+ *   • a spelling-tolerant `brand` regex (`~"City Barbe[qc]ue",i`);
+ *   • the same tolerant regex on `name` (branches a mapper named but never brand-tagged).
+ * NO exact-equality match (that returned 0 in 0070). Queried GLOBALLY — a brand/wikidata
+ * tag is specific enough that no area filter is needed. `out center tags` returns each
+ * element's tags + a representative lat/long (node's own, or way/relation centre).
+ */
+export function overpassQuery(brand: string, opts?: { timeoutSec?: number; wikidataId?: string | null }): string {
+  const rx = tolerantBrandRegex(brand);
   const timeout = Math.max(25, Math.min(opts?.timeoutSec ?? 60, 180));
-  return [
-    `[out:json][timeout:${timeout}];`,
-    `(`,
-    `  nwr["brand"~"^${b}$",i];`,
-    `  nwr["brand"~"${b}",i];`,
-    `  nwr["name"~"^${b}",i]["amenity"~"^(restaurant|fast_food|cafe)$"];`,
-    `);`,
-    `out center tags;`,
-  ].join("\n");
+  const members: string[] = [];
+  if (opts?.wikidataId && /^Q\d+$/.test(opts.wikidataId)) {
+    members.push(`  nwr["brand:wikidata"="${opts.wikidataId}"];`);
+  }
+  members.push(`  nwr["brand"~"${rx}",i];`);
+  members.push(`  nwr["name"~"${rx}",i];`);
+  return [`[out:json][timeout:${timeout}];`, `(`, ...members, `);`, `out center tags;`].join("\n");
+}
+
+/**
+ * Resolve a brand's Wikidata id (Q…) from its Wikipedia article — the id OSM tags chain
+ * outlets with. Reads `pageprops.wikibase_item` off the Wikipedia API. Injectable fetch;
+ * null on anything unresolved (the query then falls back to the tolerant regex). Cache
+ * the result on the flagship's dossier so it's resolved once per chain.
+ */
+export async function resolveWikidataId(opts: {
+  fetchImpl: typeof fetch;
+  wikipediaUrl?: string | null;
+  title?: string | null;
+}): Promise<string | null> {
+  let title = opts.title ?? null;
+  if (!title && opts.wikipediaUrl) {
+    const m = opts.wikipediaUrl.match(/\/wiki\/([^?#]+)/);
+    if (m) title = decodeURIComponent(m[1]);
+  }
+  if (!title) return null;
+  try {
+    const url = `https://en.wikipedia.org/w/api.php?action=query&prop=pageprops&ppprop=wikibase_item&format=json&redirects=1&titles=${encodeURIComponent(title)}`;
+    const res = await opts.fetchImpl(url, { headers: { "user-agent": OVERPASS_USER_AGENT, accept: "application/json" } });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { query?: { pages?: Record<string, { pageprops?: { wikibase_item?: string } }> } };
+    for (const p of Object.values(body.query?.pages ?? {})) {
+      const q = p?.pageprops?.wikibase_item;
+      if (q && /^Q\d+$/.test(q)) return q;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 const tagStr = (tags: Record<string, unknown>, key: string): string | null => {
@@ -140,13 +185,46 @@ export function parseOverpass(body: unknown, brand: string): ProviderBranch[] {
   return out;
 }
 
+export interface OverpassVariantCounts {
+  /** Elements matched by `brand:wikidata` (the gold standard). */
+  byWikidata: number;
+  /** Elements matched by the tolerant `brand` regex (not already wikidata). */
+  byBrand: number;
+  /** Elements matched by the tolerant `name` regex (not brand/wikidata). */
+  byName: number;
+}
+
 export interface OverpassResult {
   branches: ProviderBranch[];
   /** Raw element count returned (before the brand/location filter). */
   rawElements: number;
+  /** Per-variant attribution — so a residual 0 shows WHICH match returned nothing. */
+  variants: OverpassVariantCounts;
   status: number;
   error: string | null;
 }
+
+/** Attribute each returned element to the query variant that found it (patch 0071) —
+ *  post-hoc from tags, so a 0 is diagnosable ("byWikidata 0, byBrand 61, byName 0"). */
+export function overpassVariantCounts(body: unknown, brand: string, wikidataId?: string | null): OverpassVariantCounts {
+  const elements =
+    body && typeof body === "object" && Array.isArray((body as { elements?: unknown }).elements)
+      ? ((body as { elements: unknown[] }).elements as OverpassElement[])
+      : [];
+  const rx = new RegExp(tolerantBrandRegex(brand), "i");
+  const counts: OverpassVariantCounts = { byWikidata: 0, byBrand: 0, byName: 0 };
+  for (const el of elements) {
+    const tags = (el?.tags && typeof el.tags === "object" ? el.tags : {}) as Record<string, unknown>;
+    if (wikidataId && tags["brand:wikidata"] === wikidataId) { counts.byWikidata++; continue; }
+    const brandTag = typeof tags.brand === "string" ? tags.brand : "";
+    if (brandTag && rx.test(brandTag)) { counts.byBrand++; continue; }
+    const nameTag = typeof tags.name === "string" ? tags.name : "";
+    if (nameTag && rx.test(nameTag)) { counts.byName++; continue; }
+  }
+  return counts;
+}
+
+const EMPTY_VARIANTS: OverpassVariantCounts = { byWikidata: 0, byBrand: 0, byName: 0 };
 
 /** A status worth retrying on the next mirror: 403/406 (politeness/UA), 429 (rate), 5xx.
  *  A 400 is a bad QL — the same everywhere, so we don't waste mirrors on it. */
@@ -174,10 +252,12 @@ export async function fetchOverpass(
     endpoint?: string;
     endpoints?: string[];
     timeoutSec?: number;
+    /** The brand's Wikidata id (Q…), when resolved — the gold-standard match. */
+    wikidataId?: string | null;
   }
 ): Promise<OverpassResult> {
   const endpoints = opts.endpoint ? [opts.endpoint] : opts.endpoints ?? OVERPASS_MIRRORS;
-  const ql = overpassQuery(brand, { timeoutSec: opts.timeoutSec });
+  const ql = overpassQuery(brand, { timeoutSec: opts.timeoutSec, wikidataId: opts.wikidataId });
   let lastError = "no endpoint reached";
   let lastStatus = 0;
 
@@ -198,18 +278,24 @@ export async function fetchOverpass(
         const bodyText = await res.text().catch(() => "");
         lastError = `overpass ${res.status} @ ${endpoint}: ${bodyText.replace(/\s+/g, " ").trim().slice(0, 300)}`;
         if (overpassRetryable(res.status)) continue; // try the next mirror
-        return { branches: [], rawElements: 0, status: res.status, error: lastError };
+        return { branches: [], rawElements: 0, variants: EMPTY_VARIANTS, status: res.status, error: lastError };
       }
       const body = (await res.json()) as unknown;
       const rawElements =
         body && typeof body === "object" && Array.isArray((body as { elements?: unknown }).elements)
           ? (body as { elements: unknown[] }).elements.length
           : 0;
-      return { branches: parseOverpass(body, brand), rawElements, status: res.status, error: null };
+      return {
+        branches: parseOverpass(body, brand),
+        rawElements,
+        variants: overpassVariantCounts(body, brand, opts.wikidataId),
+        status: res.status,
+        error: null,
+      };
     } catch (e) {
       lastError = `overpass @ ${endpoint}: ${e instanceof Error ? e.message : String(e)}`;
       // network error — try the next mirror
     }
   }
-  return { branches: [], rawElements: 0, status: lastStatus, error: lastError };
+  return { branches: [], rawElements: 0, variants: EMPTY_VARIANTS, status: lastStatus, error: lastError };
 }

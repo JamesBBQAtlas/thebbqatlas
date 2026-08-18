@@ -8,7 +8,7 @@ import { auditField } from "@/lib/admin/content-audit";
 import { seedChainLocations, resolvePhantomFlagship, type SeedLocation } from "@/lib/admin/chain-seed";
 import { discoverChainLocations } from "@/lib/chains/discoverLocations";
 import { discoverViaEngine, cloudflareRenderer, engineConfigured } from "@/lib/web-engine/read-page";
-import { discoverViaProviders, providerCrossCheck, providersConfigured } from "@/lib/web-engine/providers";
+import { discoverViaProviders, providerCrossCheck, providersConfigured, formatProviderReceipt, providerInformedStop, FORCE_PLACES_MAX_USD, type ProviderReceipt } from "@/lib/web-engine/providers";
 import { selectChainSeeds, toSeed, crawlOwnFeed, webOnly } from "@/lib/admin/chain-tiers";
 import { identifyFlagship } from "@/lib/admin/chain-discovery/classify";
 import { hasStreetAddress } from "@/lib/admin/chain-discovery/normalize";
@@ -45,10 +45,12 @@ export async function POST(request: Request) {
   // bot-protected chain (City Barbeque, Mission) where a model's web guesses must not
   // stand in for real provider records.
   const forceProviders = String(body.source ?? "") === "providers";
+  // 0071 — "Continue sweeping": resume a cap-stopped provider sweep from its cursor.
+  const resumeSweep = forceProviders && Boolean(body.resume);
 
   const { data: row, error: loadErr } = await ctx.db
     .from("restaurants")
-    .select("id, name, slug, status, country, city, address, lat, lng, website, instagram_handle, dossier, enrichment_cost, chain_parent_id, needs_attention, attention_reason")
+    .select("id, name, slug, status, country, city, address, lat, lng, website, instagram_handle, dossier, enrichment_sources, enrichment_cost, chain_parent_id, needs_attention, attention_reason")
     .eq("id", restaurantId)
     .single();
   if (loadErr || !row) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
@@ -61,7 +63,12 @@ export async function POST(request: Request) {
 
   const dossier = (row.dossier ?? {}) as {
     is_chain?: boolean; chain_locations_url?: string | null; name?: string | null;
+    provider_wikidata?: string | null;
+    provider_sweep?: { swept?: string[]; remaining?: string[]; spentUsd?: number; complete?: boolean };
   };
+  // Wikipedia URL (for the Wikidata OSM match) from the flagship's provenance.
+  const wikipediaUrl =
+    (Array.isArray(row.enrichment_sources) ? (row.enrichment_sources as string[]) : []).find((s) => /wikipedia\.org\/wiki\//i.test(s)) ?? null;
   const priorCost = Number(row.enrichment_cost ?? 0) || 0;
   let grokCostTotal = 0;
 
@@ -208,15 +215,24 @@ export async function POST(request: Request) {
   // until GOOGLE_PLACES_API_KEY (or PROVIDER_TIER_OSM=on) is set.
   let providerSeeds: SeedLocation[] = [];
   let providerDebug: Record<string, unknown> | null = null;
+  let providerRun: Awaited<ReturnType<typeof discoverViaProviders>> | null = null;
   if (providersConfigured() && brand && (forceProviders || (crawlEmpty && engineSeeds.length === 0))) {
     try {
       const prov = await discoverViaProviders({
         brand,
         fetchImpl: fetch,
         placesKey: process.env.GOOGLE_PLACES_API_KEY ?? null,
+        // 0071 — the force path does the full geographic sweep at the raised cap; the
+        // Wikidata id + wikipedia link power the OSM match (cached on the dossier); a
+        // resume skips the regions already swept.
+        fullSweep: forceProviders,
+        wikidataId: dossier.provider_wikidata ?? null,
+        wikipediaUrl,
+        skipRegionKeys: resumeSweep ? dossier.provider_sweep?.swept ?? [] : [],
       });
       providerSeeds = prov.seeds;
       providerDebug = { ...prov.debug };
+      providerRun = prov;
     } catch (e) {
       providerDebug = { tier: "none", error: e instanceof Error ? e.message : String(e) };
     }
@@ -285,6 +301,25 @@ export async function POST(request: Request) {
         },
       }).eq("id", restaurantId);
       revalidateVenues();
+      // 0071 Part C — even a 0-found provider run gets a visible receipt + informed
+      // stop, so the operator sees the spend and can resume rather than guess.
+      let zeroReceipt: string | null = null;
+      let zeroStopped: string | null = null;
+      let zeroCanContinue = false;
+      if (forceProviders && providerRun) {
+        const pd = providerRun.debug;
+        const remaining = providerRun.regionsRemaining;
+        const r: ProviderReceipt = {
+          found: 0, osm: pd.fromOsm, places: pd.fromPlaces, deduped: pd.crossSourceDupes,
+          spendUsd: pd.places.spendUsd, capUsd: FORCE_PLACES_MAX_USD,
+          regionsSwept: providerRun.regionsSwept.length,
+          regionsTotal: providerRun.regionsSwept.length + remaining.length,
+          capped: pd.places.capped, expectedTotal: pd.osm.rawElements || null,
+        };
+        zeroReceipt = formatProviderReceipt(r);
+        zeroStopped = providerInformedStop(r);
+        zeroCanContinue = pd.places.capped && remaining.length > 0;
+      }
       return NextResponse.json({
         ok: false, brand, website, chain_underfilled: true, source_type: sourceType,
         found: 0, added: 0,
@@ -293,6 +328,9 @@ export async function POST(request: Request) {
         notes: discovery.notes,
         message: reason,
         cost: grokCostTotal,
+        receipt: zeroReceipt,
+        stopped: zeroStopped,
+        can_continue: zeroCanContinue,
       }, { status: 200 });
     }
     // Not flagged a chain and nothing found — clear chain framing, no error.
@@ -400,6 +438,48 @@ export async function POST(request: Request) {
     }
   }
 
+  // ── Provider receipt + sweep cursor (patch 0071 Part C) ──────────────────────
+  // A completion receipt shown on the chain parent on EVERY "From providers" run; an
+  // informed stop when the $3 cap trips (with an estimate of what's left); and a
+  // resumable cursor so "Continue sweeping (+$3)" appends from where it stopped —
+  // never restarts, never silently truncates. Force path only.
+  let providerReceipt: string | null = null;
+  let providerStopped: string | null = null;
+  let providerCanContinue = false;
+  let sweepState: { swept: string[]; remaining: string[]; spentUsd: number; complete: boolean } | null = null;
+  if (forceProviders && providerRun) {
+    const pd = providerRun.debug;
+    // Cumulative cursor: prior swept ∪ this run's swept; spend accumulates across
+    // resumes; complete when nothing is left AND the cap didn't stop us short.
+    const prior = dossier.provider_sweep ?? {};
+    const priorSwept = resumeSweep && Array.isArray(prior.swept) ? prior.swept : [];
+    const priorSpent = resumeSweep && typeof prior.spentUsd === "number" ? prior.spentUsd : 0;
+    const sweptAll = [...new Set([...priorSwept, ...providerRun.regionsSwept])];
+    const remaining = providerRun.regionsRemaining;
+    const spentUsd = round4(priorSpent + pd.places.spendUsd);
+    const complete = remaining.length === 0 && !pd.places.capped;
+    sweepState = { swept: sweptAll, remaining, spentUsd, complete };
+
+    // Best-effort expected total for the "remaining" estimate: OSM's raw element count
+    // when it exceeds what we rostered (OSM saw more than we kept), else unknown.
+    const expectedTotal = pd.osm.rawElements > distinctRostered ? pd.osm.rawElements : null;
+    const receipt: ProviderReceipt = {
+      found: distinctRostered,
+      osm: pd.fromOsm,
+      places: pd.fromPlaces,
+      deduped: pd.crossSourceDupes,
+      spendUsd: spentUsd,
+      capUsd: FORCE_PLACES_MAX_USD,
+      regionsSwept: sweptAll.length,
+      regionsTotal: sweptAll.length + remaining.length,
+      capped: pd.places.capped,
+      expectedTotal,
+    };
+    providerReceipt = formatProviderReceipt(receipt);
+    providerStopped = providerInformedStop(receipt);
+    providerCanContinue = pd.places.capped && remaining.length > 0;
+  }
+
   const nowIso = new Date().toISOString();
   // Item 4 — a SUCCESSFUL discovery run (addresses extracted / branches linked)
   // must clear a STALE extraction/geocode flag left by an earlier 0-result run,
@@ -424,6 +504,11 @@ export async function POST(request: Request) {
       is_chain: true,
       chain_locations_url: discovery.locatorUrl,
       discovery_source_type: sourceType,
+      // 0071 — cache the resolved Wikidata id (gold-standard OSM match) so the next
+      // run skips the Wikipedia lookup; persist the sweep cursor so "Continue
+      // sweeping" resumes from the exact regions left unswept.
+      ...(providerRun?.wikidataId ? { provider_wikidata: providerRun.wikidataId } : {}),
+      ...(sweepState ? { provider_sweep: sweepState } : {}),
       identified_flagship: flagshipCrowned
         ? { scope: "parent", reason: flagshipPick?.reason ?? null }
         : suggestedFlagship
@@ -531,5 +616,11 @@ export async function POST(request: Request) {
       : `${distinctRostered} distinct · ${result.added.length} new · ${result.linked} linked · ${alreadyPresent} already present${dupSuffix}${locSuffix}${partSuffix}`,
     seeded: result.added,
     cost: grokCostTotal,
+    // 0071 Part C — the provider run's visible receipt, informed stop, and resume
+    // affordance (null/false on the non-provider paths).
+    receipt: providerReceipt,
+    stopped: providerStopped,
+    can_continue: providerCanContinue,
+    sweep: sweepState,
   });
 }

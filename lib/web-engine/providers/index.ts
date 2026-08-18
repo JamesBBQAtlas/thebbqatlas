@@ -22,8 +22,14 @@ import type { ProviderBranch } from "../types";
 import { feedBranchesToSeeds, locationKey, type FeedToSeeds } from "../feed-to-seeds";
 import { haversineKm } from "@/lib/utils/geo";
 import type { SeedLocation } from "@/lib/admin/chain-seed";
-import { fetchOverpass, type OverpassResult } from "./overpass";
-import { fetchPlaces, PLACES_COST_PER_CALL_USD, type PlacesBudget, type PlacesResult } from "./places";
+import { fetchOverpass, resolveWikidataId, type OverpassResult } from "./overpass";
+import { fetchPlaces, PLACES_COST_PER_CALL_USD, type PlacesBudget, type PlacesResult, type PlacesRegion } from "./places";
+import { usStateRegions, US_STATE_CODES } from "./us-regions";
+
+/** Force-path ("Roster from providers") Places budget — James approved ~$3 to pull a
+ *  whole chain. Kept OFF the automated single-venue path (which stays at $0.60). */
+export const FORCE_PLACES_MAX_USD = 3.0;
+export const FORCE_PLACES_MAX_CALLS = 100;
 
 /** Two provider records are the "same place" if their pins are within ≈150 m — the
  *  geo-proximity backstop for when street tagging differs across the two sources. */
@@ -117,15 +123,29 @@ function mergeInto(primary: ProviderBranch, src: ProviderBranch): void {
   if (!primary.city && src.city) primary.city = src.city;
 }
 
+const EMPTY_PLACES: PlacesResult = {
+  branches: [], calls: 0, spendUsd: 0, capped: false, status: null, error: null,
+  perRegion: [], regionsSwept: [], regionsRemaining: [],
+};
+
 export interface ProviderDiscovery {
   seeds: SeedLocation[];
   branches: ProviderBranch[];
   deduped: number;
   dropped: number;
+  /** The Wikidata id used/resolved for the OSM match (cache this on the flagship). */
+  wikidataId: string | null;
+  /** Places regions swept this run + any not reached (the resume cursor). */
+  regionsSwept: string[];
+  regionsRemaining: string[];
   debug: {
     tier: "provider" | "none";
-    osm: { count: number; rawElements: number; error: string | null };
-    places: { count: number; calls: number; spendUsd: number; capped: boolean; status: string | null; error: string | null };
+    osm: { count: number; rawElements: number; variants: OverpassResult["variants"]; error: string | null };
+    places: {
+      count: number; calls: number; spendUsd: number; capped: boolean; status: string | null; error: string | null;
+      perRegion: { key: string; count: number }[];
+    };
+    wikidataId: string | null;
     merged: number;
     crossSourceDupes: number;
     fromPlaces: number;
@@ -133,47 +153,75 @@ export interface ProviderDiscovery {
     seedCount: number;
     deduped: number;
     dropped: number;
+    regionsSwept: number;
+    regionsRemaining: number;
     reason: string | null;
   };
 }
 
 /**
- * Run the provider tier for a chain and produce GATED seeds. OSM first (free, one call);
- * Places second (authoritative, cost-capped) when a key is configured. Merge, then hand
- * to the SAME feed→seeds shaper with `carryProvider` so each seed keeps the provider pin
- * + refs and is force-gated downstream. Never throws — a dead provider comes back as a
- * loud structured empty (tier "none") so the caller hand-seeds, never a silent zero.
+ * Run the provider tier for a chain and produce GATED seeds (patch 0071 — COVERAGE).
+ *   • OSM breadth: one free Overpass call matched by `brand:wikidata` (resolved from the
+ *     flagship's Wikipedia link, cached) + a spelling-tolerant brand/name regex.
+ *   • Places gap-fill: on the FORCE path a geographic sweep (national + every US state OSM
+ *     didn't already cover), paginated + deduped, under a raised (~$3) cap; the automated
+ *     path stays a single national query at the low cap. `skipRegionKeys` resumes a
+ *     cap-stopped sweep from its cursor (dedupe + append, never restart).
+ * Merge (normStreet + geo backstop, prefer Places, keep every id), then hand to the SAME
+ * feed→seeds shaper with `carryProvider` (force-gated downstream). Never throws.
  */
 export async function discoverViaProviders(opts: {
   brand: string;
   fetchImpl: typeof fetch;
   /** Google Places key — when absent, the tier runs OSM-only (still valid, still gated). */
   placesKey?: string | null;
-  /** Region terms for a deeper Places sweep ("Ohio", "Georgia", …). Optional. */
-  regions?: string[];
-  /** Places per-run cost cap. Defaults: 15 calls / $0.60. */
+  /** Pre-resolved Wikidata id (cached on the flagship dossier) — skips the lookup. */
+  wikidataId?: string | null;
+  /** The flagship's Wikipedia URL, to resolve the Wikidata id if not already cached. */
+  wikipediaUrl?: string | null;
+  /** FORCE path: geographic Places sweep + raised cap. The automated path leaves it off. */
+  fullSweep?: boolean;
+  /** Region keys already swept (resume cursor) — skipped this run. */
+  skipRegionKeys?: string[];
+  /** Places per-run cost cap override. */
   placesBudget?: Partial<PlacesBudget>;
   overpassEndpoint?: string;
   /** Test seams. */
   sleep?: (ms: number) => Promise<void>;
   pageDelayMs?: number;
 }): Promise<ProviderDiscovery> {
+  // Resolve the Wikidata id (gold-standard OSM match) if not already cached.
+  let wikidataId = opts.wikidataId ?? null;
+  if (!wikidataId && opts.wikipediaUrl) {
+    wikidataId = await resolveWikidataId({ fetchImpl: opts.fetchImpl, wikipediaUrl: opts.wikipediaUrl });
+  }
+
   const osm: OverpassResult = await fetchOverpass(opts.brand, {
     fetchImpl: opts.fetchImpl,
     endpoint: opts.overpassEndpoint,
+    wikidataId,
   });
 
-  let places: PlacesResult = { branches: [], calls: 0, spendUsd: 0, capped: false, status: null, error: null };
+  let places: PlacesResult = EMPTY_PLACES;
   if (opts.placesKey) {
+    // Gap-fill: sweep only states OSM didn't already cover (a working OSM keeps Places
+    // cheap). The bare national query always runs (catches cross-state top results).
+    const coveredStates = new Set(
+      osm.branches.map((b) => (b.region ?? "").toUpperCase()).filter((s) => US_STATE_CODES.includes(s))
+    );
+    const regions: PlacesRegion[] = opts.fullSweep
+      ? [{ key: "national" }, ...usStateRegions().filter((r) => !coveredStates.has(r.key))]
+      : [{ key: "national" }];
     const budget: PlacesBudget = {
-      maxCalls: opts.placesBudget?.maxCalls ?? 15,
-      maxUsd: opts.placesBudget?.maxUsd ?? 0.6,
+      maxCalls: opts.placesBudget?.maxCalls ?? (opts.fullSweep ? FORCE_PLACES_MAX_CALLS : 15),
+      maxUsd: opts.placesBudget?.maxUsd ?? (opts.fullSweep ? FORCE_PLACES_MAX_USD : 0.6),
       costPerCallUsd: opts.placesBudget?.costPerCallUsd ?? PLACES_COST_PER_CALL_USD,
     };
     places = await fetchPlaces(opts.brand, {
       key: opts.placesKey,
       fetchImpl: opts.fetchImpl,
-      regions: opts.regions,
+      regions,
+      skipRegionKeys: opts.skipRegionKeys,
       budget,
       sleep: opts.sleep,
       pageDelayMs: opts.pageDelayMs,
@@ -189,10 +237,17 @@ export async function discoverViaProviders(opts: {
     branches: merged.branches,
     deduped,
     dropped,
+    wikidataId,
+    regionsSwept: places.regionsSwept,
+    regionsRemaining: places.regionsRemaining,
     debug: {
       tier,
-      osm: { count: osm.branches.length, rawElements: osm.rawElements, error: osm.error },
-      places: { count: places.branches.length, calls: places.calls, spendUsd: places.spendUsd, capped: places.capped, status: places.status, error: places.error },
+      osm: { count: osm.branches.length, rawElements: osm.rawElements, variants: osm.variants, error: osm.error },
+      places: {
+        count: places.branches.length, calls: places.calls, spendUsd: places.spendUsd,
+        capped: places.capped, status: places.status, error: places.error, perRegion: places.perRegion,
+      },
+      wikidataId,
       merged: merged.branches.length,
       crossSourceDupes: merged.crossSourceDupes,
       fromPlaces: merged.fromPlaces,
@@ -200,12 +255,46 @@ export async function discoverViaProviders(opts: {
       seedCount: seeds.length,
       deduped,
       dropped,
+      regionsSwept: places.regionsSwept.length,
+      regionsRemaining: places.regionsRemaining.length,
       reason:
         tier === "none"
-          ? `provider tier — OSM ${osm.branches.length}, Places ${places.branches.length}, 0 usable branches — hand-seed${osm.error ? ` (osm: ${osm.error})` : ""}${places.error ? ` (places: ${places.error})` : ""}`
+          ? `provider tier — OSM ${osm.branches.length} (raw ${osm.rawElements}), Places ${places.branches.length}, 0 usable branches — hand-seed${osm.error ? ` (osm: ${osm.error})` : ""}${places.error ? ` (places: ${places.error})` : ""}`
           : null,
     },
   };
+}
+
+/** The numbers behind a "From providers" run's visible receipt (patch 0071 Part C). */
+export interface ProviderReceipt {
+  found: number;
+  osm: number;
+  places: number;
+  deduped: number;
+  spendUsd: number;
+  capUsd: number;
+  regionsSwept: number;
+  regionsTotal: number;
+  capped: boolean;
+  /** Best-effort expected total (OSM raw count / known size) for the "remaining" estimate. */
+  expectedTotal?: number | null;
+}
+
+/** A one-line receipt shown on the chain parent — always, every run. Pure. */
+export function formatProviderReceipt(r: ProviderReceipt): string {
+  const regionPart = r.regionsTotal > 1 ? ` · swept ${r.regionsSwept}/${r.regionsTotal} regions` : "";
+  const dedupePart = r.deduped ? ` · deduped ${r.deduped}` : "";
+  return `Found ${r.found} location${r.found === 1 ? "" : "s"} · OSM ${r.osm} · Places ${r.places}${dedupePart}${regionPart} · spent $${r.spendUsd.toFixed(2)} (cap $${r.capUsd.toFixed(2)})`;
+}
+
+/** When a run stopped BECAUSE it hit the cap, an explicit, estimated notice — the alert
+ *  James asked for. Null when the run wasn't capped (completed). Pure. */
+export function providerInformedStop(r: ProviderReceipt): string | null {
+  if (!r.capped) return null;
+  const unswept = Math.max(0, r.regionsTotal - r.regionsSwept);
+  const remainEst =
+    r.expectedTotal && r.expectedTotal > r.found ? `~${r.expectedTotal - r.found} likely remaining; ` : "";
+  return `⏸ Stopped at the $${r.capUsd.toFixed(2)} cap — found ${r.found}; ${remainEst}${unswept} region${unswept === 1 ? "" : "s"} not yet swept. Use “Continue sweeping” to resume.`;
 }
 
 export interface CrossCheck {

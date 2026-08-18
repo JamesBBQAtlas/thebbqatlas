@@ -5,14 +5,19 @@
  * a pin (so the geocoder is never called) with a fake Supabase client.
  * Run: node_modules/.bin/tsx scripts/test-provider-tier.mts
  */
-import { overpassQuery, parseOverpass, fetchOverpass, OVERPASS_USER_AGENT, OVERPASS_MIRRORS } from "../lib/web-engine/providers/overpass";
-import { parsePlacesResult, fetchPlaces, buildSearchTextRequest, PLACES_SEARCHTEXT_URL, PLACES_FIELD_MASK } from "../lib/web-engine/providers/places";
+import { overpassQuery, parseOverpass, fetchOverpass, OVERPASS_USER_AGENT, OVERPASS_MIRRORS, tolerantBrandRegex, overpassVariantCounts, resolveWikidataId } from "../lib/web-engine/providers/overpass";
+import { parsePlacesResult, fetchPlaces, buildSearchTextRequest, PLACES_SEARCHTEXT_URL, PLACES_FIELD_MASK, type PlacesRegion } from "../lib/web-engine/providers/places";
+import { usStateRegions } from "../lib/web-engine/providers/us-regions";
 import { sharesBrand } from "../lib/web-engine/providers/match";
 import {
   mergeProviderBranches,
   discoverViaProviders,
   crossCheckCounts,
   providerCrossCheck,
+  formatProviderReceipt,
+  providerInformedStop,
+  FORCE_PLACES_MAX_USD,
+  type ProviderReceipt,
 } from "../lib/web-engine/providers";
 import { feedBranchesToSeeds } from "../lib/web-engine/feed-to-seeds";
 import { seedChainLocations, type SeedLocation } from "../lib/admin/chain-seed";
@@ -38,14 +43,69 @@ const OVERPASS_BODY = {
   ],
 };
 
-console.log("\n[Overpass query builder — brand + name, escaped, out center tags]");
+console.log("\n[Overpass query builder — tolerant regex + wikidata union, global, out center tags]");
 {
   const q = overpassQuery("City Barbeque");
   ok("includes out center tags", /out center tags;/.test(q));
-  ok("queries the brand tag", /\["brand"~"\^City Barbeque\$",i\]/.test(q) || /\["brand"~"City Barbeque",i\]/.test(q));
-  ok("queries name on an eating amenity", /\["name"~"\^City Barbeque",i\]\["amenity"/.test(q));
+  // 0071 — spelling-tolerant, case-insensitive regex (NO exact equality — that matched 0).
+  ok("brand matched by the spelling-tolerant regex (Barbe[qc]ue), case-insensitive", /nwr\["brand"~"City Barbe\[qc\]ue",i\];/.test(q), q);
+  ok("name matched by the same tolerant regex", /nwr\["name"~"City Barbe\[qc\]ue",i\];/.test(q), q);
+  ok("no exact-equality brand match (=\"...\")", !/\["brand"="City Barbeque"\]/.test(q));
+  ok("global — no area/amenity filter appended", !/\["amenity"/.test(q) && !/area/.test(q));
+
+  // 0071 — a known Wikidata id unions in the GOLD-STANDARD brand:wikidata match first.
+  const qw = overpassQuery("City Barbeque", { wikidataId: "Q5124505" });
+  ok("wikidata id unions in brand:wikidata=Q… first", /nwr\["brand:wikidata"="Q5124505"\];/.test(qw), qw);
+  ok("still keeps the tolerant brand + name fallbacks", /\["brand"~"City Barbe\[qc\]ue",i\]/.test(qw) && /\["name"~"City Barbe\[qc\]ue",i\]/.test(qw));
+  ok("a malformed wikidata id is ignored (regex-only)", !/brand:wikidata/.test(overpassQuery("City Barbeque", { wikidataId: "not-a-qid" })));
+
   const esc = overpassQuery("Dinosaur Bar-B-Que");
   ok("regex-escapes special chars in the brand", esc.includes("Bar\\-B\\-Que") || esc.includes("Bar-B-Que"));
+}
+
+console.log("\n[tolerantBrandRegex — folds the -que/-cue spelling variance]");
+{
+  ok("Barbeque folds to Barbe[qc]ue", tolerantBrandRegex("City Barbeque") === "City Barbe[qc]ue");
+  ok("Barbecue folds to the same body (either OSM spelling matches)", tolerantBrandRegex("City Barbecue") === "City Barbe[qc]ue");
+  ok("case-insensitive fold (BARBEQUE)", tolerantBrandRegex("City BARBEQUE") === "City Barbe[qc]ue");
+  const rx = new RegExp(tolerantBrandRegex("City Barbeque"), "i");
+  ok("both spellings match the resulting regex", rx.test("City Barbecue") && rx.test("City Barbeque"));
+  ok("still escapes non-BBQ metachars", tolerantBrandRegex("A.B (C)").includes("A\\.B \\(C\\)"));
+}
+
+console.log("\n[overpassVariantCounts — per-variant attribution so a 0 is diagnosable]");
+{
+  const body = { elements: [
+    { type: "node", id: 1, tags: { "brand:wikidata": "Q5124505", brand: "City Barbeque", name: "City Barbeque" } },
+    { type: "node", id: 2, tags: { brand: "City Barbecue", name: "City Barbecue" } },   // -cue spelling → byBrand
+    { type: "node", id: 3, tags: { name: "City Barbeque Downtown" } },                   // name-only → byName
+    { type: "node", id: 4, tags: { brand: "Sonny's BBQ", name: "Sonny's" } },            // off-brand → none
+  ] };
+  const v = overpassVariantCounts(body, "City Barbeque", "Q5124505");
+  ok("wikidata match attributed to byWikidata", v.byWikidata === 1, v);
+  ok("tolerant -cue brand attributed to byBrand", v.byBrand === 1, v);
+  ok("name-only attributed to byName", v.byName === 1, v);
+  ok("off-brand attributed to none", v.byWikidata + v.byBrand + v.byName === 3, v);
+  const vNoQ = overpassVariantCounts(body, "City Barbeque", null);
+  ok("without a wikidata id the wikidata element falls to byBrand", vNoQ.byWikidata === 0 && vNoQ.byBrand === 2, vNoQ);
+}
+
+console.log("\n[resolveWikidataId — pageprops.wikibase_item off the Wikipedia API]");
+{
+  let seenUrl = "";
+  const wikiStub: typeof fetch = (async (url: string) => {
+    seenUrl = String(url);
+    return { ok: true, status: 200, json: async () => ({ query: { pages: { "12345": { pageprops: { wikibase_item: "Q5124505" } } } } }) };
+  }) as unknown as typeof fetch;
+  const q = await resolveWikidataId({ fetchImpl: wikiStub, wikipediaUrl: "https://en.wikipedia.org/wiki/City_Barbeque" });
+  ok("resolves the Q-id from the article title", q === "Q5124505", q);
+  ok("derives the title from the /wiki/<title> URL", /titles=City_Barbeque/.test(seenUrl), seenUrl);
+  const none = await resolveWikidataId({ fetchImpl: wikiStub, wikipediaUrl: null });
+  ok("no URL / no title → null (falls back to the tolerant regex)", none === null);
+  const bad: typeof fetch = (async () => ({ ok: false, status: 404, json: async () => ({}) })) as unknown as typeof fetch;
+  ok("an API error → null, never throws", (await resolveWikidataId({ fetchImpl: bad, title: "X" })) === null);
+  const noProp: typeof fetch = (async () => ({ ok: true, status: 200, json: async () => ({ query: { pages: { "1": {} } } }) })) as unknown as typeof fetch;
+  ok("a page with no wikibase_item → null", (await resolveWikidataId({ fetchImpl: noProp, title: "X" })) === null);
 }
 
 console.log("\n[parseOverpass — addr:* → branch, osm ref, brand guard, drops the unlocatable]");
@@ -160,6 +220,71 @@ console.log("\n[fetchPlaces — New API: pageToken sweep, dedupe, brand guard, C
   ok("an API error surfaces status+message, no branches, no throw", rd.branches.length === 0 && rd.status === "PERMISSION_DENIED" && /legacy/.test(rd.error ?? ""), { s: rd.status, e: rd.error });
 }
 
+console.log("\n[fetchPlaces — geographic sweep: per-region locationRestriction, per-region counts, resume]");
+{
+  const P = (id: string, name: string, addr: string, lat: number, lng: number) => ({ id, displayName: { text: name }, formattedAddress: addr, location: { latitude: lat, longitude: lng } });
+  // A stub that returns a distinct branch keyed off the locationRestriction (so each
+  // region contributes its own store), single page each.
+  const sweepStub = (log: { regions: (unknown | undefined)[] }): typeof fetch =>
+    (async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { locationRestriction?: { rectangle?: { low: { latitude: number } } } };
+      log.regions.push(body.locationRestriction);
+      const lat = body.locationRestriction?.rectangle?.low.latitude ?? 0;
+      const id = `S${lat}`;
+      return { ok: true, status: 200, json: async () => ({ places: [P(id, "City Barbeque", `${id} Main St, Town, ST, USA`, lat, -83)] }) };
+    }) as unknown as typeof fetch;
+
+  const regions: PlacesRegion[] = [
+    { key: "national" },
+    { key: "OH", locationRestriction: { rectangle: { low: { latitude: 38.3, longitude: -84.9 }, high: { latitude: 42.4, longitude: -80.5 } } } },
+    { key: "GA", locationRestriction: { rectangle: { low: { latitude: 30.3, longitude: -85.7 }, high: { latitude: 35.1, longitude: -80.8 } } } },
+  ];
+  const log1 = { regions: [] as (unknown | undefined)[] };
+  const swept = await fetchPlaces("City Barbeque", { key: "k", fetchImpl: sweepStub(log1), regions, budget: { maxCalls: 100, maxUsd: 3 }, sleep: async () => {} });
+  ok("sweeps every region (3 calls, one per region)", swept.calls === 3, swept.calls);
+  ok("national query carries NO locationRestriction; states DO", log1.regions[0] === undefined && !!log1.regions[1] && !!log1.regions[2]);
+  ok("per-region counts recorded for the receipt", swept.perRegion.length === 3 && swept.perRegion.every((r) => r.count === 1), swept.perRegion);
+  ok("regionsSwept lists all three keys, nothing remaining", swept.regionsSwept.join(",") === "national,OH,GA" && swept.regionsRemaining.length === 0, { s: swept.regionsSwept, r: swept.regionsRemaining });
+  ok("not capped inside budget", swept.capped === false);
+
+  // Resume — skipRegionKeys skips already-swept regions and prepends them to regionsSwept.
+  const log2 = { regions: [] as (unknown | undefined)[] };
+  const resumed = await fetchPlaces("City Barbeque", { key: "k", fetchImpl: sweepStub(log2), regions, skipRegionKeys: ["national", "OH"], budget: { maxCalls: 100, maxUsd: 3 }, sleep: async () => {} });
+  ok("resume skips already-swept regions (only GA hit)", resumed.calls === 1 && log2.regions.length === 1, { calls: resumed.calls });
+  ok("regionsSwept carries the prior cursor + the new region", resumed.regionsSwept.join(",") === "national,OH,GA", resumed.regionsSwept);
+
+  // Cap trips mid-sweep — the unreached regions become the resume cursor (no silent truncation).
+  const log3 = { regions: [] as (unknown | undefined)[] };
+  const cap = await fetchPlaces("City Barbeque", { key: "k", fetchImpl: sweepStub(log3), regions, budget: { maxCalls: 2, maxUsd: 3 }, sleep: async () => {} });
+  ok("cap stops the sweep short + reports capped", cap.capped === true && cap.calls === 2, { calls: cap.calls, capped: cap.capped });
+  ok("the unreached region is the resume cursor", cap.regionsRemaining.includes("GA") && !cap.regionsSwept.includes("GA"), { swept: cap.regionsSwept, remaining: cap.regionsRemaining });
+}
+
+console.log("\n[usStateRegions — 50 states + DC as rectangle-restricted sweep regions]");
+{
+  const regions = usStateRegions();
+  ok("covers 51 regions (50 states + DC)", regions.length === 51, regions.length);
+  ok("every region has a rectangle locationRestriction", regions.every((r) => "rectangle" in (r.locationRestriction ?? {})));
+  const oh = regions.find((r) => r.key === "OH")!;
+  ok("OH box is a sane US envelope (west/south of east/north, lng negative)", !!oh && oh.locationRestriction!.rectangle.low.longitude < 0 && oh.locationRestriction!.rectangle.low.latitude < oh.locationRestriction!.rectangle.high.latitude);
+}
+
+console.log("\n[formatProviderReceipt + providerInformedStop — the cost UX (Part C)]");
+{
+  const complete: ProviderReceipt = { found: 74, osm: 61, places: 13, deduped: 0, spendUsd: 0.9, capUsd: FORCE_PLACES_MAX_USD, regionsSwept: 48, regionsTotal: 50, capped: false };
+  const line = formatProviderReceipt(complete);
+  ok("receipt shows found + per-source + regions + spend/cap", /Found 74 locations/.test(line) && /OSM 61/.test(line) && /Places 13/.test(line) && /swept 48\/50 regions/.test(line) && /\$0\.90 \(cap \$3\.00\)/.test(line), line);
+  ok("a completed run has NO informed-stop notice", providerInformedStop(complete) === null);
+
+  const cappedR: ProviderReceipt = { found: 40, osm: 25, places: 15, deduped: 2, spendUsd: 3.0, capUsd: FORCE_PLACES_MAX_USD, regionsSwept: 30, regionsTotal: 50, capped: true, expectedTotal: 76 };
+  const stop = providerInformedStop(cappedR)!;
+  ok("informed stop fires when capped, with a remaining estimate", /Stopped at the \$3\.00 cap/.test(stop) && /~36 likely remaining/.test(stop) && /20 regions not yet swept/.test(stop) && /Continue sweeping/.test(stop), stop);
+  ok("capped receipt still renders the deduped count", /deduped 2/.test(formatProviderReceipt(cappedR)));
+
+  const singleRegion: ProviderReceipt = { found: 1, osm: 1, places: 0, deduped: 0, spendUsd: 0, capUsd: 0.6, regionsSwept: 1, regionsTotal: 1, capped: false };
+  ok("singular grammar + region part hidden for a single region", /Found 1 location ·/.test(formatProviderReceipt(singleRegion)) && !/regions/.test(formatProviderReceipt(singleRegion)));
+}
+
 console.log("\n[mergeProviderBranches — cross-source dedupe, prefer Places, keep both refs]");
 {
   const osm: ProviderBranch[] = [
@@ -204,6 +329,57 @@ console.log("\n[discoverViaProviders — OSM-only resolves; loud empty when noth
   const empty: typeof fetch = (async () => ({ ok: true, status: 200, json: async () => ({ elements: [] }) })) as unknown as typeof fetch;
   const de = await discoverViaProviders({ brand: "Nobody's BBQ", fetchImpl: empty });
   ok("nothing found → tier none with a hand-seed reason (never a silent zero)", de.seeds.length === 0 && de.debug.tier === "none" && Boolean(de.debug.reason));
+
+  // 0071 integration — wikipediaUrl resolves the Wikidata id (fed into the OSM query),
+  // fullSweep drives the geographic Places sweep at the raised cap, skipRegionKeys resumes.
+  let sawWikidataInQL = false;
+  const placesHits: string[] = [];
+  const integ: typeof fetch = (async (url: string, init?: RequestInit) => {
+    const u = String(url);
+    if (/wikipedia\.org/.test(u)) {
+      return { ok: true, status: 200, json: async () => ({ query: { pages: { "1": { pageprops: { wikibase_item: "Q5124505" } } } } }) };
+    }
+    if (/googleapis\.com/.test(u)) {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { locationRestriction?: { rectangle?: { low: { latitude: number } } } };
+      const lat = body.locationRestriction?.rectangle?.low.latitude;
+      const key = lat != null ? `S${lat}` : "national";
+      placesHits.push(key);
+      return { ok: true, status: 200, json: async () => ({ places: [{ id: `PL_${key}`, displayName: { text: "City Barbeque" }, formattedAddress: `${key} Rd, Town, ST, USA`, location: { latitude: lat ?? 39, longitude: -83 } }] }) };
+    }
+    // Overpass — assert the wikidata union made it into the QL, return the fixture.
+    const qlBody = String(init?.body ?? "");
+    if (/brand%3Awikidata%22%3D%22Q5124505/.test(qlBody) || /brand:wikidata"="Q5124505/.test(decodeURIComponent(qlBody))) sawWikidataInQL = true;
+    return { ok: true, status: 200, json: async () => OVERPASS_BODY };
+  }) as unknown as typeof fetch;
+
+  const full = await discoverViaProviders({
+    brand: "City Barbeque",
+    fetchImpl: integ,
+    placesKey: "k",
+    wikipediaUrl: "https://en.wikipedia.org/wiki/City_Barbeque",
+    fullSweep: true,
+    sleep: async () => {},
+  });
+  ok("wikidata id resolved from the wikipedia link + cached on the result", full.wikidataId === "Q5124505", full.wikidataId);
+  ok("the resolved wikidata id was unioned into the Overpass QL", sawWikidataInQL);
+  ok("fullSweep ran the geographic Places sweep (national + uncovered states)", full.regionsSwept.length > 1 && full.regionsSwept[0] === "national", full.regionsSwept.length);
+  ok("OSM-covered states are skipped by the gap-fill (OH/GA/IN not re-swept)", !full.regionsSwept.includes("OH") && !full.regionsSwept.includes("GA"), full.regionsSwept.filter((s) => ["OH", "GA", "IN"].includes(s)));
+  ok("debug exposes the sweep + variant diagnostics", full.debug.regionsSwept > 1 && typeof full.debug.osm.variants.byBrand === "number", full.debug.osm.variants);
+
+  // Resume — a cached wikidataId skips the wiki lookup; skipRegionKeys resumes the sweep.
+  let wikiCalled = false;
+  const integ2: typeof fetch = (async (url: string, init?: RequestInit) => {
+    const u = String(url);
+    if (/wikipedia\.org/.test(u)) { wikiCalled = true; return { ok: true, status: 200, json: async () => ({}) }; }
+    if (/googleapis\.com/.test(u)) return { ok: true, status: 200, json: async () => ({ places: [] }) };
+    return { ok: true, status: 200, json: async () => OVERPASS_BODY };
+  }) as unknown as typeof fetch;
+  const resumed = await discoverViaProviders({
+    brand: "City Barbeque", fetchImpl: integ2, placesKey: "k",
+    wikidataId: "Q5124505", fullSweep: true, skipRegionKeys: ["national"], sleep: async () => {},
+  });
+  ok("a cached wikidata id skips the Wikipedia lookup", wikiCalled === false);
+  ok("skipRegionKeys resumes — 'national' carried, not re-swept", resumed.regionsSwept.includes("national"));
 }
 
 console.log("\n[crossCheckCounts — agree raises confidence; disagree flags specifics]");

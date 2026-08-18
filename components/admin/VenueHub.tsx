@@ -341,7 +341,7 @@ export function VenueHub({
   const [heroOpen, setHeroOpen] = useState<string | null>(null);
   const [locOpen, setLocOpen] = useState<string | null>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
-  const [rowResult, setRowResult] = useState<Record<string, { msg?: string; err?: string; warn?: string }>>({});
+  const [rowResult, setRowResult] = useState<Record<string, { msg?: string; err?: string; warn?: string; receipt?: string; continueSweep?: boolean }>>({});
   const [confirmBatch, setConfirmBatch] = useState<{ kind: ActionKind; n: number; est: number } | null>(null);
   // §09.1.2b — chain roster gateway surfaced after a parent enrich detects a chain.
   const [chainGateway, setChainGateway] = useState<{
@@ -927,13 +927,19 @@ export function VenueHub({
 
   // Step 2 — Build roster: read the brand's /locations page and add every branch
   // as a seed in the "flagship not set" state. Claims nothing; nothing re-sorts.
-  async function buildRoster(v: HubVenue, opts?: { source?: "providers" }) {
+  async function buildRoster(v: HubVenue, opts?: { source?: "providers"; resume?: boolean }) {
     keepScroll();
     markActed(v.id);
     // Live feedback so the operator never stares at an unchanged screen.
     setRowResult((p) => ({
       ...p,
-      [v.id]: { msg: opts?.source === "providers" ? `Sourcing ${v.name} from providers (OSM / Google Places)…` : `Scanning ${v.name} locations…` },
+      [v.id]: {
+        msg: opts?.resume
+          ? `Continuing the ${v.name} sweep from where it stopped…`
+          : opts?.source === "providers"
+            ? `Sourcing ${v.name} from providers (OSM / Google Places)…`
+            : `Scanning ${v.name} locations…`,
+      },
     }));
     setState(v.id, "running");
     let res: Response;
@@ -943,7 +949,11 @@ export function VenueHub({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ restaurantId: v.id, ...(opts?.source ? { source: opts.source } : {}) }),
+          body: JSON.stringify({
+            restaurantId: v.id,
+            ...(opts?.source ? { source: opts.source } : {}),
+            ...(opts?.resume ? { resume: true } : {}),
+          }),
         },
         290_000
       );
@@ -963,8 +973,16 @@ export function VenueHub({
       return;
     }
     // Couldn't resolve the site, or no locations page found — surface the reason.
+    // A capped provider run still returns a receipt + a resume affordance here.
     if (data.needs_site || data.source_type === "none" || data.ok === false) {
-      setRowResult((p) => ({ ...p, [v.id]: { warn: data.message ?? "Couldn't discover locations — see the venue's attention flag." } }));
+      setRowResult((p) => ({
+        ...p,
+        [v.id]: {
+          warn: data.stopped ?? data.message ?? "Couldn't discover locations — see the venue's attention flag.",
+          ...(data.receipt ? { receipt: data.receipt } : {}),
+          ...(data.can_continue ? { continueSweep: true } : {}),
+        },
+      }));
       router.refresh();
       return;
     }
@@ -980,10 +998,15 @@ export function VenueHub({
     const added = data.added ?? 0;
     const src = data.source_note ? `${data.source_note}. ` : "";
     const part = data.partial ? " PARTIAL — re-run to continue. " : " ";
+    // If the provider cap stopped short, lead with the informed-stop notice; always
+    // show the completion receipt + a "Continue sweeping" affordance when resumable.
+    const stopNote = data.stopped ? `${data.stopped} ` : "";
     setRowResult((p) => ({
       ...p,
       [v.id]: {
-        warn: `${src}${found} location${found === 1 ? "" : "s"} (${added} new).${part}Flagship not set — pick the original with “Set as flagship”.`,
+        warn: `${src}${found} location${found === 1 ? "" : "s"} (${added} new).${part}${stopNote}Flagship not set — pick the original with “Set as flagship”.`,
+        ...(data.receipt ? { receipt: data.receipt } : {}),
+        ...(data.can_continue ? { continueSweep: true } : {}),
       },
     }));
     router.refresh();
@@ -1676,6 +1699,19 @@ export function VenueHub({
                       )}
                       {rowResult[v.id]?.msg && <div className="mt-1 text-xs text-emerald-400">{rowResult[v.id]?.msg}</div>}
                       {rowResult[v.id]?.warn && <div className="mt-1 flex items-start gap-1 text-xs text-amber-400"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{rowResult[v.id]?.warn}</div>}
+                      {/* 0071 Part C — the provider run's completion receipt (spend, regions,
+                          per-source counts) shown on the parent, plus a resume affordance when
+                          the $3 cap stopped the sweep short (appends, never restarts). */}
+                      {rowResult[v.id]?.receipt && <div className="mt-1 font-mono text-[11px] text-text-muted">{rowResult[v.id]?.receipt}</div>}
+                      {rowResult[v.id]?.continueSweep && (
+                        <button
+                          type="button"
+                          onClick={() => buildRoster(v, { source: "providers", resume: true })}
+                          className="mt-1 inline-flex items-center gap-1 rounded border border-brand-gold/40 px-2 py-0.5 text-xs font-semibold text-brand-gold hover:bg-brand-gold/10"
+                        >
+                          <MapPin className="h-3 w-3" />Continue sweeping (+$3)
+                        </button>
+                      )}
                       {rowResult[v.id]?.err && <div className="mt-1 text-xs text-destructive">{rowResult[v.id]?.err}</div>}
                     </td>
                     <td className="px-3 py-3">
