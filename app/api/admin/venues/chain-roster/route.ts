@@ -360,7 +360,12 @@ export async function POST(request: Request) {
   // flow through the SAME seedChainLocations (Part A naming, normStreet dedupe,
   // attach-under-one-flagship, per-seed gating) — no fork.
   const seedInput: SeedLocation[] = tierPick.seeds;
-  const result = await seedChainLocations(ctx.db, restaurantId, brand, anchoredCountry, seedInput);
+  // 0074 — when the roster came from the chain's OWN locations page, tell the seeder so
+  // its entries auto-attach as "<Brand> — <label>" branches (holding only the
+  // geographically-implausible strays for human verify), instead of orphan stubs.
+  const result = await seedChainLocations(ctx.db, restaurantId, brand, anchoredCountry, seedInput, {
+    ownLocationsPage: tierPick.tier === "own_feed",
+  });
 
   // Part 4D — identify the flagship from research signals (the dossier's own
   // flagship_location, a name cue like "The Original", or the earliest founding

@@ -21,6 +21,7 @@ import {
 } from "../lib/web-engine/providers";
 import { feedBranchesToSeeds } from "../lib/web-engine/feed-to-seeds";
 import { seedChainLocations, type SeedLocation } from "../lib/admin/chain-seed";
+import { isFootprintOutlier } from "../lib/utils/geo";
 import type { ProviderBranch } from "../lib/web-engine/types";
 
 let pass = 0, fail = 0;
@@ -550,6 +551,54 @@ console.log("\n[seedChainLocations — provider seeds land GATED, pin preferred,
   const avon = rows.find((r) => r.location_label === "Avon")!;
   ok("second row's geo_source reflects its own provider (osm)", avon.geo_source === "osm");
   ok("all located via provider pin → none flagged as needing a manual pin", res.needsLocation === 0, res.needsLocation);
+}
+
+console.log("\n[isFootprintOutlier — the geographic-implausibility heuristic (0074)]");
+{
+  // Evie Mae's: a West-Texas cluster + one stray Florida entry.
+  const tx = [
+    { lat: 33.51, lng: -102.00 }, // Wolfforth (flagship)
+    { lat: 33.58, lng: -101.85 }, // Lubbock
+    { lat: 35.20, lng: -101.83 }, // Amarillo
+    { lat: 32.75, lng: -97.33 },  // Fort Worth
+  ];
+  const miramarFL = { lat: 30.38, lng: -86.12 };
+  const fp = [...tx, miramarFL];
+  ok("the lone Florida entry IS an outlier", isFootprintOutlier(miramarFL, fp) === true);
+  ok("a Texas branch with a nearby sibling is NOT an outlier", tx.every((p) => isFootprintOutlier(p, fp) === false));
+  ok("too-small a footprint is never judged (attach all)", isFootprintOutlier(miramarFL, [tx[0], miramarFL]) === false);
+  ok("isolationKm is configurable (huge radius → nothing is an outlier)", isFootprintOutlier(miramarFL, fp, { isolationKm: 5000 }) === false);
+  ok("a point sharing its exact spot with a sibling is not isolated by itself", isFootprintOutlier(tx[0], [tx[0], { lat: 33.52, lng: -102.01 }, tx[1], tx[2]]) === false);
+}
+
+console.log("\n[seedChainLocations — 0074 own-locations-page auto-attach + naming]");
+{
+  // Own-page seeds (no provider_refs): the sandbox has no geocoder key, so they land
+  // unpinned — but the NAMING + ATTACH decisions are what 0074 changes and we assert those.
+  const parent = { id: "parent-1", address: "100 Flagship Rd", city: "Wolfforth", location_label: null, lat: 33.51, lng: -102.0, style: "texas" };
+  const seedsOwn: SeedLocation[] = [
+    { name: "Bartram Oaks", address: "123 Racetrack Rd", city: "Jacksonville", country: "United States" },
+    { name: "Duval Station", address: "456 Duval Station Rd", city: "Jacksonville", country: "United States" },
+  ];
+  const { db, state } = makeFakeDb(parent);
+  const res = await seedChainLocations(db, "parent-1", "Bono's Pit Bar-B-Q", "United States", seedsOwn, { ownLocationsPage: true });
+  const rows = state.inserted;
+  ok("own-page branches named '<Brand> — <label>'", rows.some((r) => r.name === "Bono's Pit Bar-B-Q — Bartram Oaks") && rows.some((r) => r.name === "Bono's Pit Bar-B-Q — Duval Station"), rows.map((r) => r.name));
+  ok("own-page branches ATTACH to the flagship (chain_parent_id set)", rows.every((r) => r.chain_parent_id === "parent-1"));
+  ok("location_label keeps the bare label", rows.some((r) => r.location_label === "Bartram Oaks"));
+  ok("still gated pending (publish gate unchanged)", rows.every((r) => r.status === "pending"));
+
+  // Scoping — WITHOUT the ownLocationsPage flag, naming is unchanged (name = brand).
+  const { db: db2, state: st2 } = makeFakeDb(parent);
+  await seedChainLocations(db2, "parent-1", "Bono's Pit Bar-B-Q", "United States", seedsOwn);
+  ok("default (non-own-page) path is UNCHANGED — name is the bare brand", st2.inserted.every((r) => r.name === "Bono's Pit Bar-B-Q"), st2.inserted.map((r) => r.name));
+
+  // Dedupe against the flagship's OWN address — a page entry at the flagship's street
+  // must not spawn a self-duplicate (the "Beaumont"/"Wade Hampton" case).
+  const { db: db3, state: st3 } = makeFakeDb(parent);
+  const selfDup: SeedLocation[] = [{ name: "Wolfforth", address: "100 Flagship Rd", city: "Wolfforth", country: "United States" }];
+  const res3 = await seedChainLocations(db3, "parent-1", "Evie Mae's BBQ", "United States", selfDup, { ownLocationsPage: true });
+  ok("a page entry at the flagship's own address is matched to the parent, not duplicated", res3.matchedParent === 1 && st3.inserted.length === 0, { matchedParent: res3.matchedParent, inserted: st3.inserted.length });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

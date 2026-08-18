@@ -3,7 +3,7 @@ import { uniqueRestaurantSlug } from "@/lib/admin/venues";
 import { composeAddress, normStreet, normCity, settlementCity, extractCleanAddress } from "@/lib/admin/address";
 import { canonicalCountry, resolveCountryCode } from "@/lib/constants/countries";
 import { geocodeStructured, GEOCODE_COARSE_REASON, coherentGeoConfidence } from "@/lib/geo/geocode";
-import { haversineKm } from "@/lib/utils/geo";
+import { haversineKm, isFootprintOutlier } from "@/lib/utils/geo";
 import { auditField } from "@/lib/admin/content-audit";
 
 /** A location to seed: a branch label/name, optional street address, and city.
@@ -61,6 +61,10 @@ export interface SeedResult {
   /** Off-brand locations-page links seeded standalone under their real name and
    *  flagged, NOT absorbed as a branch under the parent (Fix 2a). */
   offBrand: number;
+  /** Own-locations-page entries HELD for verify (unattached) because they're
+   *  geographically implausible for the brand's footprint (patch 0074) — a likely
+   *  bad link (e.g. a Florida entry on a West-Texas brand's page). */
+  geoHeld: number;
   /** Per-incoming-location decision log, for the parent's discovery_debug so the
    *  roster "shows its working" (Part 4B/FAIL 5): what happened to each address. */
   decisions: { address: string; decision: string; reason?: string }[];
@@ -272,10 +276,15 @@ export async function seedChainLocations(
   parentId: string,
   brand: string,
   country: string | null,
-  locations: SeedLocation[]
+  locations: SeedLocation[],
+  /** 0074 — when the source is the chain's OWN locations page, its entries ARE its
+   *  branches: name them "<Brand> — <label>" and attach, holding only the
+   *  geographically-implausible ones for human verify. Off for provider/web sources. */
+  opts?: { ownLocationsPage?: boolean }
 ): Promise<SeedResult> {
+  const ownPage = Boolean(opts?.ownLocationsPage);
   const found = locations.length;
-  const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0, offBrand: 0, decisions: [] };
+  const result: SeedResult = { found, added: [], updated: [], matchedParent: 0, needsLocation: 0, linked: 0, possibleDuplicates: 0, offBrand: 0, geoHeld: 0, decisions: [] };
   if (!found) return result;
   // Parse-robustness — clean every incoming address BEFORE geocoding and dedupe:
   // un-glue "St.San" → "St. San" (A5), strip a phone glued to the number (A7), and
@@ -500,8 +509,32 @@ export async function seedChainLocations(
     return false;
   };
 
+  // 0074 — the brand's geographic FOOTPRINT: every located reference point (the
+  // flagship, existing children, and this run's own located candidates). Used only on
+  // the own-locations-page path to hold a lone far-flung entry for human verify.
+  const FOOTPRINT_MIN = 4;   // too few points to judge a footprint → attach all
+  const ISOLATION_KM = 600;  // no other branch within this → a suspicious island
+  const footprint: { lat: number; lng: number }[] = [
+    ...existing.filter((e) => hasCoords(e.lat, e.lng)).map((e) => ({ lat: e.lat as number, lng: e.lng as number })),
+    ...candidates.filter((c) => hasCoords(c.lat, c.lng)).map((c) => ({ lat: c.lat as number, lng: c.lng as number })),
+  ];
+  /** Is this candidate geographically implausible for the brand — a lone pin with no
+   *  other branch within ISOLATION_KM, judged only when the footprint is big enough to
+   *  trust? A Florida entry on a West-Texas brand's page trips this; a normal branch
+   *  (which always has a nearby sibling) does not. Never trips on a small roster. */
+  const isGeoImplausible = (c: Candidate): boolean =>
+    hasCoords(c.lat, c.lng) &&
+    isFootprintOutlier({ lat: c.lat as number, lng: c.lng as number }, footprint, {
+      minFootprint: FOOTPRINT_MIN,
+      isolationKm: ISOLATION_KM,
+    });
+
   for (const c of candidates) {
     const loc = c.loc;
+    // 0074 — a plain OWN-locations-page branch (not a provider/web-gated seed): the
+    // page is a strong ownership signal, so these auto-attach + get a "<Brand> —
+    // <label>" name (below), rather than being left as orphan stubs for manual wiring.
+    const ownBranch = ownPage && !loc.provider_refs?.length && !loc.gate_reason;
     const label = loc.name && loc.name !== brand ? loc.name : loc.city;
     if (!label) continue;
 
@@ -563,6 +596,49 @@ export async function seedChainLocations(
       await db.from("restaurants").insert(offRow);
       result.offBrand += 1;
       note(offComposed || (loc.address ?? loc.name ?? ""), "off_brand", `named "${loc.name}" — not a ${brand} branch; seeded standalone + flagged`);
+      continue;
+    }
+
+    // 0074 — GEO-IMPLAUSIBLE own-page entry: the chain's own page usually lists only
+    // its branches, but can carry a stray bad link. A located entry with no other
+    // branch within ISOLATION_KM of the whole footprint (Evie Mae's West-TX page
+    // listing a "Miramar Beach, FL") is almost certainly wrong — hold it UNATTACHED +
+    // flagged for a human, never auto-file it under the flagship. A genuine branch
+    // always has a nearby sibling, so it isn't caught. Skipped when it actually
+    // matches an existing member (a re-roster of something already attached).
+    if (ownBranch && isGeoImplausible(c) && !existing.some((e) => !consumed.has(e.id) && matches(c, e))) {
+      const gLabel = (label ?? loc.name ?? loc.city ?? "").trim();
+      const gCity = settlementCity(loc.city) || loc.city || "";
+      const gSlug = await uniqueRestaurantSlug(db, `${brand} ${gLabel || gCity}`);
+      const gComposed = composeAddress({ street: loc.address, city: loc.city });
+      const gGeo = coherentGeoConfidence(c.lat, c.lng, { geo_precision: c.geoPrecision, geo_confidence: c.geoConfidence, geo_source: c.geoSource });
+      const gRow: Record<string, unknown> = {
+        slug: gSlug,
+        name: gLabel && gLabel.toLowerCase() !== brand.toLowerCase() ? `${brand} — ${gLabel}` : brand,
+        location_label: gLabel || null,
+        description: `${brand} — barbecue${gCity ? ` in ${gCity}` : ""}.`,
+        style: branchStyle,
+        lat: c.lat, lng: c.lng,
+        address: gComposed,
+        city: gCity,
+        country: canonicalCountry(loc.country ?? country),
+        price_level: 2,
+        hero_image_url: "",
+        hero_source: "none",
+        status: "pending",
+        category: "restaurant",
+        chain_parent_id: null, // HELD — not attached until a human confirms
+        geo_precision: gGeo.geo_precision,
+        geo_confidence: gGeo.geo_confidence,
+        geo_source: gGeo.geo_source,
+        needs_attention: true,
+        attention_reason: `Geographically implausible for ${brand} (far from every other branch in its footprint) — verify this is a real ${brand} location before attaching.`,
+      };
+      if (c.country_code) gRow.country_code = c.country_code;
+      if (loc.source_url) gRow.enrichment_sources = [loc.source_url];
+      await db.from("restaurants").insert(gRow);
+      result.geoHeld += 1;
+      note(gComposed || gLabel, "geo_held", `"${gLabel}" is far outside ${brand}'s footprint — held unattached for verify`);
       continue;
     }
 
@@ -682,9 +758,18 @@ export async function seedChainLocations(
       geo_confidence: c.geoConfidence,
       geo_source: c.geoSource,
     });
+    // 0074 — an own-locations-page branch is NAMED "<Brand> — <label>" (e.g. "Bono's
+    // Pit Bar-B-Q — Bartram Oaks"), keeping the location label as the suffix, instead
+    // of the bare brand. Only when the label is a distinct locality descriptor (not the
+    // brand itself, and not already brand-prefixed). Provider/web seeds keep name=brand.
+    const labelStr = (label ?? "").trim();
+    const insertName =
+      ownBranch && labelStr && labelStr.toLowerCase() !== brand.toLowerCase() && !labelStr.toLowerCase().startsWith(brand.toLowerCase())
+        ? `${brand} — ${labelStr}`
+        : brand;
     const insertRow: Record<string, unknown> = {
       slug,
-      name: brand,
+      name: insertName,
       location_label: label,
       description: `${brand} — barbecue${settle ? ` in ${settle}` : ""}.`,
       // Inherit the flagship's cuisine (never the "other" default).
