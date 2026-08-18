@@ -1671,6 +1671,30 @@ export function VenueHub({
                           </button>
                         </div>
                       )}
+                      {/* 0072 — RE-SWEEP an already-rostered chain. The "From providers"
+                          button (above) hides once a chain is rostered, so a chain
+                          rostered BEFORE the 0071 sweep existed (City Barbeque, frozen at
+                          its old single-national-query count) had no way to pick up the
+                          now-far-better 52-region sweep. This runs the SAME provider path
+                          (OSM brand:wikidata + tolerant regex → 52-region Places sweep, $3
+                          force cap, resumable "Continue sweeping"), and seedChainLocations
+                          MERGES + dedupes the results under the existing flagship — new
+                          branches land as gated pending children, the ones already there
+                          are kept untouched, never duplicated. Safe to re-run: a sweep with
+                          nothing new adds 0. Shown only on the rostered flagship row. */}
+                      {v.isChainParent && v.chainRostered && (
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => buildRoster(v, { source: "providers" })}
+                            disabled={busy}
+                            title="Re-run the full provider sweep (OpenStreetMap + Google Places, all 50 states) and merge any newly-found branches in as gated leads — the locations already rostered are kept and never duplicated"
+                            className="inline-flex items-center gap-1 rounded-md border border-sky-500/50 bg-sky-500/10 px-2 py-0.5 text-xs font-bold uppercase tracking-[0.03em] text-sky-400 transition-colors hover:bg-sky-500/20 disabled:opacity-40"
+                          >
+                            <MapPin className="h-3 w-3" />Re-sweep from providers
+                          </button>
+                        </div>
+                      )}
                       {/* Step 3: chain in "flagship not set" state — one-click pick
                           of the original on every member. */}
                       {v.flagshipUnset && (
