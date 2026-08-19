@@ -27,6 +27,18 @@ export const OWNER_EDITABLE_FIELDS = [
 
 export type OwnerEditableField = (typeof OWNER_EDITABLE_FIELDS)[number];
 
+/**
+ * PREMIUM owner link fields (Build Prompt 3c) — the Featured-listing capability.
+ * A paid Featured owner may additionally propose an online shop / order-online link
+ * and a tickets & events link. These are NOT in the free whitelist above; the submit
+ * route only accepts them when the venue's Featured entitlement is active (checked
+ * SERVER-SIDE — never trusted from the client), and they apply through the same
+ * moderated `suggestions` path. "tickets" is the tickets-&-events link-type folded in
+ * from Prompt 2 §5. Keys match the suggestions apply whitelist.
+ */
+export const PREMIUM_OWNER_LINK_FIELDS = ["shop_url", "tickets_url"] as const;
+export type PremiumOwnerLinkField = (typeof PREMIUM_OWNER_LINK_FIELDS)[number];
+
 const URL_FIELDS = new Set<OwnerEditableField>(["website", "instagram_url", "x_url", "facebook_url", "tiktok_url", "youtube_url"]);
 const MAX_DESC = 4000;
 const MAX_PHONE = 40;
@@ -103,4 +115,30 @@ export function sanitizeOwnerPatch(raw: Record<string, unknown>): OwnerPatchResu
     }
   }
   return { patch, rejected };
+}
+
+/**
+ * Validate + normalise the PREMIUM owner link fields (shop_url / tickets_url). Same
+ * https-only rule and clear-with-empty-string semantics as the free URL fields.
+ * Unknown keys are ignored. The CALLER is responsible for the entitlement gate — this
+ * only sanitises; it does not check Featured status. Returns a whitelisted patch.
+ */
+export function sanitizePremiumLinks(raw: Record<string, unknown>): OwnerPatchResult {
+  const patch: Record<string, unknown> = {};
+  const rejected: Record<string, string> = {};
+  for (const field of PREMIUM_OWNER_LINK_FIELDS) {
+    if (!(field in raw)) continue;
+    const v = raw[field];
+    if (v === "" || v === null) { patch[field] = null; continue; } // explicit clear
+    const url = safeHttpsUrl(v);
+    if (url) patch[field] = url;
+    else rejected[field] = "Must be a valid https:// URL.";
+  }
+  return { patch, rejected };
+}
+
+/** True if a raw patch contains any premium link key at all (used to detect a
+ *  not-entitled owner trying to set one, so we can tell them why it was dropped). */
+export function hasPremiumLinkKeys(raw: Record<string, unknown>): boolean {
+  return PREMIUM_OWNER_LINK_FIELDS.some((f) => f in raw);
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Check, AlertTriangle } from "lucide-react";
+import { Loader2, Check, AlertTriangle, Lock, Store, Ticket } from "lucide-react";
 
 interface Venue {
   id: string;
@@ -16,6 +16,8 @@ interface Venue {
   facebook_url: string | null;
   tiktok_url: string | null;
   youtube_url: string | null;
+  shop_url: string | null;
+  tickets_url: string | null;
   hours: Record<string, string> | null;
 }
 
@@ -26,15 +28,35 @@ const SOCIALS: [keyof Venue, string][] = [
   ["website", "Website"], ["instagram_url", "Instagram"], ["x_url", "X / Twitter"],
   ["facebook_url", "Facebook"], ["tiktok_url", "TikTok"], ["youtube_url", "YouTube"],
 ];
+// PREMIUM (Featured-listing) link fields — Build Prompt 3c.
+const PREMIUM_LINKS: [keyof Venue, string][] = [
+  ["shop_url", "Online shop / order online"],
+  ["tickets_url", "Tickets & events"],
+];
 
 /** The moderated accuracy editor for one owned venue (Build Prompt 2b). Submits a
- *  proposed edit to /api/owner/venues/edit — it lands in moderation, never live. */
-export function OwnerVenueEditor({ venue, hasPending, bare = false }: { venue: Venue; hasPending: boolean; bare?: boolean }) {
+ *  proposed edit to /api/owner/venues/edit — it lands in moderation, never live.
+ *  Featured owners (isFeatured) additionally get the premium shop/tickets links (3c);
+ *  the server re-checks entitlement, so these inputs are a convenience, not the gate. */
+export function OwnerVenueEditor({
+  venue,
+  hasPending,
+  isFeatured = false,
+  bare = false,
+}: {
+  venue: Venue;
+  hasPending: boolean;
+  isFeatured?: boolean;
+  bare?: boolean;
+}) {
   const router = useRouter();
   const [desc, setDesc] = useState(venue.description ?? "");
   const [phone, setPhone] = useState(venue.phone ?? "");
   const [links, setLinks] = useState<Record<string, string>>(
     Object.fromEntries(SOCIALS.map(([k]) => [k, (venue[k] as string | null) ?? ""]))
+  );
+  const [premiumLinks, setPremiumLinks] = useState<Record<string, string>>(
+    Object.fromEntries(PREMIUM_LINKS.map(([k]) => [k, (venue[k] as string | null) ?? ""]))
   );
   const [hours, setHours] = useState<Record<string, string>>(
     Object.fromEntries(DAYS.map(([d]) => [d, venue.hours?.[d] ?? ""]))
@@ -46,10 +68,12 @@ export function OwnerVenueEditor({ venue, hasPending, bare = false }: { venue: V
     setBusy(true);
     setResult(null);
     // Build the patch of everything the owner set (the server drops no-ops + validates).
+    // Premium links are only included when Featured — the server enforces this too.
     const patch: Record<string, unknown> = {
       description: desc,
       phone,
       ...links,
+      ...(isFeatured ? premiumLinks : {}),
       hours: Object.fromEntries(DAYS.map(([d]) => [d, hours[d] ?? ""])),
     };
     let res: Response;
@@ -116,6 +140,44 @@ export function OwnerVenueEditor({ venue, hasPending, bare = false }: { venue: V
             />
           </label>
         ))}
+      </div>
+
+      {/* PREMIUM links (Build Prompt 3c) — Featured-listing capability. */}
+      <div className="mt-5 rounded-lg border border-brand-gold/25 bg-brand-gold/5 p-4">
+        <div className="mb-2 flex items-center gap-1.5">
+          <Store className="h-4 w-4 text-brand-gold" />
+          <span className="text-sm font-semibold text-text-primary">Shop &amp; tickets links</span>
+          <span className="ml-1 rounded-full bg-brand-gold/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em] text-brand-gold">
+            Featured
+          </span>
+        </div>
+        {isFeatured ? (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {PREMIUM_LINKS.map(([k, label]) => (
+              <label key={String(k)} className="block text-sm">
+                <span className="flex items-center gap-1 text-text-secondary">
+                  {k === "tickets_url" ? <Ticket className="h-3.5 w-3.5" /> : <Store className="h-3.5 w-3.5" />}
+                  {label}
+                </span>
+                <input
+                  value={premiumLinks[k as string] ?? ""}
+                  onChange={(e) => setPremiumLinks((s) => ({ ...s, [k as string]: e.target.value }))}
+                  placeholder="https://…"
+                  className="mt-1 w-full rounded-lg border border-border-subtle bg-surface-1 px-3 py-2 text-sm text-text-primary"
+                />
+              </label>
+            ))}
+          </div>
+        ) : (
+          <p className="flex items-start gap-1.5 text-sm text-text-muted">
+            <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Add an online shop / order-online link and a tickets &amp; events link with a{" "}
+              <span className="font-semibold text-brand-gold">Featured listing</span>. Upgrade from your
+              venue page.
+            </span>
+          </p>
+        )}
       </div>
 
       <div className="mt-4">

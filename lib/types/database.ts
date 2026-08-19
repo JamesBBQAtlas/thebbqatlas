@@ -121,6 +121,9 @@ export interface Restaurant {
   facebook_url?: string | null;
   tiktok_url?: string | null;
   youtube_url?: string | null;
+  // PREMIUM owner link fields (Build Prompt 3c) — Featured-listing capability.
+  shop_url?: string | null;
+  tickets_url?: string | null;
   alcohol?: "none" | "serves" | "byob" | "both" | null;
   offerings?: string[] | null;
   price_level: number;

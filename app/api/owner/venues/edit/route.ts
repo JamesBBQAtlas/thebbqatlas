@@ -2,8 +2,14 @@ import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { userOwnsVenue } from "@/lib/account/listing";
-import { sanitizeOwnerPatch, OWNER_EDITABLE_FIELDS } from "@/lib/account/owner-edits";
+import { userOwnsVenue, getListingStatus } from "@/lib/account/listing";
+import {
+  sanitizeOwnerPatch,
+  sanitizePremiumLinks,
+  hasPremiumLinkKeys,
+  OWNER_EDITABLE_FIELDS,
+  PREMIUM_OWNER_LINK_FIELDS,
+} from "@/lib/account/owner-edits";
 import { logAdminAction } from "@/lib/admin/audit-log";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 
@@ -37,15 +43,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "You don't own this venue." }, { status: 403 });
   }
 
-  const { patch, rejected } = sanitizeOwnerPatch((body.patch ?? {}) as Record<string, unknown>);
+  const rawPatch = (body.patch ?? {}) as Record<string, unknown>;
+  const { patch, rejected } = sanitizeOwnerPatch(rawPatch);
+
+  // PREMIUM LINK SEAM (Build Prompt 3c) — shop_url / tickets_url are a Featured-listing
+  // capability. Accept them ONLY when this venue's Featured entitlement is active, checked
+  // SERVER-SIDE against the restaurant's is_premium/premium_until (never trusted from the
+  // client). A not-entitled owner who submits one gets a clear reason, not a silent drop.
+  if (hasPremiumLinkKeys(rawPatch)) {
+    const listing = await getListingStatus(db, user.id, restaurantId);
+    if (listing.isFeatured) {
+      const prem = sanitizePremiumLinks(rawPatch);
+      Object.assign(patch, prem.patch);
+      Object.assign(rejected, prem.rejected);
+    } else {
+      for (const f of PREMIUM_OWNER_LINK_FIELDS) {
+        if (f in rawPatch) rejected[f] = "Shop & tickets links need a Featured listing.";
+      }
+    }
+  }
+
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ error: "No valid changes to submit.", rejected }, { status: 400 });
   }
 
-  // Current values, to store the before/after and drop no-op fields.
+  // Current values, to store the before/after and drop no-op fields. Premium link
+  // columns are selected too so their before/after diff is captured when featured.
   const { data: current } = await db
     .from("restaurants")
-    .select(["name", ...OWNER_EDITABLE_FIELDS].join(", "))
+    .select(["name", ...OWNER_EDITABLE_FIELDS, ...PREMIUM_OWNER_LINK_FIELDS].join(", "))
     .eq("id", restaurantId)
     .single();
   if (!current) return NextResponse.json({ error: "Venue not found." }, { status: 404 });

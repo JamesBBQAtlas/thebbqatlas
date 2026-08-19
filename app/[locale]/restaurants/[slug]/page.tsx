@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Clock, Star } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Ticket, Clock, Star } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
@@ -191,6 +191,17 @@ export default async function RestaurantPage({ params }: Props) {
       { kind: "youtube", label: SOCIAL_LABELS.youtube, href: restaurant.youtube_url },
     ] as const
   ).filter((s): s is { kind: SocialKind; label: string; href: string } => Boolean(s.href));
+
+  // PREMIUM owner links (Build Prompt 3c) — an online shop / order-online link and a
+  // tickets & events link. A Featured-listing capability, so they only render while the
+  // venue's paid Featured entitlement is active (computed as isPaidFeatured below); if
+  // Featured lapses the links quietly disappear.
+  const premiumLinks = (
+    [
+      { key: "shop" as const, label: "Shop / order online", href: restaurant.shop_url ?? null },
+      { key: "tickets" as const, label: "Tickets & events", href: restaurant.tickets_url ?? null },
+    ]
+  ).filter((l): l is { key: "shop" | "tickets"; label: string; href: string } => Boolean(l.href));
 
   // Venue imagery hierarchy (copyright-safe): (1) an approved uploaded photo
   // from our moderated media system; else (2) the official Instagram embed (its
@@ -740,6 +751,32 @@ export default async function RestaurantPage({ params }: Props) {
                     </a>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {/* Shop & tickets (Build Prompt 3c) — Featured-listing owner links. Only
+              shown while the venue's paid Featured entitlement is active. */}
+          {isPaidFeatured && premiumLinks.length > 0 && (
+            <div className="rounded-xl border border-brand-gold/25 bg-brand-gold/5 p-6">
+              <h3 className="mb-4 border-b border-brand-gold/20 pb-3 font-heading text-base font-bold text-text-primary">
+                Shop &amp; tickets
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {premiumLinks.map((l) => (
+                  <TrackedLink
+                    key={l.key}
+                    href={l.href}
+                    eventType={l.key === "tickets" ? "tickets" : "shop"}
+                    restaurantId={restaurant.id}
+                    ariaLabel={l.label}
+                    title={l.label}
+                    className="inline-flex items-center gap-2 rounded-full border border-brand-gold/40 bg-brand-gold/10 px-3.5 py-1.5 text-sm font-semibold text-brand-gold transition-colors hover:bg-brand-gold/15"
+                  >
+                    {l.key === "tickets" ? <Ticket className="h-4 w-4" /> : <Store className="h-4 w-4" />}
+                    <span>{l.label}</span>
+                  </TrackedLink>
+                ))}
               </div>
             </div>
           )}

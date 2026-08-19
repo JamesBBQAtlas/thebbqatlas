@@ -12,7 +12,9 @@ export interface ClickEventPayload {
     | "map"
     | "share"
     | "save"
-    | "media";
+    | "media"
+    | "shop"      // Build Prompt 3c — Featured owner shop/order-online link
+    | "tickets";  // Build Prompt 3c — Featured owner tickets & events link
   restaurant_id?: string | null;
   media_pick_id?: string | null;
   partner?: string;
