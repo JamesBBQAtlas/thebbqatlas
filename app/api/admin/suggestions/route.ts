@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
+import { logAdminAction } from "@/lib/admin/audit-log";
 
 // Fields a suggestion is allowed to write when approved.
 const ALLOWED = new Set([
@@ -38,8 +39,19 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Already handled" }, { status: 409 });
   }
 
+  // Is this an owner-submitted accuracy edit (Prompt 2b)? created_by is a real user
+  // id rather than the 'self-heal' sentinel.
+  const isOwnerEdit = s.kind === "owner_edit";
+
   if (action === "reject") {
     await ctx.db.from("suggestions").update({ status: "rejected" }).eq("id", id);
+    await logAdminAction({
+      db: ctx.db, actorId: ctx.userId,
+      action: isOwnerEdit ? "owner.edit_reject" : "suggestion.reject",
+      entityType: "restaurant", entityId: s.restaurant_id ?? null,
+      summary: `${isOwnerEdit ? "owner edit" : "suggestion"} rejected`,
+      context: { route: "admin/suggestions", suggestion_id: id, kind: s.kind, proposed_by: s.created_by },
+    });
     return NextResponse.json({ ok: true, status: "rejected" });
   }
 
@@ -48,6 +60,13 @@ export async function PATCH(request: Request) {
   const update: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(proposed)) {
     if (ALLOWED.has(k) && v !== undefined) update[k] = v;
+  }
+  // Prompt 2b — an APPROVED copy edit becomes protected hand-written copy, so the
+  // enrichment engine never overwrites what a human just signed off (the same
+  // manual_copy guard the admin copy editor uses).
+  if ("description" in update) {
+    update.manual_copy = true;
+    update.manual_copy_at = new Date().toISOString();
   }
   if (s.restaurant_id && Object.keys(update).length > 0) {
     update.enriched_at = new Date().toISOString();
@@ -62,5 +81,15 @@ export async function PATCH(request: Request) {
     .update({ status: "applied", applied_at: new Date().toISOString() })
     .eq("id", id);
 
-  return NextResponse.json({ ok: true, status: "applied", applied: Object.keys(update) });
+  const applied = Object.keys(update).filter((k) => k !== "enriched_at" && k !== "manual_copy" && k !== "manual_copy_at");
+  await logAdminAction({
+    db: ctx.db, actorId: ctx.userId,
+    action: isOwnerEdit ? "owner.edit_approve" : "suggestion.approve",
+    entityType: "restaurant", entityId: s.restaurant_id ?? null,
+    summary: `${isOwnerEdit ? "owner edit" : "suggestion"} approved — ${applied.join(", ")}`,
+    diff: Object.fromEntries(applied.map((k) => [k, { old: (s.current as Record<string, unknown> | null)?.[k] ?? null, new: update[k] }])),
+    context: { route: "admin/suggestions", suggestion_id: id, kind: s.kind, proposed_by: s.created_by },
+  });
+
+  return NextResponse.json({ ok: true, status: "applied", applied });
 }

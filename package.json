@@ -37,7 +37,8 @@
     "test:enrich-safety": "tsx scripts/test-enrich-safety.mts",
     "prepare": "husky",
     "test:audit-log": "tsx scripts/test-audit-log.mts",
-    "test:claims": "tsx scripts/test-claims.mts"
+    "test:claims": "tsx scripts/test-claims.mts",
+    "test:owner-edits": "tsx scripts/test-owner-edits.mts"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",
