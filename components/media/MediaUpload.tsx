@@ -38,10 +38,18 @@ export function MediaUpload({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [error, setError] = useState("");
+  // Rights/ownership attestation (Prompt 4) — must be ticked before uploading; the
+  // server also requires it, so this is a UX gate, not the enforcement.
+  const [rights, setRights] = useState(false);
 
   async function onChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
+    if (!rights) {
+      setError("Please confirm you own these photos or have the right to post them.");
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
     setBusy(true);
     setError("");
     setMsg("");
@@ -86,6 +94,7 @@ export function MediaUpload({
           kind: isVideo ? "video" : "image",
           restaurantId,
           source,
+          rightsAttested: true,
         }),
       });
       if (res.ok) count++;
@@ -110,10 +119,20 @@ export function MediaUpload({
         className="hidden"
         id={`media-${restaurantId}`}
       />
+      <label className="mb-2 flex items-start gap-2 text-xs text-text-secondary">
+        <input
+          type="checkbox"
+          checked={rights}
+          onChange={(e) => setRights(e.target.checked)}
+          className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-brand-gold"
+        />
+        <span>I own these {imagesOnly ? "photos" : "photos/videos"} or have the right to post them, and they contain no explicit or unsafe content.</span>
+      </label>
       <label
         htmlFor={`media-${restaurantId}`}
-        className={`inline-flex cursor-pointer items-center gap-2 rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold ${
-          busy ? "pointer-events-none opacity-60" : ""
+        aria-disabled={!rights || busy}
+        className={`inline-flex items-center gap-2 rounded-md border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-brand-gold/60 hover:text-brand-gold ${
+          busy || !rights ? "pointer-events-none opacity-60" : "cursor-pointer"
         }`}
       >
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}

@@ -44,7 +44,8 @@
     "test:venue-title": "tsx scripts/test-venue-title.mts",
     "test:entitlements": "tsx scripts/test-entitlements.mts",
     "test:revenue": "tsx scripts/test-revenue.mts",
-    "test:premium-links": "tsx scripts/test-premium-links.mts"
+    "test:premium-links": "tsx scripts/test-premium-links.mts",
+    "test:photo-safety": "tsx scripts/test-photo-safety.mts"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",

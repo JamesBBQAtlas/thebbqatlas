@@ -23,9 +23,18 @@ export async function POST(request: Request) {
   const source = typeof body.source === "string" ? body.source.slice(0, 40) : "upload";
   const caption =
     typeof body.caption === "string" ? body.caption.trim().slice(0, 300) || null : null;
+  // Rights/ownership attestation (Prompt 4) — the uploader must affirm they own the
+  // photo or have the right to post it. Enforced server-side, not just in the UI.
+  const rightsAttested = body.rightsAttested === true;
 
   if (!restaurantId || !url || !storagePath) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 });
+  }
+  if (!rightsAttested) {
+    return NextResponse.json(
+      { error: "Please confirm you own this photo or have the right to post it." },
+      { status: 400 }
+    );
   }
 
   // Abuse rail (Part 5) — the client caps a single upload at 15, but that's
@@ -55,6 +64,9 @@ export async function POST(request: Request) {
     caption,
     source,
     status: "pending",
+    rights_attested: true,
+    rights_attested_at: new Date().toISOString(),
+    // safety_status defaults to 'unchecked'; screened by the admin queue / weekly cron.
   });
   if (error) {
     return NextResponse.json({ error: "Could not register media" }, { status: 500 });
