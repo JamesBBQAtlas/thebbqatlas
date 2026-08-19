@@ -6,21 +6,12 @@ import { userOwnsVenue } from "@/lib/account/listing";
 import { logAdminAction } from "@/lib/admin/audit-log";
 import { haversineKm } from "@/lib/utils/geo";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { PIN_FAR_KM, validCoord } from "@/lib/account/owner-pin";
 
+// A Next.js `route.ts` may ONLY export HTTP handlers + segment config. PIN_FAR_KM
+// and validCoord now live in "@/lib/account/owner-pin" so the route can use them
+// without exporting them (which broke the production build).
 export const dynamic = "force-dynamic";
-
-/** A proposed pin more than this from the current pin is flagged for the admin as
- *  implausible (never auto-applied — the admin always confirms). */
-export const PIN_FAR_KM = 50;
-
-export function validCoord(lat: unknown, lng: unknown): { lat: number; lng: number } | null {
-  const la = typeof lat === "number" ? lat : Number(lat);
-  const ln = typeof lng === "number" ? lng : Number(lng);
-  if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
-  if (la < -90 || la > 90 || ln < -180 || ln > 180) return null;
-  if (la === 0 && ln === 0) return null; // null island
-  return { lat: la, lng: ln };
-}
 
 /**
  * Owner map-pin correction (Build Prompt 2 addendum). An approved owner proposes the

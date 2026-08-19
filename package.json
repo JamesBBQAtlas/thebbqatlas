@@ -11,6 +11,7 @@
     "audit:grants": "node scripts/audit-write-grants.mjs",
     "audit:affiliate": "tsx scripts/audit-affiliate.mts",
     "audit:schema": "node scripts/audit-schema-columns.mjs",
+    "audit:routes": "node scripts/audit-route-exports.mjs",
     "test:chain": "tsx scripts/test-chain-discovery.mts",
     "test:chain-part4": "tsx scripts/test-chain-part4.mts",
     "test:chain-roster": "tsx scripts/test-chain-roster-fix.mts",

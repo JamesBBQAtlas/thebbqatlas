@@ -2,7 +2,7 @@
  * the far-move sanity threshold. Pure.
  * Run: node_modules/.bin/tsx scripts/test-owner-pin.mts
  */
-import { validCoord, PIN_FAR_KM } from "../app/api/owner/venues/pin/route";
+import { validCoord, PIN_FAR_KM } from "../lib/account/owner-pin";
 import { haversineKm } from "../lib/utils/geo";
 
 let pass = 0, fail = 0;
