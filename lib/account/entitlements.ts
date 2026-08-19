@@ -1,4 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export type PremiumStatus = {
   isPremium: boolean;
@@ -47,4 +49,40 @@ export async function getPremiumStatus(
       hasBillingAccount: false,
     };
   }
+}
+
+/** True when the given status counts as an active entitlement. Exported so the gate
+ *  logic is unit-testable in isolation from the DB. */
+export function isEntitledStatus(status: string | null | undefined): boolean {
+  return Boolean(status && ACTIVE.has(status));
+}
+
+/** Server-side premium check (Build Prompt 3 §1). The single source of truth — never
+ *  gate on the client. */
+export async function isPremium(db: SupabaseClient, userId: string): Promise<boolean> {
+  return (await getPremiumStatus(db, userId)).isPremium;
+}
+
+/**
+ * Route/server-action guard for premium-only server work (Build Prompt 3 §1).
+ * Resolves the signed-in user from the request cookies, then reads their
+ * entitlement through the SERVICE-ROLE client so the check is robust to the
+ * subscriptions RLS policy (the entitlement is never trusted from the client).
+ * Returns `{ userId }` when premium, otherwise `null` — callers 401/403 on null.
+ */
+export async function requirePremium(): Promise<{ userId: string } | null> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  // Prefer the service-role client for the entitlement read so a missing or
+  // restrictive RLS policy can never silently deny a genuinely-paid user. Fall
+  // back to the request-scoped client if the service key isn't configured.
+  const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createAdminClient()
+    : supabase;
+
+  return (await isPremium(db, user.id)) ? { userId: user.id } : null;
 }

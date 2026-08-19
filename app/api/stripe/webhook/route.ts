@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { LISTING } from "@/lib/stripe/config";
 import { sendOrderReceipt } from "@/lib/email/senders";
 import { revalidateVenues } from "@/lib/cache/venues";
+import { logAdminAction } from "@/lib/admin/audit-log";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,16 @@ async function upsertSubscription(
     },
     { onConflict: "user_id" }
   );
+
+  // Audit trail (Prompt 1) — a system-actor row for every subscription state change.
+  await logAdminAction({
+    db: admin, actorId: null, actorEmail: "stripe:webhook",
+    action: "subscription.update",
+    entityType: "subscription",
+    entityId: null,
+    summary: `subscription ${sub.status}${sub.cancel_at_period_end ? " (cancels at period end)" : ""} for user ${userId}`,
+    context: { stripe_subscription_id: sub.id, status: sub.status, plan: "premium", user_id: userId },
+  });
 }
 
 export async function POST(request: Request) {
@@ -120,6 +131,12 @@ export async function POST(request: Request) {
   }
 
   const admin = createAdminClient();
+
+  // IDEMPOTENCY — a replayed / retried / duplicate event (same event.id) is skipped so
+  // it never double-applies a side-effect or double-writes an audit row. Recorded only
+  // AFTER the handler succeeds (below), so a mid-handler failure lets Stripe retry.
+  const { data: seen } = await admin.from("stripe_events").select("id").eq("id", event.id).maybeSingle();
+  if (seen) return NextResponse.json({ received: true, duplicate: true });
 
   try {
     switch (event.type) {
@@ -187,6 +204,20 @@ export async function POST(request: Request) {
         }
         break;
       }
+      case "invoice.payment_succeeded":
+      case "invoice.payment_failed": {
+        // A payment result flips subscription status (past_due → active, or a final
+        // failure → unpaid). Reconcile by re-reading the subscription (idempotent
+        // upsert), so entitlement reflects the latest state promptly.
+        const inv = event.data.object as Stripe.Invoice & { subscription?: string | { id: string } | null };
+        const subId = typeof inv.subscription === "string" ? inv.subscription : inv.subscription?.id;
+        if (subId) {
+          const sub = await stripe.subscriptions.retrieve(subId);
+          if (sub.metadata?.type === "listing") await applyListingEntitlement(admin, sub);
+          else await upsertSubscription(admin, sub.metadata?.user_id, sub);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -194,5 +225,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "handler error" }, { status: 500 });
   }
 
+  // Handler succeeded — record the event id for idempotency (best-effort; a duplicate
+  // insert just means a concurrent retry already recorded it).
+  await admin.from("stripe_events").insert({ id: event.id, type: event.type });
   return NextResponse.json({ received: true });
 }

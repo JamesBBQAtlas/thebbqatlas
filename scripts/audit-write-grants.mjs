@@ -48,6 +48,10 @@ const SERVICE_ROLE = new Set([
   // only via logAdminAction() on the service-role client; admin-read RLS, no insert
   // policy, UPDATE + DELETE blocked by triggers (migration 076).
   "admin_audit_log",
+  // Stripe webhook idempotency ledger (Build Prompt 3a) — inserted only by the
+  // signature-verified webhook via the service-role client; admin-read RLS, no
+  // insert policy for end users. One row per processed event.id.
+  "stripe_events",
   // Curated Watch/Read/Listen directory — public reads published rows (SELECT
   // policy), but all writes are admin-only via the service-role client.
   "media_picks",
