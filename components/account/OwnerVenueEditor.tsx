@@ -29,7 +29,7 @@ const SOCIALS: [keyof Venue, string][] = [
 
 /** The moderated accuracy editor for one owned venue (Build Prompt 2b). Submits a
  *  proposed edit to /api/owner/venues/edit — it lands in moderation, never live. */
-export function OwnerVenueEditor({ venue, hasPending }: { venue: Venue; hasPending: boolean }) {
+export function OwnerVenueEditor({ venue, hasPending, bare = false }: { venue: Venue; hasPending: boolean; bare?: boolean }) {
   const router = useRouter();
   const [desc, setDesc] = useState(venue.description ?? "");
   const [phone, setPhone] = useState(venue.phone ?? "");
@@ -79,7 +79,7 @@ export function OwnerVenueEditor({ venue, hasPending }: { venue: Venue; hasPendi
   }
 
   return (
-    <section className="rounded-xl border border-border-subtle bg-surface-0 p-5">
+    <section className={bare ? "" : "rounded-xl border border-border-subtle bg-surface-0 p-5"}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-heading text-xl font-bold text-text-primary">{venue.name}</h2>
         {hasPending && (

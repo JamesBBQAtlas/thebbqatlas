@@ -17,6 +17,7 @@ export const dynamic = "force-dynamic";
 
 interface OwnerEditRow {
   id: string;
+  kind: string;
   restaurant_id: string | null;
   title: string | null;
   summary: string | null;
@@ -50,8 +51,8 @@ export default async function OwnerEditsPage() {
   const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY ? createAdminClient() : supabase;
   const { data } = await db
     .from("suggestions")
-    .select("id, restaurant_id, title, summary, current, proposed, created_by, created_at, restaurants(name, slug)")
-    .eq("kind", "owner_edit")
+    .select("id, kind, restaurant_id, title, summary, current, proposed, created_by, created_at, restaurants(name, slug)")
+    .in("kind", ["owner_edit", "geo_correction"])
     .eq("status", "pending")
     .order("created_at", { ascending: true })
     .limit(200);
@@ -99,15 +100,44 @@ export default async function OwnerEditsPage() {
                   </div>
                   <SuggestionActions suggestionId={r.id} />
                 </div>
-                <ul className="mt-3 space-y-1 text-xs">
-                  {Object.keys(proposed).map((k) => (
-                    <li key={k} className="text-text-secondary">
-                      <span className="font-semibold text-text-primary">{k.replace(/_/g, " ")}</span>:{" "}
-                      <span className="text-text-muted line-through">{shortVal((current as Record<string, unknown>)[k])}</span>{" "}
-                      → <span className="text-brand-gold">{shortVal((proposed as Record<string, unknown>)[k])}</span>
-                    </li>
-                  ))}
-                </ul>
+                {r.kind === "geo_correction" ? (
+                  <div className="mt-3 text-xs">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 font-semibold text-sky-400">📍 pin correction</span>
+                    {typeof (proposed as { far?: boolean }).far === "boolean" && (proposed as { far?: boolean }).far && (
+                      <span className="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 font-semibold text-amber-400">
+                        ⚠ moved {String((proposed as { distance_km?: number }).distance_km ?? "?")} km — verify this is right before approving
+                      </span>
+                    )}
+                    <p className="mt-2 text-text-secondary">
+                      {typeof (proposed as { distance_km?: number }).distance_km === "number"
+                        ? `Moved ${(proposed as { distance_km?: number }).distance_km} km. `
+                        : "New pin set. "}
+                      <span className="text-text-muted">
+                        {shortVal((current as { lat?: unknown }).lat)},{shortVal((current as { lng?: unknown }).lng)}
+                      </span>{" "}
+                      → <span className="text-brand-gold">
+                        {shortVal((proposed as { lat?: unknown }).lat)},{shortVal((proposed as { lng?: unknown }).lng)}
+                      </span>
+                    </p>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${String((proposed as { lat?: unknown }).lat)},${String((proposed as { lng?: unknown }).lng)}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="mt-1 inline-block text-brand-gold hover:underline"
+                    >
+                      Preview the proposed spot on a map ↗
+                    </a>
+                  </div>
+                ) : (
+                  <ul className="mt-3 space-y-1 text-xs">
+                    {Object.keys(proposed).map((k) => (
+                      <li key={k} className="text-text-secondary">
+                        <span className="font-semibold text-text-primary">{k.replace(/_/g, " ")}</span>:{" "}
+                        <span className="text-text-muted line-through">{shortVal((current as Record<string, unknown>)[k])}</span>{" "}
+                        → <span className="text-brand-gold">{shortVal((proposed as Record<string, unknown>)[k])}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             );
           })}

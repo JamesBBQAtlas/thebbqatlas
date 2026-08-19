@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
 import { OwnerVenueEditor } from "@/components/account/OwnerVenueEditor";
+import { OwnerPinEditor } from "@/components/account/OwnerPinEditor";
 
 export const metadata = { title: "My Venues" };
 export const dynamic = "force-dynamic";
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
  */
 
 const FIELDS =
-  "id, name, slug, status, description, phone, website, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, hours";
+  "id, name, slug, status, description, phone, website, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, hours, lat, lng";
 
 interface OwnedVenue {
   id: string;
@@ -32,6 +33,8 @@ interface OwnedVenue {
   tiktok_url: string | null;
   youtube_url: string | null;
   hours: Record<string, string> | null;
+  lat: number | null;
+  lng: number | null;
 }
 
 export default async function OwnerDashboard() {
@@ -53,17 +56,23 @@ export default async function OwnerDashboard() {
     : [];
   const venues = [...((byOwner ?? []) as unknown as OwnedVenue[]), ...(byClaim as unknown as OwnedVenue[])];
 
-  // Pending owner edits (to show a "changes awaiting review" note per venue).
+  // Pending owner submissions (per venue), to show an "awaiting review" note — split
+  // by kind so the field editor and the pin editor each show their own state.
   const pendingByVenue = new Set<string>();
+  const pendingPinByVenue = new Set<string>();
   if (venues.length) {
     const { data: pend } = await db
       .from("suggestions")
-      .select("restaurant_id")
-      .eq("kind", "owner_edit")
+      .select("restaurant_id, kind")
+      .in("kind", ["owner_edit", "geo_correction"])
       .eq("status", "pending")
       .eq("created_by", user.id)
       .in("restaurant_id", venues.map((v) => v.id));
-    for (const p of pend ?? []) if (p.restaurant_id) pendingByVenue.add(p.restaurant_id);
+    for (const p of pend ?? []) {
+      if (!p.restaurant_id) continue;
+      if (p.kind === "geo_correction") pendingPinByVenue.add(p.restaurant_id);
+      else pendingByVenue.add(p.restaurant_id);
+    }
   }
 
   return (
@@ -86,24 +95,30 @@ export default async function OwnerDashboard() {
       ) : (
         <div className="space-y-8">
           {venues.map((v) => (
-            <OwnerVenueEditor
-              key={v.id}
-              venue={{
-                id: v.id,
-                name: v.name,
-                slug: v.slug,
-                description: v.description,
-                phone: v.phone,
-                website: v.website,
-                instagram_url: v.instagram_url,
-                x_url: v.x_url,
-                facebook_url: v.facebook_url,
-                tiktok_url: v.tiktok_url,
-                youtube_url: v.youtube_url,
-                hours: v.hours,
-              }}
-              hasPending={pendingByVenue.has(v.id)}
-            />
+            <div key={v.id} className="rounded-xl border border-border-subtle bg-surface-0 p-5">
+              <OwnerVenueEditor
+                bare
+                venue={{
+                  id: v.id,
+                  name: v.name,
+                  slug: v.slug,
+                  description: v.description,
+                  phone: v.phone,
+                  website: v.website,
+                  instagram_url: v.instagram_url,
+                  x_url: v.x_url,
+                  facebook_url: v.facebook_url,
+                  tiktok_url: v.tiktok_url,
+                  youtube_url: v.youtube_url,
+                  hours: v.hours,
+                }}
+                hasPending={pendingByVenue.has(v.id)}
+              />
+              <OwnerPinEditor
+                venue={{ id: v.id, name: v.name, lat: v.lat, lng: v.lng }}
+                hasPending={pendingPinByVenue.has(v.id)}
+              />
+            </div>
           ))}
         </div>
       )}
