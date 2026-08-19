@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
+import { logAdminAction } from "@/lib/admin/audit-log";
 
 /**
  * Owner/seller claims a venue. Creates a pending claim (one per user+venue)
@@ -47,17 +48,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Venue not found" }, { status: 404 });
   }
 
-  const { error } = await db.from("restaurant_claims").upsert(
-    {
-      restaurant_id: restaurantId,
-      user_id: user.id,
-      role_requested: roleRequested,
-      note,
-      contact_email: email,
-      status: "pending",
-    },
-    { onConflict: "restaurant_id,user_id" }
-  );
+  const { data: claimRow, error } = await db
+    .from("restaurant_claims")
+    .upsert(
+      {
+        restaurant_id: restaurantId,
+        user_id: user.id,
+        role_requested: roleRequested,
+        note,
+        contact_email: email,
+        // A re-claim (e.g. after a prior rejection) resets the row to pending +
+        // clears the previous decision so the admin sees a fresh request.
+        status: "pending",
+        decided_by: null,
+        decided_at: null,
+        decision_note: null,
+      },
+      { onConflict: "restaurant_id,user_id" }
+    )
+    .select("id")
+    .maybeSingle();
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -66,6 +76,16 @@ export async function POST(request: Request) {
   await db
     .from("profiles")
     .upsert({ id: user.id, account_type: roleRequested }, { onConflict: "id" });
+
+  // Audit (Prompt 1) — the claimant's own submit. actorId = the user.
+  await logAdminAction({
+    db, actorId: user.id, actorEmail: user.email ?? null,
+    action: "claim.submit",
+    entityType: "restaurant_claim",
+    entityId: claimRow?.id ?? null,
+    summary: `claim submitted (${roleRequested}) for venue ${restaurantId}`,
+    context: { route: "claims", restaurant_id: restaurantId, contact_email: email },
+  });
 
   return NextResponse.json({ ok: true });
 }

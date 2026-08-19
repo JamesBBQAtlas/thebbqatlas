@@ -366,15 +366,31 @@ export async function POST(request: Request) {
     if (type === "claim") {
       const { data: claim } = await admin
         .from("restaurant_claims")
-        .select("id, restaurant_id, user_id, role_requested")
+        .select("id, restaurant_id, user_id, role_requested, status")
         .eq("id", id)
         .single();
       if (!claim) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
+      // SECURITY (Prompt 2) — an admin may NEVER approve their OWN claim. Reject/
+      // revoke of one's own is fine; self-grant of ownership is not.
+      if (action === "approve" && claim.user_id === ctx.userId) {
+        return NextResponse.json(
+          { error: "You can't approve your own claim — another admin must review it." },
+          { status: 403 }
+        );
+      }
+      // approve → approved; anything else → rejected (reason stored). Ownership
+      // revoke (with its own status) lands with the owner dashboard in Prompt 2b.
+      const newStatus = action === "approve" ? "approved" : "rejected";
       await admin
         .from("restaurant_claims")
-        .update({ status: action === "approve" ? "approved" : "rejected" })
+        .update({
+          status: newStatus,
+          decided_by: ctx.userId,
+          decided_at: new Date().toISOString(),
+          decision_note: notes ?? null,
+        })
         .eq("id", id);
       if (action === "approve") {
         // Record ownership on the venue and set the user's account type.
@@ -393,6 +409,16 @@ export async function POST(request: Request) {
             { onConflict: "id" }
           );
       }
+      // Unified audit trail (Prompt 1) — one row per claim decision.
+      await logAdminAction({
+        db: admin, actorId: ctx.userId,
+        action: action === "approve" ? "claim.approve" : "claim.reject",
+        entityType: "restaurant_claim",
+        entityId: claim.id,
+        summary: `claim ${newStatus} (${claim.role_requested}) for venue ${claim.restaurant_id}`,
+        diff: { status: { old: claim.status, new: newStatus } },
+        context: { route: "admin/moderate", claimant: claim.user_id, ...(notes ? { reason: notes } : {}) },
+      });
       return NextResponse.json({ ok: true });
     }
 

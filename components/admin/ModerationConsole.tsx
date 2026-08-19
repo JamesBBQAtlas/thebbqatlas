@@ -60,6 +60,8 @@ export type ClaimModItem = {
   restaurantSlug?: string;
   note?: string;
   contactEmail?: string;
+  /** Verification hint (Prompt 2a): contact-email domain vs venue website domain. */
+  domainMatch?: "match" | "mismatch" | "unknown";
   created_at: string;
 };
 
@@ -485,8 +487,14 @@ export function ModerationConsole({
                       </p>
                     )}
                     {c.contactEmail && (
-                      <p className="mt-2 text-xs text-text-muted">
-                        Contact: {c.contactEmail}
+                      <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-muted">
+                        <span>Contact: {c.contactEmail}</span>
+                        {c.domainMatch === "match" && (
+                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 font-semibold text-emerald-400">✓ email domain matches the venue website</span>
+                        )}
+                        {c.domainMatch === "mismatch" && (
+                          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-semibold text-amber-400">email domain ≠ venue website — verify</span>
+                        )}
                       </p>
                     )}
                     <p className="mt-2 text-xs text-text-muted">

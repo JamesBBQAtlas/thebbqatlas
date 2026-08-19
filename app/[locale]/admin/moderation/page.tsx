@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { domainMatchHint } from "@/lib/admin/claims";
 import {
   ModerationConsole,
   type ReviewItem,
@@ -63,7 +64,7 @@ export default async function ModerationPage() {
       .order("created_at", { ascending: true }),
     db
       .from("restaurant_claims")
-      .select("*, restaurants(name, slug)")
+      .select("*, restaurants(name, slug, website)")
       .eq("status", "pending")
       .order("created_at", { ascending: true }),
     // Part 3 — community venue photos land in `media` (kind='image'), NOT
@@ -215,6 +216,9 @@ export default async function ModerationPage() {
     restaurantSlug: c.restaurants?.slug,
     note: c.note ?? undefined,
     contactEmail: c.contact_email ?? undefined,
+    // Verification hint (Prompt 2a) — does the contact email sit on the venue's own
+    // web domain? A hint for the reviewer, never an auto-decision.
+    domainMatch: domainMatchHint(c.contact_email, c.restaurants?.website),
     created_at: c.created_at,
   }));
 

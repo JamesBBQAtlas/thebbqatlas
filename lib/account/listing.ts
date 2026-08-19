@@ -32,6 +32,10 @@ export async function ownsVenue(
   return Boolean(claim);
 }
 
+/** Build Prompt 2 name for the ownership check — the single source of truth every
+ *  owner-scoped guard (owner dashboard, owner edits, product links, pin) uses. */
+export const userOwnsVenue = ownsVenue;
+
 export interface ListingStatus {
   owns: boolean;
   isFeatured: boolean; // paid Featured entitlement active
