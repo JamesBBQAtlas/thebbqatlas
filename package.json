@@ -39,7 +39,8 @@
     "test:audit-log": "tsx scripts/test-audit-log.mts",
     "test:claims": "tsx scripts/test-claims.mts",
     "test:owner-edits": "tsx scripts/test-owner-edits.mts",
-    "test:owner-pin": "tsx scripts/test-owner-pin.mts"
+    "test:owner-pin": "tsx scripts/test-owner-pin.mts",
+    "test:venue-title": "tsx scripts/test-venue-title.mts"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",

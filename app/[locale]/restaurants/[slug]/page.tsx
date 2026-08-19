@@ -31,6 +31,7 @@ import { TrackView } from "@/components/account/TrackView";
 import { VenueViewBeacon } from "@/components/restaurants/VenueViewBeacon";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { restaurantJsonLd, breadcrumbJsonLd, eventJsonLd, faqPageJsonLd } from "@/lib/seo/jsonld";
+import { venueDisplayTitle, venueH1 } from "@/lib/seo/venue-title";
 import { venueFaqs } from "@/lib/seo/hub-content";
 import { mergeVenueFaqs, parseStoredFaq } from "@/lib/seo/venue-faq";
 import { HubFaq } from "@/components/seo/HubFaq";
@@ -92,12 +93,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // hero, so the preview never renders imageless (or in the wrong aspect ratio).
   const ogImage = safeVenueImage(restaurant.hero_image_url) || SITE.ogImage;
 
+  // SEO — a chain branch gets its city injected ("City Barbeque — Acworth, GA") so it
+  // isn't one of hundreds of near-duplicate titles; single-location venues are
+  // unchanged. Computed at render time → applies to every future-rostered chain too.
+  const displayTitle = venueDisplayTitle(restaurant);
+
   return {
-    title: restaurant.name,
+    title: displayTitle,
     description,
     alternates: { canonical },
     openGraph: {
-      title: restaurant.name,
+      title: displayTitle,
       description,
       type: "article",
       url: absoluteUrl(canonical),
@@ -106,7 +112,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title: restaurant.name,
+      title: displayTitle,
       description,
       images: [ogImage],
     },
@@ -316,7 +322,7 @@ export default async function RestaurantPage({ params }: Props) {
             </nav>
 
             <h1 className="max-w-4xl font-heading text-4xl font-extrabold leading-[1.05] text-text-primary text-balance sm:text-5xl md:text-6xl">
-              {restaurant.name}
+              {venueH1(restaurant)}
             </h1>
 
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
