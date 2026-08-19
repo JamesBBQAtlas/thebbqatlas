@@ -6,6 +6,7 @@ import { BBQ_STYLES } from "@/lib/constants/styles";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { canonicalCountry } from "@/lib/constants/countries";
 import { auditField, auditCreated } from "@/lib/admin/content-audit";
+import { logAdminAction } from "@/lib/admin/audit-log";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -250,17 +251,30 @@ export async function PATCH(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   // Audit the publish/unpublish (status) change.
+  const statusNote =
+    status === "approved"
+      ? "published"
+      : status === "parked"
+        ? "parked"
+        : status === "pending"
+          ? "returned to pending"
+          : "unpublished/declined";
   await auditField(ctx.db, restaurantId, "published", prev?.status ?? null, status, {
     source: "manual_edit",
     changedBy: ctx.userId,
-    note:
-      status === "approved"
-        ? "published"
-        : status === "parked"
-          ? "parked"
-          : status === "pending"
-            ? "returned to pending"
-            : "unpublished/declined",
+    note: statusNote,
+  });
+  // Unified audit trail (Prompt 1) — a dotted action per status transition.
+  const statusAction =
+    status === "approved" ? "venue.publish" : status === "parked" ? "venue.park" : status === "pending" ? "venue.unpark" : "venue.unpublish";
+  await logAdminAction({
+    db: ctx.db, actorId: ctx.userId,
+    action: statusAction,
+    entityType: "restaurant",
+    entityId: restaurantId,
+    summary: `venue ${statusNote} (${prev?.status ?? "?"} → ${status})`,
+    diff: { status: { old: prev?.status ?? null, new: status } },
+    context: { route: "admin/venues", ...(override ? { override: true } : {}) },
   });
 
   // Publishing/unpublishing changes what the public site shows — refresh now.

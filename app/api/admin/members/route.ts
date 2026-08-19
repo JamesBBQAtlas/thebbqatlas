@@ -1,8 +1,75 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAdminAction } from "@/lib/admin/audit-log";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * Admin-only member rename — change a member's username and/or display name (the
+ * "firestarter → flamephoenix" hand-edit, now auditable). Service-role write; every
+ * change writes one `admin_audit_log` row (action `user.username_change`). Never
+ * touches role/account_type (those have their own guarded paths).
+ */
+export async function POST(request: Request) {
+  const ctx = await requireAdmin();
+  if (!ctx) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const body = await request.json().catch(() => ({}));
+  const id = typeof body.id === "string" ? body.id.trim() : "";
+  if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+
+  const patch: Record<string, unknown> = {};
+  if (typeof body.username === "string") patch.username = body.username.trim();
+  if (typeof body.display_name === "string") patch.display_name = body.display_name.trim();
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json({ error: "Provide a username and/or display_name to change." }, { status: 400 });
+  }
+
+  const { db, userId: actorId } = ctx;
+  const { data: before, error: readErr } = await db
+    .from("profiles")
+    .select("username, display_name")
+    .eq("id", id)
+    .single();
+  if (readErr || !before) return NextResponse.json({ error: "Member not found." }, { status: 404 });
+
+  // No-op guard — nothing actually changing.
+  const changed: Record<string, { old: unknown; new: unknown }> = {};
+  for (const k of Object.keys(patch)) {
+    if (String(before[k as keyof typeof before] ?? "") !== String(patch[k] ?? "")) {
+      changed[k] = { old: before[k as keyof typeof before] ?? null, new: patch[k] ?? null };
+    }
+  }
+  if (Object.keys(changed).length === 0) {
+    return NextResponse.json({ ok: true, message: "No change." });
+  }
+
+  const { error: updErr } = await db.from("profiles").update(patch).eq("id", id);
+  if (updErr) return NextResponse.json({ error: updErr.message }, { status: 400 });
+
+  let targetEmail: string | null = null;
+  try {
+    const { data: u } = await db.auth.admin.getUserById(id);
+    targetEmail = u?.user?.email ?? null;
+  } catch {
+    /* email best-effort */
+  }
+  await logAdminAction({
+    db, actorId,
+    action: "user.username_change",
+    entityType: "profile",
+    entityId: id,
+    summary:
+      "username" in changed
+        ? `username ${changed.username.old ?? "—"} → ${changed.username.new ?? "—"}`
+        : `display name ${changed.display_name?.old ?? "—"} → ${changed.display_name?.new ?? "—"}`,
+    diff: changed,
+    context: { route: "admin/members", target_email: targetEmail },
+  });
+
+  return NextResponse.json({ ok: true, changed: Object.keys(changed) });
+}
 
 /**
  * Admin-only member detail — returns a single member's activity (saved spots,

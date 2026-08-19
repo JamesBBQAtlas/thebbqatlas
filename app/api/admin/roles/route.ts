@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
+import { logAdminAction } from "@/lib/admin/audit-log";
 
 /**
  * Admin-only role management — the ONLY sanctioned path that can write
@@ -126,6 +127,16 @@ export async function POST(request: Request) {
     target_email: targetEmail,
     old_role: targetRole,
     new_role: newRole,
+  });
+  // Unified audit trail (Prompt 1) — one row per role change on the profile entity.
+  await logAdminAction({
+    db, actorId, actorEmail,
+    action: "user.role_change",
+    entityType: "profile",
+    entityId: targetId,
+    summary: `${targetEmail ?? "user"} role ${targetRole} → ${newRole}`,
+    diff: { role: { old: targetRole, new: newRole } },
+    context: { route: "admin/roles", target_email: targetEmail },
   });
 
   return NextResponse.json({

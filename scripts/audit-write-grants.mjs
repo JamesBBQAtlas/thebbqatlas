@@ -44,6 +44,10 @@ const SERVICE_ROLE = new Set([
   // Append-only editorial/status audit trail — inserted by admin routes via the
   // service-role client; admin-read RLS, UPDATE blocked by trigger.
   "content_audit",
+  // Append-only unified admin/owner/system action log (Build Prompt 1) — inserted
+  // only via logAdminAction() on the service-role client; admin-read RLS, no insert
+  // policy, UPDATE + DELETE blocked by triggers (migration 076).
+  "admin_audit_log",
   // Curated Watch/Read/Listen directory — public reads published rows (SELECT
   // policy), but all writes are admin-only via the service-role client.
   "media_picks",

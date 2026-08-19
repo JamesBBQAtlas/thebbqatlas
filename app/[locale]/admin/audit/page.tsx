@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
-import { ExternalLink, PencilLine, PlusCircle, Search, Sparkles, Wrench } from "lucide-react";
+import { ExternalLink, PencilLine, PlusCircle, Search, Sparkles, Wrench, ShieldCheck } from "lucide-react";
 
 export const metadata = { title: "Change Log" };
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ interface Change {
 }
 interface Event {
   key: string;
-  kind: "ai_enrichment" | "manual_edit" | "roster" | "import" | "operator" | "system" | "venue_create" | "venue_hunt";
+  kind: "ai_enrichment" | "manual_edit" | "roster" | "import" | "operator" | "system" | "venue_create" | "venue_hunt" | "admin_action";
   restaurantId: string | null;
   restaurantName: string | null;
   restaurantSlug: string | null;
@@ -36,6 +36,24 @@ interface Event {
   model: string | null;
   by: string | null;
   at: string;
+  // admin_audit_log fields (kind === "admin_action")
+  action?: string;
+  summary?: string;
+  entityType?: string;
+  entityId?: string | null;
+  actorEmail?: string | null;
+}
+
+interface AdminLogRow {
+  id: string;
+  actor_id: string | null;
+  actor_email: string | null;
+  action: string;
+  entity_type: string;
+  entity_id: string | null;
+  summary: string;
+  diff: Record<string, { old: unknown; new: unknown }> | Record<string, unknown> | null;
+  created_at: string;
 }
 
 interface AuditRow {
@@ -88,6 +106,7 @@ const LABELS: Record<Event["kind"], { text: string; cls: string; Icon: typeof Pe
   system: { text: "System", cls: "bg-surface-2 text-text-muted", Icon: Wrench },
   venue_create: { text: "Created venue", cls: "bg-emerald-500/15 text-emerald-400", Icon: PlusCircle },
   venue_hunt: { text: "AI hunt", cls: "bg-surface-2 text-text-muted", Icon: Search },
+  admin_action: { text: "Admin action", cls: "bg-sky-500/15 text-sky-400", Icon: ShieldCheck },
 };
 
 const AUDIT_KINDS = new Set(["ai_enrichment", "manual_edit", "roster", "import", "operator", "system"]);
@@ -132,7 +151,7 @@ function groupAudit(rows: AuditRow[]): Event[] {
 export default async function AuditPage({
   searchParams,
 }: {
-  searchParams: { all?: string; restaurant?: string };
+  searchParams: { all?: string; restaurant?: string; entity_type?: string; entity_id?: string; actor?: string; action?: string; q?: string };
 }) {
   const supabase = await createClient();
   const {
@@ -194,8 +213,59 @@ export default async function AuditPage({
     at: r.created_at,
   }));
 
+  // 3) admin_audit_log — the unified action trail (Prompt 1): every admin/owner/
+  //    system action (venue publish/park, role/username change, and — as they ship
+  //    — claims, subscriptions, photo moderation). Filterable by entity type, actor,
+  //    action, and a per-entity history view (entity_type + entity_id).
+  const entityTypeFilter = searchParams.entity_type;
+  const entityIdFilter = searchParams.entity_id;
+  const actorFilter = searchParams.actor;
+  const actionFilter = searchParams.action;
+  const q = (searchParams.q ?? "").trim();
+  let adminQ = db
+    .from("admin_audit_log")
+    .select("id, actor_id, actor_email, action, entity_type, entity_id, summary, diff, created_at")
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (entityTypeFilter) adminQ = adminQ.eq("entity_type", entityTypeFilter);
+  if (entityIdFilter) adminQ = adminQ.eq("entity_id", entityIdFilter);
+  if (actorFilter) adminQ = adminQ.eq("actor_id", actorFilter);
+  if (actionFilter) adminQ = adminQ.eq("action", actionFilter);
+  if (venueFilter) adminQ = adminQ.eq("entity_id", venueFilter);
+  if (q) adminQ = adminQ.ilike("summary", `%${q}%`);
+  const { data: adminData } = await adminQ;
+  const adminEvents: Event[] = ((adminData ?? []) as unknown as AdminLogRow[]).map((r) => ({
+    key: `x-${r.id}`,
+    kind: "admin_action",
+    restaurantId: r.entity_type === "restaurant" ? r.entity_id : null,
+    restaurantName: null,
+    restaurantSlug: null,
+    changes: r.diff && typeof r.diff === "object"
+      ? Object.entries(r.diff)
+          .filter(([, v]) => v && typeof v === "object" && "old" in (v as object) && "new" in (v as object))
+          .map(([field, v]) => ({ field, from: (v as { old: unknown }).old, to: (v as { new: unknown }).new }))
+      : [],
+    citations: [],
+    model: null,
+    by: r.actor_id,
+    at: r.created_at,
+    action: r.action,
+    summary: r.summary,
+    entityType: r.entity_type,
+    entityId: r.entity_id,
+    actorEmail: r.actor_email,
+  }));
+
+  // Distinct actions + entity types present, for the filter chips.
+  const actionsPresent = [...new Set(((adminData ?? []) as unknown as AdminLogRow[]).map((r) => r.action))].sort();
+  const entityTypesPresent = [...new Set(((adminData ?? []) as unknown as AdminLogRow[]).map((r) => r.entity_type))].sort();
+
+  // When a filter/search targets the action log specifically, show ONLY those (a
+  // clean per-entity / per-action history); otherwise show the full merged timeline.
+  const actionLogOnly = Boolean(entityTypeFilter || entityIdFilter || actorFilter || actionFilter || q);
+
   // Merge + sort newest-first.
-  const events = [...auditEvents, ...runEvents].sort(
+  const events = (actionLogOnly ? adminEvents : [...auditEvents, ...runEvents, ...adminEvents]).sort(
     (a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()
   );
 
@@ -241,6 +311,43 @@ export default async function AuditPage({
         </div>
       </div>
 
+      {/* Action-log filters (admin_audit_log): entity type, action, free-text search. */}
+      <div className="mb-5 space-y-3 rounded-xl border border-border-subtle bg-surface-0 p-3">
+        <form action="/admin/audit" method="get" className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-text-muted" />
+            <input
+              type="search"
+              name="q"
+              defaultValue={q}
+              placeholder="Search actions (e.g. published, role, username)…"
+              className="w-full rounded-lg border border-border-subtle bg-surface-1 py-1.5 pl-8 pr-3 text-sm text-text-primary placeholder:text-text-muted"
+            />
+          </div>
+          <button type="submit" className="rounded-lg border border-brand-gold/50 bg-brand-gold/10 px-3 py-1.5 text-sm font-semibold text-brand-gold">Search</button>
+        </form>
+        {(entityTypesPresent.length > 0 || actionsPresent.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-text-muted">Entity:</span>
+            {entityTypesPresent.map((t) => (
+              <Link key={t} href={`/admin/audit?entity_type=${encodeURIComponent(t)}`}
+                className={`rounded-full border px-2 py-0.5 ${entityTypeFilter === t ? "border-sky-500/60 bg-sky-500/10 text-sky-400" : "border-border-subtle text-text-secondary hover:text-sky-400"}`}>{t}</Link>
+            ))}
+            <span className="ml-2 text-text-muted">Action:</span>
+            {actionsPresent.slice(0, 14).map((a) => (
+              <Link key={a} href={`/admin/audit?action=${encodeURIComponent(a)}`}
+                className={`rounded-full border px-2 py-0.5 font-mono ${actionFilter === a ? "border-sky-500/60 bg-sky-500/10 text-sky-400" : "border-border-subtle text-text-secondary hover:text-sky-400"}`}>{a}</Link>
+            ))}
+          </div>
+        )}
+        {actionLogOnly && (
+          <p className="text-xs text-text-muted">
+            Showing the action log{entityIdFilter ? ` for one ${entityTypeFilter ?? "entity"}` : ""}.{" "}
+            <Link href="/admin/audit" className="text-brand-gold hover:underline">Clear filters</Link>
+          </p>
+        )}
+      </div>
+
       {venueFilter && (
         <p className="mb-4 text-sm text-text-muted">
           Filtered to one venue.{" "}
@@ -267,7 +374,12 @@ export default async function AuditPage({
                       <l.Icon className="h-3 w-3" />
                       {l.text}
                     </span>
-                    {e.restaurantSlug ? (
+                    {e.kind === "admin_action" ? (
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-[0.6875rem] text-sky-400">{e.action}</span>
+                        <span className="font-semibold text-text-primary">{e.summary}</span>
+                      </span>
+                    ) : e.restaurantSlug ? (
                       <Link
                         href={`/restaurants/${e.restaurantSlug}`}
                         className="font-semibold text-text-primary hover:text-brand-gold"
@@ -281,9 +393,12 @@ export default async function AuditPage({
                     )}
                   </div>
                   <div className="flex items-center gap-2 text-xs text-text-muted">
-                    <span>{nameById.get(e.by ?? "") ?? "system"}</span>
+                    <span>{e.kind === "admin_action" ? (e.actorEmail ?? nameById.get(e.by ?? "") ?? "system") : (nameById.get(e.by ?? "") ?? "system")}</span>
                     <span>·</span>
                     <span>{timeAgo(e.at)}</span>
+                    {e.kind === "admin_action" && e.entityId && (
+                      <Link href={`/admin/audit?entity_type=${encodeURIComponent(e.entityType ?? "")}&entity_id=${encodeURIComponent(e.entityId)}`} className="hidden text-sky-400 hover:underline sm:inline">· history</Link>
+                    )}
                     {e.model && <span className="hidden sm:inline">· {e.model}</span>}
                   </div>
                 </div>

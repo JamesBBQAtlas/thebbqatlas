@@ -5,6 +5,7 @@ import { canonicalCountry } from "@/lib/constants/countries";
 import { settlementCity } from "@/lib/admin/address";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { auditFromPatch, auditField } from "@/lib/admin/content-audit";
+import { logAdminAction, diffFromPatch } from "@/lib/admin/audit-log";
 import { BBQ_STYLES } from "@/lib/constants/styles";
 import { looksLikeSeedStub } from "@/lib/admin/seed-copy";
 import { ITEM_CATEGORIES } from "@/lib/ai/enrich";
@@ -233,6 +234,21 @@ export async function POST(request: Request) {
     changedBy: ctx.userId,
     note: touchedCopy ? "manual copy edit" : "manual field edit",
   });
+  // Unified audit trail (Prompt 1) — one action row per admin venue edit, with the
+  // changed fields as its diff (internal bookkeeping keys excluded from the diff).
+  const editDiff = diffFromPatch(row as Record<string, unknown>, patch);
+  for (const k of ["updated_at", "updated_by", "updated_by_actor"]) delete editDiff[k];
+  if (Object.keys(editDiff).length) {
+    await logAdminAction({
+      db: ctx.db, actorId: ctx.userId,
+      action: "venue.update",
+      entityType: "restaurant",
+      entityId: restaurantId,
+      summary: `venue edited — ${Object.keys(editDiff).join(", ")}`,
+      diff: editDiff,
+      context: { route: "admin/venues/edit", ...(touchedCopy ? { touched_copy: true } : {}) },
+    });
+  }
 
   // Flagship style change → propagate the new definite style to any branch still
   // on the "other" default, so no branch is left contradicting the flagship.

@@ -35,7 +35,8 @@
     "test:wrl": "tsx scripts/test-wrl-url.mts",
     "test:pin-lock": "tsx scripts/test-pin-lock.mts",
     "test:enrich-safety": "tsx scripts/test-enrich-safety.mts",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:audit-log": "tsx scripts/test-audit-log.mts"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",

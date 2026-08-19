@@ -8,6 +8,7 @@ import { checkDuplicate } from "@/lib/venues/dedupe-server";
 import { sendModerationOutcome } from "@/lib/email/senders";
 import { emailFirstName } from "@/lib/email/recipient";
 import { auditField, auditCreated } from "@/lib/admin/content-audit";
+import { logAdminAction } from "@/lib/admin/audit-log";
 import { normalizePhotoSource, photoModerationTable } from "@/lib/admin/photo-moderation";
 
 type ModType = "submission" | "review" | "photo";
@@ -205,6 +206,15 @@ export async function POST(request: Request) {
               source: "manual_edit",
               changedBy: ctx.userId,
               note: "published from moderation queue",
+            });
+            await logAdminAction({
+              db: admin, actorId: ctx.userId,
+              action: "venue.publish",
+              entityType: "restaurant",
+              entityId: venue.id,
+              summary: `venue published from moderation queue (${venue.status ?? "?"} → approved)`,
+              diff: { status: { old: venue.status ?? null, new: "approved" } },
+              context: { route: "admin/moderate" },
             });
           }
         } else {
