@@ -92,6 +92,32 @@ you don't fight live constraints), in the FK order above, then repoint the app's
 it. For point-in-time needs, Supabase's own PITR/daily backup is the faster primary;
 this independent copy is the guarantee that survives even a Supabase/account problem.
 
+## 4b. Restoring uploaded FILES (photos/videos)
+
+The weekly job also mirrors the actual uploaded files from Supabase Storage to the same
+bucket, under a NON-dated `storage/` prefix (immutable files, kept as one growing
+mirror rather than per-week snapshots):
+
+```
+bbq-atlas-backups/storage/
+  media/<userid>/<uuid>.jpg
+  review-photos/...
+  manifest.json        ← full object inventory + sizes
+```
+
+To restore a file, download it from the backup and re-upload it into the Supabase
+Storage bucket at the SAME path (via the dashboard, the CLI, or the storage API):
+
+```
+aws s3 cp --endpoint-url $BACKUP_S3_ENDPOINT \
+  s3://$BACKUP_S3_BUCKET/$BACKUP_S3_PREFIX/storage/media/<userid>/<uuid>.jpg .
+# then upload back into the `media` bucket at path <userid>/<uuid>.jpg
+```
+
+The DB `media` / `review_photos` rows (restored in §2) point at these paths, so
+restoring the rows + the files together fully rebuilds the gallery. `storage/manifest.json`
+lists every expected file + size to verify completeness.
+
 ## 5. Test-run once (required)
 
 1. Create a throwaway Supabase project (or a `_restore`-schema copy).

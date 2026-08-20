@@ -8,6 +8,7 @@ import { rowsToNdjson, countNdjsonLines, gzip, sha256hex } from "../lib/backup/n
 import {
   snapshotFolder, tableKey, manifestKey, foldersFromKeys, foldersToPrune, EXCLUDED_TABLES,
 } from "../lib/backup/plan";
+import { storageKey } from "../lib/backup/storage";
 
 let pass = 0, fail = 0;
 function ok(name: string, cond: boolean, extra?: unknown) {
@@ -64,6 +65,12 @@ console.log("\n[excluded tables mirror the DB function]");
     ok(`${t} is excluded`, EXCLUDED_TABLES.has(t));
   }
   ok("restaurants is NOT excluded", !EXCLUDED_TABLES.has("restaurants"));
+}
+
+console.log("\n[storage key — mirror path for uploaded files]");
+{
+  ok("storageKey mirrors bucket + path", storageKey("bbq-atlas-backups", "media", "abc/def.jpg") === "bbq-atlas-backups/storage/media/abc/def.jpg");
+  ok("storage keys are NOT dated (immutable mirror, not per-snapshot)", !/\d{4}-\d{2}-\d{2}/.test(storageKey("bbq-atlas-backups", "media", "x.png")));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

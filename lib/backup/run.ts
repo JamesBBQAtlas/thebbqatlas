@@ -13,6 +13,7 @@ import {
   foldersToPrune,
 } from "./plan";
 import { createS3Destination } from "./s3-destination";
+import { runStorageBackup, type StorageSummary } from "./storage";
 import type { BackupDestination } from "./destination";
 
 /** Resolve the configured backup destination (BACKUP_DEST, default "s3"). */
@@ -52,6 +53,7 @@ export interface BackupSummary {
   tables: TableResult[];
   failures: string[];
   pruned: string[];
+  storage: StorageSummary | null;
 }
 
 const PAGE = 1000;
@@ -190,7 +192,21 @@ export async function runBackup(now: Date = new Date()): Promise<BackupSummary> 
     tables: results,
     failures,
     pruned,
+    storage: null,
   };
+
+  // Storage half — mirror the uploaded FILES (Supabase Storage) to the same off-cloud
+  // bucket, incrementally. Isolated so a storage failure can't lose the table export.
+  try {
+    summary.storage = await runStorageBackup(db, dest, { prefix });
+    if (!summary.storage.ok) {
+      summary.ok = false;
+      summary.failures.push(...summary.storage.failures.map((f) => `storage: ${f}`));
+    }
+  } catch (e) {
+    summary.ok = false;
+    summary.failures.push(`storage backup crashed: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   // Write the manifest alongside the table files (row counts + checksums let us spot
   // a truncated/failed export). Best-effort — a manifest failure shouldn't lose the data.
@@ -214,7 +230,7 @@ export async function runBackup(now: Date = new Date()): Promise<BackupSummary> 
       action: "ops.db_backup",
       entityType: "system",
       entityId: null,
-      summary: `Weekly DB backup ${summary.ok ? "OK" : "FAILED"} — ${summary.tableCount} tables, ${summary.totalRows} rows, ${(summary.totalBytes / 1e6).toFixed(1)}MB → ${summary.destination}/${summary.folder}`,
+      summary: `Weekly backup ${summary.ok ? "OK" : "FAILED"} — ${summary.tableCount} tables/${summary.totalRows} rows, ${summary.storage?.copied ?? 0} new files (${summary.storage?.totalObjects ?? 0} total) → ${summary.destination}/${summary.folder}`,
       context: {
         folder: summary.folder,
         ok: summary.ok,
@@ -222,6 +238,15 @@ export async function runBackup(now: Date = new Date()): Promise<BackupSummary> 
         totalBytes: summary.totalBytes,
         failures: summary.failures,
         pruned: summary.pruned,
+        storage: summary.storage
+          ? {
+              totalObjects: summary.storage.totalObjects,
+              copied: summary.storage.copied,
+              skipped: summary.storage.skipped,
+              failed: summary.storage.failed,
+              bytesCopied: summary.storage.bytesCopied,
+            }
+          : null,
       },
     });
   } catch {

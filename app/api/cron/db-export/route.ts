@@ -24,24 +24,29 @@ async function emailResult(summary: BackupSummary): Promise<void> {
   const rows = summary.tables
     .map((t) => `  ${t.ok ? "✓" : "✗"} ${t.table}: ${t.exportedRows} rows (${fmtBytes(t.bytes)})${t.ok ? "" : ` — ${t.error}`}`)
     .join("\n");
+  const st = summary.storage;
+  const storageLine = st
+    ? `Files: ${st.totalObjects} total · ${st.copied} new copied (${fmtBytes(st.bytesCopied)}) · ${st.skipped} already backed up${st.failed ? ` · ${st.failed} failed` : ""}${st.capped ? " · CAPPED (more next run)" : ""}`
+    : "Files: (storage backup did not run)";
   const head = summary.ok
-    ? `✅ Weekly DB backup OK — ${summary.tableCount} tables, ${summary.totalRows} rows, ${fmtBytes(summary.totalBytes)}`
-    : `❌ Weekly DB backup FAILED — ${summary.failures.length} problem(s)`;
+    ? `✅ Weekly backup OK — ${summary.tableCount} tables / ${summary.totalRows} rows, ${st?.copied ?? 0} new files, ${fmtBytes(summary.totalBytes)}`
+    : `❌ Weekly backup FAILED — ${summary.failures.length} problem(s)`;
   const text =
     `${head}\n\n` +
     `Snapshot: ${summary.destination} · ${summary.prefix}/${summary.folder}\n` +
     `Duration: ${(summary.durationMs / 1000).toFixed(1)}s · kept last ${summary.retain}` +
     (summary.pruned.length ? ` · pruned ${summary.pruned.join(", ")}` : "") +
-    `\n\nTables:\n${rows}\n` +
+    `\n\n${storageLine}\n` +
+    `\nTables:\n${rows}\n` +
     (summary.failures.length ? `\nFailures:\n${summary.failures.map((f) => `  • ${f}`).join("\n")}\n` : "") +
-    `\nManifest: ${summary.prefix}/${summary.folder}/manifest.json\n` +
+    `\nManifests: ${summary.prefix}/${summary.folder}/manifest.json · ${summary.prefix}/storage/manifest.json\n` +
     `Restore steps: docs/DR-restore.md`;
 
   await sendEmail({
     to: EMAIL_REPLY_TO,
     subject: summary.ok
-      ? `✅ DB backup ${summary.folder} — ${summary.totalRows} rows`
-      : `❌ DB backup FAILED ${summary.folder}`,
+      ? `✅ Backup ${summary.folder} — ${summary.totalRows} rows + ${summary.storage?.totalObjects ?? 0} files`
+      : `❌ Backup FAILED ${summary.folder}`,
     text,
     html: `<pre style="font:13px/1.5 ui-monospace,monospace">${text.replace(/</g, "&lt;")}</pre>`,
     from: EMAIL_FROM.transactional,
