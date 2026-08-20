@@ -101,6 +101,7 @@ export interface HubVenue {
   lastRunCost: number;
   chainSeed: boolean;
   chainParentId: string | null;
+  chainParentHint: string | null;
   isChainParent: boolean;
   chainRostered: boolean;
   flagshipUnset: boolean;
@@ -1180,7 +1181,7 @@ export function VenueHub({
     router.refresh();
   }
 
-  async function chainEdit(v: HubVenue, action: "attach" | "detach", parentId?: string) {
+  async function chainEdit(v: HubVenue, action: "attach" | "detach" | "confirm", parentId?: string) {
     keepScroll();
     markActed(v.id);
     setState(v.id, "running");
@@ -1470,7 +1471,7 @@ export function VenueHub({
                       <div className="font-semibold text-text-primary">
                         {indent && <span className="mr-1 text-brand-sienna-light" aria-hidden="true">↳</span>}
                         {v.name}
-                        {v.location_label && <span className="ml-1.5 text-xs font-normal text-brand-sienna-light">· {v.location_label}</span>}
+                        {v.location_label && !v.name.toLowerCase().includes(v.location_label.toLowerCase()) && <span className="ml-1.5 text-xs font-normal text-brand-sienna-light">· {v.location_label}</span>}
                         {/* Confident FLAGSHIP badge — ONLY on a CONFIRMED flagship
                             (rostered AND flagship set). Never while flagship_unset. */}
                         {!v.chainSeed && v.chainRostered && !v.flagshipUnset && (
@@ -1826,6 +1827,7 @@ export function VenueHub({
                           onDelete={() => { setLocOpen(null); deleteVenue(v); }}
                           onDetach={() => chainEdit(v, "detach")}
                           onAttach={(pid) => chainEdit(v, "attach", pid)}
+                          onConfirmBranch={() => chainEdit(v, "confirm")}
                           onFlag={(patch) => setFlag(v, patch)}
                         />
                       </td>
@@ -2036,6 +2038,7 @@ export function EditorPanel({
   onDelete,
   onDetach,
   onAttach,
+  onConfirmBranch,
   onFlag,
 }: {
   venue: HubVenue;
@@ -2045,6 +2048,7 @@ export function EditorPanel({
   onDelete: () => void;
   onDetach: () => void;
   onAttach: (parentId: string) => void;
+  onConfirmBranch?: () => void;
   onFlag: (patch: { is_featured?: boolean; permanently_closed?: boolean }) => void;
 }) {
   const f = venue.fields as Record<string, unknown>;
@@ -2324,6 +2328,15 @@ export function EditorPanel({
           </button>
         ) : (
           <div className="inline-flex items-center gap-1.5">
+            {/* One-click "Confirm branch" (niggle v2 #4) — for a held row flagged as a
+                footprint-outlier / off-brand candidate that already knows its parent
+                (chain_parent_hint). Attaches it to that parent and clears the flag for
+                good, so a real branch isn't left sitting flagged. */}
+            {onConfirmBranch && venue.needs_attention && venue.chainParentHint && (
+              <button type="button" onClick={onConfirmBranch} className="inline-flex items-center gap-1.5 rounded-md border border-emerald-500/50 bg-emerald-500/10 px-2.5 py-1.5 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/15">
+                <Link2 className="h-3.5 w-3.5" />Confirm branch
+              </button>
+            )}
             <select value={attachTo} onChange={(e) => setAttachTo(e.target.value)} className="rounded-md border border-border-default bg-surface-0 px-2 py-1.5 text-xs text-text-primary focus:outline-none">
               <option value="">Attach to chain…</option>
               {flagshipChoices.filter((c) => c.id !== venue.id).map((c) => (
@@ -2554,7 +2567,7 @@ function PreviewModal({ venue, mode, onClose, onResolved }: { venue: HubVenue; m
           <span className="absolute bottom-3 left-4 rounded-full bg-black/50 px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-white">{venue.heroSourceLabel}</span>
         </div>
         <div className="p-6">
-          <h3 className="font-heading text-2xl font-bold text-text-primary">{venue.name}{venue.location_label && <span className="ml-2 text-base font-normal text-brand-sienna-light">· {venue.location_label}</span>}</h3>
+          <h3 className="font-heading text-2xl font-bold text-text-primary">{venue.name}{venue.location_label && !venue.name.toLowerCase().includes(venue.location_label.toLowerCase()) && <span className="ml-2 text-base font-normal text-brand-sienna-light">· {venue.location_label}</span>}</h3>
           <p className="mt-1 text-sm text-text-muted">{[venue.city, venue.country].filter(Boolean).join(", ") || "no location"} · {venue.styleLabel}</p>
 
           {/* Chain signal surfaced at the COPY-preview stage, not only at approve (§09.2.8). */}

@@ -83,6 +83,9 @@ export function toHubVenue(r: Restaurant): HubVenue {
     })(),
     chainSeed: Boolean(r.chain_parent_id),
     chainParentId: r.chain_parent_id ?? null,
+    // The parent a held (footprint/off-brand) row would attach to if confirmed —
+    // powers the one-click "Confirm branch" (niggle v2 #4).
+    chainParentHint: (r as { chain_parent_hint?: string | null }).chain_parent_hint ?? null,
     // Parent-of-a-chain flag (for the "part of a chain" preview note); siblings
     // are chainSeed, not isChainParent.
     isChainParent: !r.chain_parent_id && Boolean((r.dossier as { is_chain?: boolean } | null)?.is_chain),

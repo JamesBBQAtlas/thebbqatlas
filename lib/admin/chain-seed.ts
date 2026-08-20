@@ -585,6 +585,7 @@ export async function seedChainLocations(
         status: "pending",
         category: "restaurant",
         chain_parent_id: null,
+        chain_parent_hint: parentId, // enables one-click "Confirm branch" if the admin judges it a real branch
         geo_precision: offGeo.geo_precision,
         geo_confidence: offGeo.geo_confidence,
         geo_source: offGeo.geo_source,
@@ -628,11 +629,12 @@ export async function seedChainLocations(
         status: "pending",
         category: "restaurant",
         chain_parent_id: null, // HELD — not attached until a human confirms
+        chain_parent_hint: parentId, // the parent to attach to on one-click "Confirm branch"
         geo_precision: gGeo.geo_precision,
         geo_confidence: gGeo.geo_confidence,
         geo_source: gGeo.geo_source,
         needs_attention: true,
-        attention_reason: `Geographically implausible for ${brand} (far from every other branch in its footprint) — verify this is a real ${brand} location before attaching.`,
+        attention_reason: `Far outside ${brand}'s footprint (no other branch nearby) — verify this is a real ${brand} branch, then Confirm branch.`,
       };
       if (c.country_code) gRow.country_code = c.country_code;
       if (loc.source_url) gRow.enrichment_sources = [loc.source_url];

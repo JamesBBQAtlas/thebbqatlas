@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Check,
   X,
@@ -204,6 +205,7 @@ export function ModerationConsole({
   const [reviews, setReviews] = useState(initialReviews);
   const [photos, setPhotos] = useState(initialPhotos);
   const [busy, setBusy] = useState<string | null>(null);
+  const router = useRouter();
 
   async function act(
     apiType: ApiType,
@@ -229,6 +231,11 @@ export function ModerationConsole({
         if (bucket === "claims") setClaims((p) => p.filter((c) => c.id !== id));
         if (bucket === "reviews") setReviews((p) => p.filter((r) => r.id !== id));
         if (bucket === "photos") setPhotos((p) => p.filter((ph) => ph.id !== id));
+        // Re-run the force-dynamic admin layout so the AdminNav "Moderation Queue"
+        // pending pill (and the Media pill) decrement live — the optimistic local
+        // filter above updates this console's own tab counts instantly; this keeps
+        // the top-level nav badge in step without a manual reload (niggle v2 #1).
+        router.refresh();
       }
     } finally {
       setBusy(null);

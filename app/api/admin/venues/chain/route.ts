@@ -20,9 +20,51 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "");
-  const action = body.action === "attach" ? "attach" : body.action === "detach" ? "detach" : null;
+  const action =
+    body.action === "attach" ? "attach"
+      : body.action === "detach" ? "detach"
+        : body.action === "confirm" ? "confirm"
+          : null;
   if (!restaurantId || !action) {
     return NextResponse.json({ error: "restaurantId and a valid action are required." }, { status: 400 });
+  }
+
+  // "confirm" (niggle v2 #4) — a held footprint-outlier / off-brand candidate is a REAL
+  // branch. Attach it to the parent stored at hold time (chain_parent_hint) and clear the
+  // needs_attention flag permanently, in one click. Falls back to manual attach if no hint.
+  if (action === "confirm") {
+    const { data: held } = await ctx.db
+      .from("restaurants")
+      .select("id, chain_parent_hint, needs_attention")
+      .eq("id", restaurantId)
+      .single();
+    if (!held) return NextResponse.json({ error: "Venue not found." }, { status: 404 });
+    const hint = (held.chain_parent_hint as string | null) ?? null;
+    if (!hint) {
+      return NextResponse.json(
+        { error: "No candidate parent recorded — attach it to a chain manually." },
+        { status: 400 }
+      );
+    }
+    const { error } = await ctx.db
+      .from("restaurants")
+      .update({
+        chain_parent_id: hint,
+        chain_parent_hint: null,
+        needs_attention: false,
+        attention_reason: null,
+        flagship_unset: false,
+        chain_candidate: false,
+      })
+      .eq("id", restaurantId);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await auditField(ctx.db, restaurantId, "chain", null, { chain_parent_id: hint }, {
+      source: "roster",
+      changedBy: ctx.userId,
+      note: "confirmed branch — footprint/off-brand flag dismissed",
+    });
+    revalidateVenues();
+    return NextResponse.json({ ok: true, action, message: "Confirmed as a branch — flag cleared." });
   }
 
   if (action === "detach") {
