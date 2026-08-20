@@ -21,7 +21,6 @@ import { DirectoryPagination } from "@/components/directory/DirectoryPagination"
 import { paginate, parsePageParam, pagePath } from "@/lib/directory/paginate";
 import { type BbqStyle } from "@/lib/constants/styles";
 import { StyleChip } from "@/components/restaurants/StyleChip";
-import { routing } from "@/i18n/routing";
 
 interface Props {
   params: { locale: string; country: string; city: string };
@@ -36,17 +35,12 @@ export const revalidate = 3600;
 // is noindex'd (and dropped from the sitemap) so the venue page carries the SEO.
 const HUB_INDEX_MIN_VENUES = 2;
 
+// On-demand ISR: city pages render on first request and then cache (revalidate
+// below), instead of pre-building every city at deploy time (which was the bulk of a
+// slow, DB-hammering build). dynamicParams (default true) renders any city at request
+// time. SEO is unaffected — crawlers get full cached HTML.
 export async function generateStaticParams() {
-  const all = await getRestaurants();
-  const params: { country: string; city: string }[] = [];
-  for (const country of groupByCountry(all).values()) {
-    for (const city of groupByCity(country.venues).values()) {
-      params.push({ country: country.slug, city: city.slug });
-    }
-  }
-  return routing.locales.flatMap((locale) =>
-    params.map((p) => ({ locale, ...p }))
-  );
+  return [];
 }
 
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {

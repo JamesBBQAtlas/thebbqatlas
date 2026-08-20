@@ -53,6 +53,14 @@ async function emitAlert(source: string, err: unknown, meta?: Record<string, unk
     /* swallow — never throw into the request path */
   }
 
+  // Email ONLY for the true emergency: we fell all the way to the hard-coded SEED
+  // (wrong numbers shown to users). Healthily serving last-known-good real data under
+  // a transient blip is the safety net WORKING — it's recorded in the audit row above,
+  // but doesn't warrant an email each time (that was spamming the inbox on every deploy
+  // when the build briefly overloaded the DB). Callers set servedSeed=true only when
+  // they actually returned the seed.
+  if (meta?.servedSeed !== true) return;
+
   // Email alert (best-effort; independent of the DB).
   try {
     const servedLkg = Boolean(meta?.servedLastKnownGood);

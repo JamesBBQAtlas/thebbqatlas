@@ -5,7 +5,6 @@ import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Ticke
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
-  getRestaurants,
   getNearbyVenues,
   getSignatureDishes,
   getSlugRedirect,
@@ -63,7 +62,6 @@ import { AffiliateDisclosure } from "@/components/monetization/AffiliateDisclosu
 import { getSiblingLocations } from "@/lib/queries/brands";
 import { slugify } from "@/lib/seo/hubs";
 import type { Brand } from "@/lib/types/database";
-import { routing } from "@/i18n/routing";
 
 interface Props {
   params: { locale: string; slug: string };
@@ -72,11 +70,13 @@ interface Props {
 // Pre-render every approved restaurant (ISR: refresh hourly).
 export const revalidate = 3600;
 
+// On-demand ISR: venue pages render on first request and then cache (revalidate
+// below), instead of pre-building all 800+ at deploy time. That keeps builds fast and
+// off the database, and scales as the directory grows. dynamicParams (default true)
+// generates any slug not pre-listed at request time; the page still notFound()s a
+// genuinely unknown slug. SEO is unaffected — crawlers get full cached HTML.
 export async function generateStaticParams() {
-  const restaurants = await getRestaurants();
-  return routing.locales.flatMap((locale) =>
-    restaurants.map((r) => ({ locale, slug: r.slug }))
-  );
+  return [];
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {

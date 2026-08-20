@@ -121,6 +121,9 @@ export async function getRestaurants(): Promise<Restaurant[]> {
     const lkg = approvedLkg.get();
     reportFallbackServed("approved-restaurants", e, {
       servedLastKnownGood: Boolean(lkg),
+      // Only the SEED case (no last-known-good yet) is an emergency worth an email —
+      // serving real last-known-good is the safety net working and is audit-logged only.
+      servedSeed: !lkg,
       count: lkg?.length ?? FALLBACK_RESTAURANTS.length,
     });
     return lkg ?? FALLBACK_RESTAURANTS;

@@ -19,7 +19,6 @@ import { HubFaq } from "@/components/seo/HubFaq";
 import { SearchImpressionBeacon } from "@/components/seo/SearchImpressionBeacon";
 import { DirectoryPagination } from "@/components/directory/DirectoryPagination";
 import { paginate, parsePageParam, pagePath } from "@/lib/directory/paginate";
-import { routing } from "@/i18n/routing";
 
 interface Props {
   params: { locale: string; country: string };
@@ -28,12 +27,11 @@ interface Props {
 
 export const revalidate = 3600;
 
+// On-demand ISR: country pages render on first request and then cache (revalidate
+// below) rather than pre-building at deploy time. dynamicParams (default true) renders
+// any country at request time. SEO is unaffected — crawlers get full cached HTML.
 export async function generateStaticParams() {
-  const all = await getRestaurants();
-  const slugs = [...groupByCountry(all).keys()];
-  return routing.locales.flatMap((locale) =>
-    slugs.map((country) => ({ locale, country }))
-  );
+  return [];
 }
 
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
