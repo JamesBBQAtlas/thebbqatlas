@@ -49,12 +49,13 @@ export async function PATCH(request: Request) {
   // id rather than the 'self-heal' sentinel.
   const isOwnerEdit = s.kind === "owner_edit";
   const isGeo = s.kind === "geo_correction";
+  const isHero = s.kind === "hero_set";
 
   if (action === "reject") {
     await ctx.db.from("suggestions").update({ status: "rejected" }).eq("id", id);
     await logAdminAction({
       db: ctx.db, actorId: ctx.userId,
-      action: isGeo ? "owner.pin_reject" : isOwnerEdit ? "owner.edit_reject" : "suggestion.reject",
+      action: isGeo ? "owner.pin_reject" : isHero ? "owner.hero_reject" : isOwnerEdit ? "owner.edit_reject" : "suggestion.reject",
       entityType: "restaurant", entityId: s.restaurant_id ?? null,
       summary: `${isGeo ? "pin correction" : isOwnerEdit ? "owner edit" : "suggestion"} rejected`,
       context: { route: "admin/suggestions", suggestion_id: id, kind: s.kind, proposed_by: s.created_by },
@@ -97,6 +98,37 @@ export async function PATCH(request: Request) {
       context: { route: "admin/suggestions", suggestion_id: id, proposed_by: s.created_by, geo_locked: true },
     });
     return NextResponse.json({ ok: true, status: "applied", applied: ["lat", "lng", "geo_locked"] });
+  }
+
+  // Approve a HERO SET (owner Pro-tier hero pick) — the owner chose one of their OWN
+  // already-approved photos as the venue hero. Write hero_image_url + hero_source. The
+  // image was already moderated at upload; this approval is the human sign-off on it
+  // becoming the hero. Only these two fields are written (not the generic whitelist).
+  if (isHero) {
+    const p = (s.proposed ?? {}) as { hero_image_url?: string; hero_source?: string };
+    if (!s.restaurant_id || typeof p.hero_image_url !== "string" || !p.hero_image_url) {
+      return NextResponse.json({ error: "Malformed hero selection." }, { status: 400 });
+    }
+    const { data: before } = await ctx.db
+      .from("restaurants")
+      .select("hero_image_url")
+      .eq("id", s.restaurant_id)
+      .single();
+    const { error: hErr } = await ctx.db
+      .from("restaurants")
+      .update({ hero_image_url: p.hero_image_url, hero_source: p.hero_source ?? "owner_pick" })
+      .eq("id", s.restaurant_id);
+    if (hErr) return NextResponse.json({ error: hErr.message }, { status: 500 });
+    await ctx.db.from("suggestions").update({ status: "applied", applied_at: new Date().toISOString() }).eq("id", id);
+    await logAdminAction({
+      db: ctx.db, actorId: ctx.userId,
+      action: "owner.hero_approve",
+      entityType: "restaurant", entityId: s.restaurant_id,
+      summary: "owner hero photo approved",
+      diff: { hero_image_url: { old: before?.hero_image_url ?? null, new: p.hero_image_url } },
+      context: { route: "admin/suggestions", suggestion_id: id, proposed_by: s.created_by },
+    });
+    return NextResponse.json({ ok: true, status: "applied", applied: ["hero_image_url"] });
   }
 
   // Approve: apply the proposed (whitelisted) fields.

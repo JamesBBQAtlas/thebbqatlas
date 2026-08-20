@@ -52,7 +52,7 @@ export default async function OwnerEditsPage() {
   const { data } = await db
     .from("suggestions")
     .select("id, kind, restaurant_id, title, summary, current, proposed, created_by, created_at, restaurants(name, slug)")
-    .in("kind", ["owner_edit", "geo_correction"])
+    .in("kind", ["owner_edit", "geo_correction", "hero_set"])
     .eq("status", "pending")
     .order("created_at", { ascending: true })
     .limit(200);
@@ -100,7 +100,18 @@ export default async function OwnerEditsPage() {
                   </div>
                   <SuggestionActions suggestionId={r.id} />
                 </div>
-                {r.kind === "geo_correction" ? (
+                {r.kind === "hero_set" ? (
+                  <div className="mt-3 text-xs">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-gold/15 px-2 py-0.5 font-semibold text-brand-gold">🖼 hero photo (Pro owner)</span>
+                    <p className="mt-2 text-text-secondary">Owner picked a new hero from their approved photos.</p>
+                    {typeof (proposed as { hero_image_url?: string }).hero_image_url === "string" && (
+                      <div className="mt-2 aspect-video max-w-xs overflow-hidden rounded-lg border border-border-subtle">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={String((proposed as { hero_image_url?: string }).hero_image_url)} alt="" className="h-full w-full object-cover" />
+                      </div>
+                    )}
+                  </div>
+                ) : r.kind === "geo_correction" ? (
                   <div className="mt-3 text-xs">
                     <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 font-semibold text-sky-400">📍 pin correction</span>
                     {typeof (proposed as { far?: boolean }).far === "boolean" && (proposed as { far?: boolean }).far && (

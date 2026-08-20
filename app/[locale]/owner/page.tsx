@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
 import { OwnerVenueEditor } from "@/components/account/OwnerVenueEditor";
 import { OwnerPinEditor } from "@/components/account/OwnerPinEditor";
+import { OwnerHeroPicker } from "@/components/account/OwnerHeroPicker";
 import { hasPageControl } from "@/lib/account/listing";
 
 export const metadata = { title: "My Venues" };
@@ -67,17 +68,19 @@ export default async function OwnerDashboard() {
   // by kind so the field editor and the pin editor each show their own state.
   const pendingByVenue = new Set<string>();
   const pendingPinByVenue = new Set<string>();
+  const pendingHeroByVenue = new Set<string>();
   if (venues.length) {
     const { data: pend } = await db
       .from("suggestions")
       .select("restaurant_id, kind")
-      .in("kind", ["owner_edit", "geo_correction"])
+      .in("kind", ["owner_edit", "geo_correction", "hero_set"])
       .eq("status", "pending")
       .eq("created_by", user.id)
       .in("restaurant_id", venues.map((v) => v.id));
     for (const p of pend ?? []) {
       if (!p.restaurant_id) continue;
       if (p.kind === "geo_correction") pendingPinByVenue.add(p.restaurant_id);
+      else if (p.kind === "hero_set") pendingHeroByVenue.add(p.restaurant_id);
       else pendingByVenue.add(p.restaurant_id);
     }
   }
@@ -126,6 +129,9 @@ export default async function OwnerDashboard() {
                 hasControl={hasPageControl(v)}
                 hasPending={pendingByVenue.has(v.id)}
               />
+              {hasPageControl(v) && (
+                <OwnerHeroPicker venueId={v.id} hasPending={pendingHeroByVenue.has(v.id)} />
+              )}
               <OwnerPinEditor
                 venue={{ id: v.id, name: v.name, lat: v.lat, lng: v.lng }}
                 hasPending={pendingPinByVenue.has(v.id)}
