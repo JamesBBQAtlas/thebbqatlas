@@ -13,8 +13,10 @@ export interface ClickEventPayload {
     | "share"
     | "save"
     | "media"
-    | "shop"      // Build Prompt 3c — Featured owner shop/order-online link
-    | "tickets";  // Build Prompt 3c — Featured owner tickets & events link
+    | "shop"        // Pro owner shop/merch link
+    | "tickets"     // Pro owner tickets & events link
+    | "gift_card"   // Pro owner gift-card link
+    | "order";      // Pro owner online-ordering link
   restaurant_id?: string | null;
   media_pick_id?: string | null;
   partner?: string;

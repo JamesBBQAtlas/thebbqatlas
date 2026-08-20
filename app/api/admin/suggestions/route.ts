@@ -16,10 +16,12 @@ const ALLOWED = new Set([
   "facebook_url",
   "tiktok_url",
   "youtube_url",
-  // PREMIUM owner link fields (Build Prompt 3c) — the submit route only lets a
-  // Featured owner propose these, so by the time one reaches here it's entitled.
+  // PREMIUM owner link fields (Pro tier) — the submit route only lets a Pro owner
+  // propose these, so by the time one reaches here it's entitled.
   "shop_url",
   "tickets_url",
+  "gift_card_url",
+  "order_url",
   "permanently_closed",
 ]);
 

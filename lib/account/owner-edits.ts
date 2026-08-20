@@ -28,15 +28,15 @@ export const OWNER_EDITABLE_FIELDS = [
 export type OwnerEditableField = (typeof OWNER_EDITABLE_FIELDS)[number];
 
 /**
- * PREMIUM owner link fields (Build Prompt 3c) — the Featured-listing capability.
- * A paid Featured owner may additionally propose an online shop / order-online link
- * and a tickets & events link. These are NOT in the free whitelist above; the submit
- * route only accepts them when the venue's Featured entitlement is active (checked
- * SERVER-SIDE — never trusted from the client), and they apply through the same
- * moderated `suggestions` path. "tickets" is the tickets-&-events link-type folded in
- * from Prompt 2 §5. Keys match the suggestions apply whitelist.
+ * PREMIUM owner link fields — the $49 PRO tier "page control" capability (Aug 19
+ * realignment). A Pro owner may propose the full set of owner links: online shop / merch,
+ * tickets & events, gift cards, and online ordering. These are NOT in the free whitelist
+ * above; the submit route only accepts them when the venue's PRO entitlement is active
+ * (checked SERVER-SIDE via getListingStatus().hasControl — never trusted from the client),
+ * and they apply through the same moderated `suggestions` path. Gating is on Pro, NOT on
+ * the (separate, time-boxed) Featured prominence purchase. Keys match the apply whitelist.
  */
-export const PREMIUM_OWNER_LINK_FIELDS = ["shop_url", "tickets_url"] as const;
+export const PREMIUM_OWNER_LINK_FIELDS = ["shop_url", "tickets_url", "gift_card_url", "order_url"] as const;
 export type PremiumOwnerLinkField = (typeof PREMIUM_OWNER_LINK_FIELDS)[number];
 
 const URL_FIELDS = new Set<OwnerEditableField>(["website", "instagram_url", "x_url", "facebook_url", "tiktok_url", "youtube_url"]);

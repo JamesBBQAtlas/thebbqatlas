@@ -46,19 +46,20 @@ export async function POST(request: Request) {
   const rawPatch = (body.patch ?? {}) as Record<string, unknown>;
   const { patch, rejected } = sanitizeOwnerPatch(rawPatch);
 
-  // PREMIUM LINK SEAM (Build Prompt 3c) — shop_url / tickets_url are a Featured-listing
-  // capability. Accept them ONLY when this venue's Featured entitlement is active, checked
-  // SERVER-SIDE against the restaurant's is_premium/premium_until (never trusted from the
-  // client). A not-entitled owner who submits one gets a clear reason, not a silent drop.
+  // PREMIUM LINK SEAM — shop/tickets/gift-card/ordering links are the $49 PRO tier
+  // "page control" capability (Aug 19 realignment). Accept them ONLY when this venue's PRO
+  // entitlement is active, checked SERVER-SIDE via getListingStatus().hasControl (never
+  // trusted from the client). NOT gated on the separate Featured prominence purchase. A
+  // not-entitled owner who submits one gets a clear reason, not a silent drop.
   if (hasPremiumLinkKeys(rawPatch)) {
     const listing = await getListingStatus(db, user.id, restaurantId);
-    if (listing.isFeatured) {
+    if (listing.hasControl) {
       const prem = sanitizePremiumLinks(rawPatch);
       Object.assign(patch, prem.patch);
       Object.assign(rejected, prem.rejected);
     } else {
       for (const f of PREMIUM_OWNER_LINK_FIELDS) {
-        if (f in rawPatch) rejected[f] = "Shop & tickets links need a Featured listing.";
+        if (f in rawPatch) rejected[f] = "Owner links need the Pro tier.";
       }
     }
   }

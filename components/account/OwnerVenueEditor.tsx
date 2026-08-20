@@ -18,6 +18,8 @@ interface Venue {
   youtube_url: string | null;
   shop_url: string | null;
   tickets_url: string | null;
+  gift_card_url: string | null;
+  order_url: string | null;
   hours: Record<string, string> | null;
 }
 
@@ -28,25 +30,27 @@ const SOCIALS: [keyof Venue, string][] = [
   ["website", "Website"], ["instagram_url", "Instagram"], ["x_url", "X / Twitter"],
   ["facebook_url", "Facebook"], ["tiktok_url", "TikTok"], ["youtube_url", "YouTube"],
 ];
-// PREMIUM (Featured-listing) link fields — Build Prompt 3c.
+// PREMIUM (Pro-tier) link fields — full page control (Aug 19 realignment).
 const PREMIUM_LINKS: [keyof Venue, string][] = [
-  ["shop_url", "Online shop / order online"],
+  ["shop_url", "Online shop / merch"],
+  ["order_url", "Order online"],
   ["tickets_url", "Tickets & events"],
+  ["gift_card_url", "Gift cards"],
 ];
 
 /** The moderated accuracy editor for one owned venue (Build Prompt 2b). Submits a
  *  proposed edit to /api/owner/venues/edit — it lands in moderation, never live.
- *  Featured owners (isFeatured) additionally get the premium shop/tickets links (3c);
- *  the server re-checks entitlement, so these inputs are a convenience, not the gate. */
+ *  Pro-tier owners (hasControl) additionally get the premium owner links; the server
+ *  re-checks entitlement, so these inputs are a convenience, not the gate. */
 export function OwnerVenueEditor({
   venue,
   hasPending,
-  isFeatured = false,
+  hasControl = false,
   bare = false,
 }: {
   venue: Venue;
   hasPending: boolean;
-  isFeatured?: boolean;
+  hasControl?: boolean;
   bare?: boolean;
 }) {
   const router = useRouter();
@@ -73,7 +77,7 @@ export function OwnerVenueEditor({
       description: desc,
       phone,
       ...links,
-      ...(isFeatured ? premiumLinks : {}),
+      ...(hasControl ? premiumLinks : {}),
       hours: Object.fromEntries(DAYS.map(([d]) => [d, hours[d] ?? ""])),
     };
     let res: Response;
@@ -142,16 +146,16 @@ export function OwnerVenueEditor({
         ))}
       </div>
 
-      {/* PREMIUM links (Build Prompt 3c) — Featured-listing capability. */}
+      {/* PREMIUM links — the $49 Pro tier "page control" capability. */}
       <div className="mt-5 rounded-lg border border-brand-gold/25 bg-brand-gold/5 p-4">
         <div className="mb-2 flex items-center gap-1.5">
           <Store className="h-4 w-4 text-brand-gold" />
-          <span className="text-sm font-semibold text-text-primary">Shop &amp; tickets links</span>
+          <span className="text-sm font-semibold text-text-primary">Owner links</span>
           <span className="ml-1 rounded-full bg-brand-gold/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em] text-brand-gold">
-            Featured
+            Pro
           </span>
         </div>
-        {isFeatured ? (
+        {hasControl ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {PREMIUM_LINKS.map(([k, label]) => (
               <label key={String(k)} className="block text-sm">
@@ -172,8 +176,8 @@ export function OwnerVenueEditor({
           <p className="flex items-start gap-1.5 text-sm text-text-muted">
             <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Add an online shop / order-online link and a tickets &amp; events link with a{" "}
-              <span className="font-semibold text-brand-gold">Featured listing</span>. Upgrade from your
+              Add your shop/merch, ordering, tickets &amp; events, and gift-card links with the{" "}
+              <span className="font-semibold text-brand-gold">Pro tier</span>. Upgrade from your
               venue page.
             </span>
           </p>

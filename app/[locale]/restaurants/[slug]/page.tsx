@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Ticket, Clock, Star } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Ticket, Gift, Clock, Star } from "lucide-react";
 import { Link } from "@/i18n/navigation";
 import {
   getRestaurantBySlug,
@@ -192,16 +192,19 @@ export default async function RestaurantPage({ params }: Props) {
     ] as const
   ).filter((s): s is { kind: SocialKind; label: string; href: string } => Boolean(s.href));
 
-  // PREMIUM owner links (Build Prompt 3c) — an online shop / order-online link and a
-  // tickets & events link. A Featured-listing capability, so they only render while the
-  // venue's paid Featured entitlement is active (computed as isPaidFeatured below); if
-  // Featured lapses the links quietly disappear.
+  // PREMIUM owner links — the $49 Pro tier "page control" capability (shop/merch,
+  // ordering, tickets & events, gift cards). They render only while the venue's PRO
+  // entitlement is active (hasPro below) — NOT the separate Featured prominence; if Pro
+  // lapses the links quietly disappear.
+  type PremiumLinkKey = "shop" | "order" | "tickets" | "gift_card";
   const premiumLinks = (
     [
-      { key: "shop" as const, label: "Shop / order online", href: restaurant.shop_url ?? null },
+      { key: "shop" as const, label: "Shop / merch", href: restaurant.shop_url ?? null },
+      { key: "order" as const, label: "Order online", href: restaurant.order_url ?? null },
       { key: "tickets" as const, label: "Tickets & events", href: restaurant.tickets_url ?? null },
+      { key: "gift_card" as const, label: "Gift cards", href: restaurant.gift_card_url ?? null },
     ]
-  ).filter((l): l is { key: "shop" | "tickets"; label: string; href: string } => Boolean(l.href));
+  ).filter((l): l is { key: PremiumLinkKey; label: string; href: string } => Boolean(l.href));
 
   // Venue imagery hierarchy (copyright-safe): (1) an approved uploaded photo
   // from our moderated media system; else (2) the official Instagram embed (its
@@ -221,11 +224,17 @@ export default async function RestaurantPage({ params }: Props) {
     ? { url: realHero.url, isReal: true }
     : { url: styleHeroUrl(restaurant.style), isReal: false };
 
-  // Paid "Featured" listing (Phase 5.1) — drives the verified badge + placement.
+  // FEATURED prominence (time-boxed weekly window) — drives the verified badge + placement.
   const isPaidFeatured =
     Boolean(restaurant.is_premium) &&
     (!restaurant.premium_until ||
       new Date(restaurant.premium_until).getTime() > Date.now());
+
+  // PRO page control ($49 tier) — what gates the owner links + hero. Independent of Featured.
+  const hasPro =
+    restaurant.listing_tier === "pro" &&
+    (!restaurant.listing_until ||
+      new Date(restaurant.listing_until).getTime() > Date.now());
 
   // Nearby (by true distance). Miles for US/UK, kilometres elsewhere.
   const useMiles = code === "US" || code === "GB";
@@ -755,25 +764,25 @@ export default async function RestaurantPage({ params }: Props) {
             </div>
           )}
 
-          {/* Shop & tickets (Build Prompt 3c) — Featured-listing owner links. Only
-              shown while the venue's paid Featured entitlement is active. */}
-          {isPaidFeatured && premiumLinks.length > 0 && (
+          {/* Owner links — Pro-tier ($49) page control (shop/merch, ordering, tickets &
+              events, gift cards). Shown only while the venue's PRO entitlement is active. */}
+          {hasPro && premiumLinks.length > 0 && (
             <div className="rounded-xl border border-brand-gold/25 bg-brand-gold/5 p-6">
               <h3 className="mb-4 border-b border-brand-gold/20 pb-3 font-heading text-base font-bold text-text-primary">
-                Shop &amp; tickets
+                Shop &amp; more
               </h3>
               <div className="flex flex-wrap gap-2">
                 {premiumLinks.map((l) => (
                   <TrackedLink
                     key={l.key}
                     href={l.href}
-                    eventType={l.key === "tickets" ? "tickets" : "shop"}
+                    eventType={l.key === "order" ? "order" : l.key === "tickets" ? "tickets" : l.key === "gift_card" ? "gift_card" : "shop"}
                     restaurantId={restaurant.id}
                     ariaLabel={l.label}
                     title={l.label}
                     className="inline-flex items-center gap-2 rounded-full border border-brand-gold/40 bg-brand-gold/10 px-3.5 py-1.5 text-sm font-semibold text-brand-gold transition-colors hover:bg-brand-gold/15"
                   >
-                    {l.key === "tickets" ? <Ticket className="h-4 w-4" /> : <Store className="h-4 w-4" />}
+                    {l.key === "tickets" ? <Ticket className="h-4 w-4" /> : l.key === "gift_card" ? <Gift className="h-4 w-4" /> : l.key === "order" ? <UtensilsCrossed className="h-4 w-4" /> : <Store className="h-4 w-4" />}
                     <span>{l.label}</span>
                   </TrackedLink>
                 ))}

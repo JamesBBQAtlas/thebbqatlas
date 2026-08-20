@@ -3,7 +3,7 @@ import type Stripe from "stripe";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { stripe } from "@/lib/stripe/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { LISTING } from "@/lib/stripe/config";
+import { LISTING, PRO, FEATURED } from "@/lib/stripe/config";
 import { sendOrderReceipt } from "@/lib/email/senders";
 import { revalidateVenues } from "@/lib/cache/venues";
 import { logAdminAction } from "@/lib/admin/audit-log";
@@ -39,6 +39,38 @@ async function applyListingEntitlement(
   // Refresh the venue page / directory / map so the badge + featured placement
   // update promptly rather than waiting on ISR.
   revalidateVenues();
+}
+
+/**
+ * Apply the PRO page-control tier ($49/mo) to its restaurant (Aug 19 realignment). Active
+ * → listing_tier='pro' + listing_until; cancelled/unpaid → listing_tier=null (control
+ * lapses; hero + owner links stop rendering). This is SEPARATE from Featured prominence —
+ * it never touches is_premium/premium_until.
+ */
+async function applyProEntitlement(
+  admin: SupabaseClient,
+  sub: Stripe.Subscription
+): Promise<void> {
+  const restaurantId = sub.metadata?.restaurant_id;
+  if (!restaurantId) return;
+  const item = sub.items?.data?.[0];
+  const periodEnd = item?.current_period_end ?? null;
+  const active = LISTING_ACTIVE.has(sub.status);
+  await admin
+    .from("restaurants")
+    .update({
+      listing_tier: active ? "pro" : null,
+      listing_until: periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+    })
+    .eq("id", restaurantId);
+  revalidateVenues();
+}
+
+/** Route a venue subscription to the right entitlement by its metadata.type. */
+async function applyVenueSubscription(admin: SupabaseClient, sub: Stripe.Subscription): Promise<void> {
+  const t = sub.metadata?.type;
+  if (t === "pro") await applyProEntitlement(admin, sub);
+  else await applyListingEntitlement(admin, sub); // 'listing' / 'featured' → prominence window
 }
 
 /** Reconcile a Stripe subscription into our `subscriptions` table. */
@@ -145,9 +177,12 @@ export async function POST(request: Request) {
         const userId = s.metadata?.user_id;
         if (s.mode === "subscription" && s.subscription) {
           const sub = await stripe.subscriptions.retrieve(s.subscription as string);
-          if (s.metadata?.type === "listing" || sub.metadata?.type === "listing") {
-            // Featured venue listing → entitlement on the restaurant + a receipt.
-            await applyListingEntitlement(admin, sub);
+          const type = s.metadata?.type ?? sub.metadata?.type;
+          const isVenue = type === "listing" || type === "featured" || type === "pro";
+          if (isVenue) {
+            // Venue subscription → the right entitlement (Pro control OR Featured
+            // prominence) on the restaurant + a receipt.
+            await applyVenueSubscription(admin, sub);
             const email = s.customer_details?.email;
             if (email) {
               const rid = sub.metadata?.restaurant_id;
@@ -156,10 +191,11 @@ export async function POST(request: Request) {
                 const { data: v } = await admin.from("restaurants").select("name").eq("id", rid).single();
                 if (v?.name) venueName = v.name;
               }
+              const prod = type === "pro" ? PRO : FEATURED;
               await sendOrderReceipt({
                 to: email,
-                description: `${LISTING.name} — ${venueName}`,
-                amount: `${LISTING.price}/${LISTING.interval}`,
+                description: `${prod.name} — ${venueName}`,
+                amount: `${prod.price}/${prod.interval}`,
               });
             }
           } else {
@@ -197,8 +233,9 @@ export async function POST(request: Request) {
       case "customer.subscription.updated":
       case "customer.subscription.deleted": {
         const sub = event.data.object as Stripe.Subscription;
-        if (sub.metadata?.type === "listing") {
-          await applyListingEntitlement(admin, sub);
+        const t = sub.metadata?.type;
+        if (t === "listing" || t === "featured" || t === "pro") {
+          await applyVenueSubscription(admin, sub);
         } else {
           await upsertSubscription(admin, sub.metadata?.user_id, sub);
         }
@@ -213,7 +250,8 @@ export async function POST(request: Request) {
         const subId = typeof inv.subscription === "string" ? inv.subscription : inv.subscription?.id;
         if (subId) {
           const sub = await stripe.subscriptions.retrieve(subId);
-          if (sub.metadata?.type === "listing") await applyListingEntitlement(admin, sub);
+          const t = sub.metadata?.type;
+          if (t === "listing" || t === "featured" || t === "pro") await applyVenueSubscription(admin, sub);
           else await upsertSubscription(admin, sub.metadata?.user_id, sub);
         }
         break;

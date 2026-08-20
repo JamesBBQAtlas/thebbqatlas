@@ -121,9 +121,14 @@ export interface Restaurant {
   facebook_url?: string | null;
   tiktok_url?: string | null;
   youtube_url?: string | null;
-  // PREMIUM owner link fields (Build Prompt 3c) — Featured-listing capability.
+  // PREMIUM owner link fields (Pro tier) — page-control capability.
   shop_url?: string | null;
   tickets_url?: string | null;
+  gift_card_url?: string | null;
+  order_url?: string | null;
+  // Page-control subscription tier ($49 Pro / $29.99 lower) — separate from Featured.
+  listing_tier?: string | null;
+  listing_until?: string | null;
   alcohol?: "none" | "serves" | "byob" | "both" | null;
   offerings?: string[] | null;
   price_level: number;

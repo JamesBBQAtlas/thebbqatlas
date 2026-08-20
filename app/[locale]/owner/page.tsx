@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { Link } from "@/i18n/navigation";
 import { OwnerVenueEditor } from "@/components/account/OwnerVenueEditor";
 import { OwnerPinEditor } from "@/components/account/OwnerPinEditor";
+import { hasPageControl } from "@/lib/account/listing";
 
 export const metadata = { title: "My Venues" };
 export const dynamic = "force-dynamic";
@@ -17,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 
 const FIELDS =
-  "id, name, slug, status, description, phone, website, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, shop_url, tickets_url, hours, lat, lng, is_premium, premium_tier, premium_until";
+  "id, name, slug, status, description, phone, website, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, shop_url, tickets_url, gift_card_url, order_url, hours, lat, lng, listing_tier, listing_until";
 
 interface OwnedVenue {
   id: string;
@@ -34,18 +35,13 @@ interface OwnedVenue {
   youtube_url: string | null;
   shop_url: string | null;
   tickets_url: string | null;
+  gift_card_url: string | null;
+  order_url: string | null;
   hours: Record<string, string> | null;
   lat: number | null;
   lng: number | null;
-  is_premium: boolean | null;
-  premium_tier: string | null;
-  premium_until: string | null;
-}
-
-/** Paid Featured entitlement active — mirrors getListingStatus (is_premium + not expired). */
-function isFeaturedVenue(v: OwnedVenue): boolean {
-  const notExpired = !v.premium_until || new Date(v.premium_until).getTime() > Date.now();
-  return Boolean(v.is_premium) && notExpired;
+  listing_tier: string | null;
+  listing_until: string | null;
 }
 
 export default async function OwnerDashboard() {
@@ -123,9 +119,11 @@ export default async function OwnerDashboard() {
                   youtube_url: v.youtube_url,
                   shop_url: v.shop_url,
                   tickets_url: v.tickets_url,
+                  gift_card_url: v.gift_card_url,
+                  order_url: v.order_url,
                   hours: v.hours,
                 }}
-                isFeatured={isFeaturedVenue(v)}
+                hasControl={hasPageControl(v)}
                 hasPending={pendingByVenue.has(v.id)}
               />
               <OwnerPinEditor

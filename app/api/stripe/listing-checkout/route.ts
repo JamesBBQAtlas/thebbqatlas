@@ -2,21 +2,19 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/server";
-import { LISTING } from "@/lib/stripe/config";
+import { PRO, FEATURED } from "@/lib/stripe/config";
 import { ownsVenue } from "@/lib/account/listing";
 import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 /**
- * Start a Stripe Checkout session for the Featured listing (Phase 5.1). Only the
- * venue's owner (approved claim) can subscribe. metadata.type="listing" +
- * restaurant_id lets the webhook set the entitlement on the right restaurant.
+ * Start a Stripe Checkout session for a venue listing purchase. `plan` selects the
+ * product: 'pro' → the $49/mo page-control tier (hero + all links); 'featured' → the
+ * time-boxed weekly prominence window. Only the venue's owner (approved claim) can buy.
+ * metadata.type (pro|featured) + restaurant_id lets the webhook set the right entitlement.
  */
 export async function POST(request: Request) {
   if (!(await rateLimit(`listing-checkout:${clientIp(request)}`, 15, 3600))) {
     return NextResponse.json({ error: "Too many requests — try again later." }, { status: 429 });
-  }
-  if (!stripe || !LISTING.priceId) {
-    return NextResponse.json({ error: "Featured listings aren't switched on yet." }, { status: 503 });
   }
 
   const supabase = await createClient();
@@ -28,6 +26,13 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "").trim();
   if (!restaurantId) return NextResponse.json({ error: "Missing venue" }, { status: 400 });
+
+  // Which product? Default to 'pro' (page control) — the primary paid tier.
+  const plan = body.plan === "featured" ? "featured" : "pro";
+  const product = plan === "featured" ? FEATURED : PRO;
+  if (!stripe || !product.priceId) {
+    return NextResponse.json({ error: `${product.name} isn't switched on yet.` }, { status: 503 });
+  }
 
   const admin = process.env.SUPABASE_SERVICE_ROLE_KEY ? createAdminClient() : supabase;
 
@@ -63,14 +68,14 @@ export async function POST(request: Request) {
     }
 
     const back = venue?.slug ? `/restaurants/${venue.slug}` : "/my-atlas";
-    const meta = { type: "listing", restaurant_id: restaurantId, user_id: user.id };
+    const meta = { type: plan, restaurant_id: restaurantId, user_id: user.id };
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
       customer: customerId,
-      line_items: [{ price: LISTING.priceId, quantity: 1 }],
+      line_items: [{ price: product.priceId, quantity: 1 }],
       allow_promotion_codes: true,
-      success_url: `${origin}${back}?listing=success`,
-      cancel_url: `${origin}${back}?listing=cancelled`,
+      success_url: `${origin}${back}?${plan}=success`,
+      cancel_url: `${origin}${back}?${plan}=cancelled`,
       metadata: meta,
       subscription_data: { metadata: meta },
     });
