@@ -46,12 +46,19 @@ export function createS3Destination(): BackupDestination {
     label: `S3-compatible (${bucket})`,
 
     async put(key, body, contentType) {
+      const bytes = new Uint8Array(body);
       const res = await aws.fetch(`${base}/${encodeKey(key)}`, {
         method: "PUT",
         // Buffer is a Uint8Array at runtime (undici accepts it); the DOM lib type
         // for BodyInit doesn't include Node's Buffer, hence the cast.
-        body: new Uint8Array(body),
-        headers: { "content-type": contentType },
+        body: bytes,
+        headers: {
+          "content-type": contentType,
+          // Backblaze B2 REQUIRES an explicit Content-Length and rejects chunked /
+          // streamed uploads with 411 MissingContentLength — set it from the byte
+          // length so the whole gzipped body is sent as a single sized request.
+          "content-length": String(bytes.byteLength),
+        },
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
