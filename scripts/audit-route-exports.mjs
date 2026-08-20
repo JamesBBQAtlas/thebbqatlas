@@ -23,13 +23,27 @@ const ALLOWED = new Set([
   "preferredRegion", "maxDuration", "generateStaticParams",
 ]);
 
-// All route files tracked by git under app/.
-const files = execSync("git ls-files 'app/**/route.ts' 'app/**/route.tsx'", {
-  encoding: "utf8",
-})
+// All route files tracked by git under app/. We list everything under `app` with a
+// plain DIRECTORY pathspec and filter in JS — NOT a `app/**/route.ts` glob pathspec,
+// whose `**` matching differs between platforms (it matched on Linux but returned zero
+// files under Windows Git Bash, silently disabling the guard). This is portable.
+const tracked = execSync("git ls-files -- app", { encoding: "utf8" })
   .split("\n")
   .map((s) => s.trim())
   .filter(Boolean);
+
+const files = tracked.filter((f) => /(^|\/)route\.(ts|tsx)$/.test(f));
+
+// Defensive: this repo has API routes, so finding zero route files means the finder
+// itself is broken (as the glob pathspec was) — fail loud rather than pass vacuously.
+const hasApi = tracked.some((f) => f.startsWith("app/api/"));
+if (files.length === 0 && hasApi) {
+  console.error(
+    "✗ route-export guard: found 0 route files but app/api/ has tracked files — the " +
+      "file finder is broken. Refusing to pass vacuously."
+  );
+  process.exit(1);
+}
 
 // Matches: export const X / export function X / export async function X /
 // export let X / export var X — capturing the exported identifier.
