@@ -47,7 +47,8 @@
     "test:premium-links": "tsx scripts/test-premium-links.mts",
     "test:photo-safety": "tsx scripts/test-photo-safety.mts",
     "test:venue-cache": "tsx scripts/test-venue-cache.mts",
-    "test:listing-tier": "tsx scripts/test-listing-tier.mts"
+    "test:listing-tier": "tsx scripts/test-listing-tier.mts",
+    "test:backup": "tsx scripts/test-backup.mts"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",
@@ -59,6 +60,7 @@
     "@supabase/ssr": "^0.5.2",
     "@supabase/supabase-js": "^2.47.10",
     "@tailwindcss/typography": "^0.5.20",
+    "aws4fetch": "^1.0.20",
     "cheerio": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

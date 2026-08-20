@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/photo-safety",
       "schedule": "0 6 * * 1"
+    },
+    {
+      "path": "/api/cron/db-export",
+      "schedule": "0 3 * * 0"
     }
   ]
 }
