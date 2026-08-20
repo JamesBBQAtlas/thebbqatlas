@@ -20,6 +20,7 @@ const TABS: { href: string; label: string; badge?: BadgeKey; primary?: boolean }
   { href: "/admin/listings", label: "Listings" },
   { href: "/admin/revenue", label: "Revenue" },
   { href: "/admin/owner-edits", label: "Owner Edits" },
+  { href: "/admin/owners", label: "Owners" },
   { href: "/admin/members", label: "Members" },
   { href: "/admin/subscribers", label: "Subscribers" },
   { href: "/admin/gear", label: "Gear" },
