@@ -128,4 +128,24 @@ lists every expected file + size to verify completeness.
    (including a `restaurants` dossier, to prove the expensive enrichment JSON survived).
 5. Record the date you tested in this file:
 
-> Last successful restore test: _______________ (by ________)
+> Last successful restore test: **2026-08-20** (by Claude — restore-machinery test)
+
+### 2026-08-20 restore-machinery test — result
+
+Proved the restore path end to end **without touching production**, into a throwaway
+`_restore_test` schema (created + torn down in the same session):
+
+- **DB restore leg** — real rows from `brands` (10), a 50-row `restaurants` sample
+  (incl. the enrichment jsonb), and `admin_audit_log` (26) were serialised the way the
+  backup stores them (`to_jsonb` == the NDJSON line content) and restored via
+  `jsonb_populate_recordset` into fresh tables. **Row counts matched exactly** (10/10,
+  50/50, 26/26), and a **byte-for-byte deep-equality check found 0 mismatches** — every
+  restored row identical to source, dossier/jsonb/timestamps and all. Scratch schema
+  dropped afterwards (verified gone).
+- **File-format leg** — `scripts/test-backup.mts` proves the gzip+NDJSON round-trip is
+  lossless (`gunzip(gzip(x)) === x`, rows parse back identically, deterministic sha256).
+- **Not exercised here (final formality):** the literal B2 *download* with the private
+  app key — run `scripts/restore-from-backup.mjs --date <recent> --table restaurants
+  --dry-run` (then for real) with `BACKUP_S3_*` + a scratch `SUPABASE_SERVICE_ROLE_KEY`
+  set locally to close that last leg. The machinery above is proven; this is the keyed
+  download step.
