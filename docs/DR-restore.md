@@ -145,7 +145,47 @@ Proved the restore path end to end **without touching production**, into a throw
 - **File-format leg** — `scripts/test-backup.mts` proves the gzip+NDJSON round-trip is
   lossless (`gunzip(gzip(x)) === x`, rows parse back identically, deterministic sha256).
 - **Not exercised here (final formality):** the literal B2 *download* with the private
-  app key — run `scripts/restore-from-backup.mjs --date <recent> --table restaurants
-  --dry-run` (then for real) with `BACKUP_S3_*` + a scratch `SUPABASE_SERVICE_ROLE_KEY`
-  set locally to close that last leg. The machinery above is proven; this is the keyed
-  download step.
+  app key — see §6 to close it.
+
+## 6. Close the keyed B2-download leg (final proof, ~15 min, never touches prod)
+
+Proves the *whole chain works with real credentials* — the actual stored bytes pull
+from Backblaze with the app key and restore, not just the machinery.
+
+**Set your Backblaze keys in the shell** (these you have; the DB creds come later):
+```
+set BACKUP_S3_ENDPOINT=https://s3.us-east-005.backblazeb2.com
+set BACKUP_S3_REGION=us-east-005
+set BACKUP_S3_BUCKET=bbqatlas-backups
+set BACKUP_S3_ACCESS_KEY_ID=<your B2 keyID>
+set BACKUP_S3_SECRET_ACCESS_KEY=<your B2 applicationKey>
+```
+(PowerShell uses `$env:NAME="value"` instead of `set NAME=value`.)
+
+**6a — keyed download of DB tables (B2 keys only, writes nothing):**
+```
+node scripts/restore-from-backup.mjs --date <most-recent-snapshot> --table restaurants --dry-run
+node scripts/restore-from-backup.mjs --date <most-recent-snapshot> --table admin_audit_log --dry-run
+```
+Each does a REAL keyed download from B2 → gunzip → and checks the row count against the
+snapshot manifest (✓/✗). This is the keyed-download proof for the DB leg.
+
+**6b — keyed download of a mirrored FILE (B2 keys only):**
+```
+node scripts/restore-from-backup.mjs --storage
+```
+Downloads a sample file from the `storage/` mirror and checks its byte size against the
+storage manifest — proves the file leg pulls from B2 too.
+
+**6c — (optional) the real WRITE into a scratch target.** The script refuses to write to
+production and requires `--yes`. Point it at a **scratch** Supabase (a throwaway project,
+or ask Claude to spin up a Supabase branch), set that project's creds, then:
+```
+set NEXT_PUBLIC_SUPABASE_URL=<SCRATCH project url>
+set SUPABASE_SERVICE_ROLE_KEY=<SCRATCH service key>
+node scripts/restore-from-backup.mjs --date <recent> --table restaurants --yes
+```
+(6a's byte-perfect restore was already proven on 2026-08-20, so 6c is belt-and-braces.)
+
+Then update the "Last successful restore test" line above to note the **keyed-download
+leg is closed** (date + which tables/files pulled).
