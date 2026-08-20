@@ -48,7 +48,8 @@
     "test:photo-safety": "tsx scripts/test-photo-safety.mts",
     "test:venue-cache": "tsx scripts/test-venue-cache.mts",
     "test:listing-tier": "tsx scripts/test-listing-tier.mts",
-    "test:backup": "tsx scripts/test-backup.mts"
+    "test:backup": "tsx scripts/test-backup.mts",
+    "env:inventory": "node scripts/env-inventory.mjs"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "^5.3.0",
