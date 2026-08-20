@@ -16,3 +16,8 @@ npm run audit:affiliate
 # conservative and only fails on a column it's sure the code writes and the
 # schema lacks.
 npm run audit:schema
+# Route-export guard: blocks a push where a Next.js route.ts exports anything other
+# than an HTTP handler + segment config. `tsc` doesn't catch this, but `next build`
+# fails on it in production — the exact class that failed two deploys (a test-only
+# export left on the owner-pin route). No DB needed; a pure scan of app/**/route.ts.
+npm run audit:routes
