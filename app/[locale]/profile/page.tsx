@@ -15,6 +15,7 @@ import { RestaurantCard } from "@/components/restaurants/RestaurantCard";
 import { AvatarUpload } from "@/components/account/AvatarUpload";
 import { resolveAvatarUrl } from "@/lib/account/avatar-resolve";
 import { getPremiumStatus } from "@/lib/account/entitlements";
+import { PREMIUM_PURCHASABLE } from "@/lib/stripe/config";
 import { getUserCheckIns } from "@/lib/queries/checkins";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import type { Restaurant, Submission, AccountType } from "@/lib/types/database";
@@ -152,14 +153,16 @@ export default async function ProfilePage() {
                 <span className="inline-flex items-center gap-1 rounded-full border border-brand-gold/50 bg-brand-gold/10 px-2.5 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em] text-brand-gold">
                   <Sparkles className="h-3 w-3" /> Premium
                 </span>
-              ) : (
+              ) : PREMIUM_PURCHASABLE ? (
+                /* Consumer premium is DEFERRED — the CTA only appears when it's
+                   actually purchasable (CONSUMER_PREMIUM_LIVE=1 + Stripe + price). */
                 <Link
                   href="/premium"
                   className="inline-flex items-center gap-1 rounded-full border border-border-default px-2.5 py-0.5 text-[0.625rem] font-semibold uppercase tracking-[0.06em] text-text-muted transition-colors hover:border-brand-gold/50 hover:text-brand-gold"
                 >
                   <Sparkles className="h-3 w-3" /> Go Premium
                 </Link>
-              )}
+              ) : null}
             </div>
           </div>
         </div>

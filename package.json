@@ -46,6 +46,7 @@
     "test:revenue": "tsx scripts/test-revenue.mts",
     "test:premium-links": "tsx scripts/test-premium-links.mts",
     "test:photo-safety": "tsx scripts/test-photo-safety.mts",
+    "test:venue-cache": "tsx scripts/test-venue-cache.mts",
     "test:listing-tier": "tsx scripts/test-listing-tier.mts"
   },
   "dependencies": {

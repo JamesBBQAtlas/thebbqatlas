@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { Check, Sparkles, CircleCheck } from "lucide-react";
@@ -33,6 +34,11 @@ export default async function PremiumPage({ params, searchParams }: Props) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Consumer premium is DEFERRED (BUILD PROMPT 75, Fix 2). While it isn't
+  // purchasable there must be no reachable consumer-billing path, so unless the
+  // viewer is already a premium member (managing an existing sub), send them home
+  // rather than render a dead upgrade page.
   const premium = user
     ? await getPremiumStatus(supabase, user.id)
     : {
@@ -42,6 +48,9 @@ export default async function PremiumPage({ params, searchParams }: Props) {
         cancelAtPeriodEnd: false,
         hasBillingAccount: false,
       };
+  if (!PREMIUM_PURCHASABLE && !premium.isPremium) {
+    redirect("/");
+  }
 
   return (
     <div className="mx-auto max-w-2xl px-6 py-16 sm:px-10">
