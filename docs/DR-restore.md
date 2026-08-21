@@ -128,7 +128,8 @@ lists every expected file + size to verify completeness.
    (including a `restaurants` dossier, to prove the expensive enrichment JSON survived).
 5. Record the date you tested in this file:
 
-> Last successful restore test: **2026-08-20** (by Claude — restore-machinery test)
+> Last successful restore test: **2026-08-20** (restore-machinery, byte-perfect) ·
+> **keyed B2-download leg closed 2026-08-21** (real keyed pull with the live app key — see §6 result)
 
 ### 2026-08-20 restore-machinery test — result
 
@@ -144,8 +145,11 @@ Proved the restore path end to end **without touching production**, into a throw
   dropped afterwards (verified gone).
 - **File-format leg** — `scripts/test-backup.mts` proves the gzip+NDJSON round-trip is
   lossless (`gunzip(gzip(x)) === x`, rows parse back identically, deterministic sha256).
-- **Not exercised here (final formality):** the literal B2 *download* with the private
-  app key — see §6 to close it.
+- **Keyed B2-download leg — CLOSED 2026-08-21.** The real keyed pull from Backblaze with
+  the live app key was run (see §6 result below): `restaurants` **1205/1205 ✓** and
+  `admin_audit_log` **25/25 ✓** downloaded + gunzipped + count-matched against the manifest,
+  and a mirrored file (**3,573,826 bytes**) pulled **byte-exact** vs the storage manifest.
+  Nothing written. The whole chain — real credentials, real stored bytes — is now proven.
 
 ## 6. Close the keyed B2-download leg (final proof, ~15 min, never touches prod)
 
@@ -189,3 +193,20 @@ node scripts/restore-from-backup.mjs --date <recent> --table restaurants --yes
 
 Then update the "Last successful restore test" line above to note the **keyed-download
 leg is closed** (date + which tables/files pulled).
+
+### 2026-08-21 keyed-download leg — result (CLOSED)
+
+Run against the live `2026-08-20` snapshot with the real Backblaze app key (B2 creds only,
+no Supabase creds loaded, nothing written):
+
+```
+restaurants     : 1205 rows (manifest: 1205 ✓)
+admin_audit_log :   25 rows (manifest:   25 ✓)
+storage sample  : media/…/2bd1ad51-…-fc257d59a9a9.jpeg — 3,573,826 bytes (manifest: 3,573,826 ✓)
+```
+
+Each `--dry-run` did a **real keyed GET from B2 → gunzip → count-check** vs the manifest;
+`--storage` did a **real keyed file GET → byte-size check** vs the storage manifest. All ✓.
+Combined with the 2026-08-20 byte-perfect restore into a scratch schema, the full
+disaster-recovery chain — credentials, transport, format, and restore — is proven.
+
