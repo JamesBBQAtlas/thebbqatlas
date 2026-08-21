@@ -8,8 +8,6 @@
  * Pure. Run: node_modules/.bin/tsx scripts/test-country-normalize.mts
  */
 import { canonicalCountry, isRecognizedCountry } from "../lib/constants/countries";
-import { createRequire } from "node:module";
-const require = createRequire(import.meta.url);
 
 let pass = 0, fail = 0;
 function ok(name: string, cond: boolean, extra?: unknown) {
@@ -56,16 +54,9 @@ console.log("\n[Georgia — ambiguous (country vs US state) → human review]");
 ok("Georgia is NOT auto-converted (kept raw)", canonicalCountry("Georgia") === "Georgia");
 ok("Georgia is NOT auto-recognised → flags for a human", isRecognizedCountry("Georgia") === false);
 
-console.log("\n[guard — bundled seed data carries only canonical country names]");
-{
-  const data = require("../data/restaurants.json");
-  const arr: { country?: string | null }[] = Array.isArray(data) ? data : (data.restaurants ?? data.venues ?? []);
-  const bad = [...new Set(
-    arr.map((r) => (r.country ?? "").trim()).filter(Boolean)
-      .filter((c) => !isRecognizedCountry(c) || canonicalCountry(c) !== c)
-  )];
-  ok(`all ${arr.length} seed rows use canonical country names`, bad.length === 0, bad);
-}
+// (The "bundled seed data" guard was retired with FALLBACK_RESTAURANTS in B1 — there
+// is no longer any bundled seed to guard; canonicalCountry is enforced at the write
+// sites, which the cases above cover.)
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);

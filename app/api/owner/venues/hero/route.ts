@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { userOwnsVenue, getListingStatus } from "@/lib/account/listing";
 import { logAdminAction } from "@/lib/admin/audit-log";
@@ -19,10 +19,11 @@ export const dynamic = "force-dynamic";
  */
 
 async function gate(request: Request, restaurantId: string) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
-  const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY ? createAdminClient() : supabase;
+  // B8 — accept a Bearer token (native) OR cookie (web); web flow is unchanged.
+  const auth = await getRequestUser(request);
+  if (!auth) return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  const user = auth.user;
+  const db: SupabaseClient = process.env.SUPABASE_SERVICE_ROLE_KEY ? createAdminClient() : auth.db;
   if (!(await userOwnsVenue(db, user.id, restaurantId))) {
     return { error: NextResponse.json({ error: "You don't own this venue." }, { status: 403 }) };
   }
@@ -105,7 +106,7 @@ export async function POST(request: Request) {
     })
     .select("id")
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) { console.error("[owner/hero] error:", error.message); return NextResponse.json({ error: "Could not update the hero." }, { status: 500 }); }
 
   await logAdminAction({
     db: g.db, actorId: g.user.id, actorEmail: g.user.email ?? null,

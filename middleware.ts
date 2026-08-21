@@ -1,9 +1,38 @@
-import { type NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import createIntlMiddleware from "next-intl/middleware";
 import { createServerClient } from "@supabase/ssr";
 import { routing } from "./i18n/routing";
 
 const intlMiddleware = createIntlMiddleware(routing);
+
+/**
+ * B8 — env-gated CORS for the native app origins. DARK until APP_ORIGINS is set (a
+ * comma-separated allowlist), exactly like the AASA/assetlinks routes stay dark until the
+ * app IDs exist. Native clients authenticate with a Bearer token (not cookies), so no
+ * credentialed CORS is needed. The web flow never reaches this branch.
+ */
+function handleApiCors(request: NextRequest): NextResponse {
+  const allowlist = (process.env.APP_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const origin = request.headers.get("origin");
+  const allowed = Boolean(origin && allowlist.includes(origin));
+
+  const res =
+    request.method === "OPTIONS"
+      ? new NextResponse(null, { status: 204 })
+      : NextResponse.next();
+
+  if (allowed && origin) {
+    res.headers.set("Access-Control-Allow-Origin", origin);
+    res.headers.set("Vary", "Origin");
+    res.headers.set("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+    res.headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+    res.headers.set("Access-Control-Max-Age", "86400");
+  }
+  return res;
+}
 
 /**
  * Composed middleware:
@@ -13,6 +42,12 @@ const intlMiddleware = createIntlMiddleware(routing);
  *     the same response so SSR pages see a valid session.
  */
 export async function middleware(request: NextRequest) {
+  // API routes: no locale routing, no cookie refresh — just env-gated CORS (dark by
+  // default). Returns before any page logic, so the web page flow is unchanged.
+  if (request.nextUrl.pathname.startsWith("/api")) {
+    return handleApiCors(request);
+  }
+
   const response = intlMiddleware(request);
 
   const supabase = createServerClient(
@@ -63,5 +98,7 @@ export const config = {
   // and static assets (so the map tiles, images, and video are never rewritten).
   matcher: [
     "/((?!api|auth|_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|manifest.webmanifest|logos|images|markers|video|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|mp4|webm|txt|xml)$).*)",
+    // B8 — also run on /api, but ONLY for the CORS branch above (env-gated, dark by default).
+    "/api/:path*",
   ],
 };

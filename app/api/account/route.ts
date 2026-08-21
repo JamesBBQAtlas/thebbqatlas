@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 
 /** Update the signed-in user's own profile (display name / account type). */
 export async function PATCH(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // B8 — accept a Bearer token (native) OR cookie (web); web flow is unchanged.
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = auth.user;
+  const supabase = auth.db;
 
   const body = await request.json().catch(() => ({}));
   const updates: Record<string, unknown> = {};
@@ -54,7 +54,8 @@ export async function PATCH(request: Request) {
         { status: 409 }
       );
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[account] error:", error.message);
+    return NextResponse.json({ error: "Could not update your account." }, { status: 500 });
   }
   return NextResponse.json({ ok: true });
 }

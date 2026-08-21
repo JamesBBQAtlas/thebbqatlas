@@ -31,7 +31,7 @@ export async function POST(request: Request) {
       .from("media_picks")
       .update({ sort_order: i, updated_at: new Date().toISOString() })
       .eq("id", ids[i]);
-    if (error) return NextResponse.json({ error: error.message, updated }, { status: 500 });
+    if (error) { console.error("[admin/media-picks/reorder] error:", error.message); return NextResponse.json({ error: "Something went wrong.", updated }, { status: 500 }); }
     updated++;
   }
 

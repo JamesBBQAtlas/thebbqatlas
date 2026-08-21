@@ -11,6 +11,7 @@ import {
 import { claudeCost, round4 } from "@/lib/ai/cost";
 import { logAiUsage, providerForModel } from "@/lib/ai/usage-log";
 import { auditFromPatch } from "@/lib/admin/content-audit";
+import { looksLikeSeedStub } from "@/lib/admin/seed-copy";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
 
   const { data: row, error } = await ctx.db
     .from("restaurants")
-    .select("id, status, dossier, enrichment_cost, hook, description")
+    .select("id, status, dossier, enrichment_cost, hook, description, manual_copy")
     .eq("id", restaurantId)
     .single();
   if (error || !row) {
@@ -52,6 +53,16 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  // M5 — never overwrite hand-written copy. If manual_copy is set and the admin didn't
+  // explicitly pass overwriteManual, the rewrite is HELD for review (pending_changes)
+  // instead of clobbering the draft, mirroring enrich-draft's protectCopy guard. A
+  // seed-stub placeholder isn't real manual copy, so it stays freely replaceable.
+  const overwriteManual = body.overwriteManual === true;
+  const protectCopy =
+    Boolean(row.manual_copy) &&
+    !overwriteManual &&
+    !looksLikeSeedStub(row.description as string | null);
 
   let copy;
   try {
@@ -80,19 +91,25 @@ export async function POST(request: Request) {
     user_id: ctx.userId,
   });
   const priorCost = Number(row.enrichment_cost ?? 0) || 0;
+  // A protected manual draft routes through the pending path (like a live venue) so its
+  // copy is preserved and the rewrite waits for approval instead of overwriting.
+  const effectiveStatus = protectCopy ? "approved" : row.status;
   const patch = {
-    ...buildCopyPatch(row.status, copy),
+    ...buildCopyPatch(effectiveStatus, copy),
     enrichment_cost: round4(priorCost + cost),
   };
   const { error: updErr } = await ctx.db
     .from("restaurants")
     .update(patch)
     .eq("id", restaurantId);
-  if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
+  if (updErr) {
+    console.error("[admin.rewrite] update failed:", updErr.message);
+    return NextResponse.json({ error: "Could not save the rewrite." }, { status: 500 });
+  }
 
-  // Audit the copy change now if it landed live (draft); an approved venue's
-  // rewrite waits in pending_changes and is audited on approve-copy.
-  if (row.status !== "approved") {
+  // Audit the copy change now if it landed live (draft); a protected draft or approved
+  // venue's rewrite waits in pending_changes and is audited on approve-copy.
+  if (effectiveStatus !== "approved") {
     await auditFromPatch(ctx.db, restaurantId, row as Record<string, unknown>, patch, {
       source: "ai_enrichment",
       changedBy: null,
@@ -103,8 +120,9 @@ export async function POST(request: Request) {
   const hasCopy = Boolean(copy.hook || copy.description);
   return NextResponse.json({
     ok: true,
-    pending: row.status === "approved" && hasCopy,
-    has_pending: row.status === "approved" && hasCopy,
+    pending: effectiveStatus === "approved" && hasCopy,
+    has_pending: effectiveStatus === "approved" && hasCopy,
+    protected_manual_copy: protectCopy,
     has_copy: hasCopy,
     thin: copy.needs_attention && !hasCopy,
     needs_attention: copy.needs_attention,

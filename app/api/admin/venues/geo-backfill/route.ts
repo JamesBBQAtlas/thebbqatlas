@@ -79,7 +79,7 @@ export async function POST(request: Request) {
     .or(`lat.neq.${US_CENTROID[0]},lng.neq.${US_CENTROID[1]}`); // exclude the US centroid
 
   const { data, count, error } = await base.order("id", { ascending: true }).limit(limit);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   const rows = ((data ?? []) as Row[]).filter(isRealCandidatePin); // drop any sentinel that slipped the SQL filter
 
   let processed = 0, updated = 0, confirmed = 0, approximate = 0, geocodeCalls = 0;

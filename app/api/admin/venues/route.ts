@@ -158,7 +158,7 @@ export async function POST(request: Request) {
     .select("id, slug, status")
     .single();
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ error: "Something went wrong." }, { status: 400 });
   }
 
   // Provenance log — best-effort; must never fail a successful creation.
@@ -248,7 +248,7 @@ export async function PATCH(request: Request) {
     .from("restaurants")
     .update({ status })
     .eq("id", restaurantId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
 
   // Audit the publish/unpublish (status) change.
   const statusNote =

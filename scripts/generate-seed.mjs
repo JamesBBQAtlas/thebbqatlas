@@ -146,15 +146,11 @@ const enriched = restaurants.map((r, i) => {
   };
 });
 
-// TypeScript fallback
-const tsContent = `import type { Restaurant } from "@/lib/types/database";
-
-export const FALLBACK_RESTAURANTS: Restaurant[] = ${JSON.stringify(enriched, null, 2)} as Restaurant[];
-`;
-writeFileSync(join(root, "lib/data/fallback-restaurants.ts"), tsContent);
-
-// JSON export
-writeFileSync(join(root, "data/restaurants.json"), JSON.stringify(enriched, null, 2));
+// NOTE: the runtime seed (lib/data/fallback-restaurants.ts) and data/restaurants.json
+// were RETIRED in B1. With 808 real venues + last-known-good serving on an outage, a
+// bundled 75-row seed had no legitimate job and was a latent door to the "fake venue
+// page" bug — so this generator no longer emits them. It keeps _inserts.sql only, as a
+// one-off DB bootstrap aid.
 
 // SQL INSERTs
 const esc = (s) => s.replace(/'/g, "''");
@@ -179,4 +175,4 @@ const dishInserts = featured.flatMap((r, fi) => {
 
 console.log(`Generated ${enriched.length} restaurants`);
 writeFileSync(join(root, "scripts/_inserts.sql"), inserts + "\n\n" + dishInserts);
-console.log("Wrote fallback-restaurants.ts, data/restaurants.json, scripts/_inserts.sql");
+console.log("Wrote scripts/_inserts.sql (runtime seed TS/JSON retired — B1).");

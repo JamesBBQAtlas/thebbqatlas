@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getListingStatus } from "@/lib/account/listing";
 import { PRO_PURCHASABLE, FEATURED_PURCHASABLE, PRO, FEATURED } from "@/lib/stripe/config";
@@ -15,13 +16,13 @@ export async function GET(request: Request) {
   const restaurantId = new URL(request.url).searchParams.get("restaurantId") ?? "";
   if (!restaurantId) return NextResponse.json({ error: "Missing venue" }, { status: 400 });
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const admin = process.env.SUPABASE_SERVICE_ROLE_KEY ? createAdminClient() : supabase;
+  // B8 — accept Bearer OR cookie; anon (no auth) still returns the purchasable flags.
+  const auth = await getRequestUser(request);
+  const admin = process.env.SUPABASE_SERVICE_ROLE_KEY
+    ? createAdminClient()
+    : (auth?.db ?? (await createClient()));
 
-  const status = await getListingStatus(admin, user?.id ?? null, restaurantId);
+  const status = await getListingStatus(admin, auth?.userId ?? null, restaurantId);
   return NextResponse.json({
     ...status,
     proPurchasable: PRO_PURCHASABLE,

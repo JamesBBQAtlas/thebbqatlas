@@ -38,7 +38,7 @@ export async function POST(request: Request) {
     .single();
 
   const { error } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
 
   await auditFromPatch(ctx.db, restaurantId, (before as Record<string, unknown>) ?? null, patch, {
     source: "manual_edit",

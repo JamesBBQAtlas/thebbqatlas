@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { userOwnsVenue } from "@/lib/account/listing";
 import { logAdminAction } from "@/lib/admin/audit-log";
@@ -26,9 +26,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Too many requests — try again later." }, { status: 429 });
   }
 
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // B8 — accept a Bearer token (native) OR cookie (web); web flow is unchanged.
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = auth.user;
+  const supabase = auth.db;
 
   const body = await request.json().catch(() => ({}));
   const restaurantId = typeof body.restaurantId === "string" ? body.restaurantId : "";
@@ -75,7 +77,7 @@ export async function POST(request: Request) {
     })
     .select("id")
     .single();
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) { console.error("[owner/pin] error:", error.message); return NextResponse.json({ error: "Could not save the pin." }, { status: 500 }); }
 
   await logAdminAction({
     db, actorId: user.id, actorEmail: user.email ?? null,

@@ -3,7 +3,7 @@ import { Link } from "@/i18n/navigation";
 import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { MapCanvas } from "@/components/map/MapCanvas";
-import type { Restaurant } from "@/lib/types/database";
+import { PUBLIC_VENUE_COLUMNS, type PublicRestaurant } from "@/lib/types/public";
 
 export const metadata = { title: "My Atlas — Map" };
 export const dynamic = "force-dynamic";
@@ -21,14 +21,16 @@ export default async function MyAtlasMapPage() {
     .eq("user_id", user.id);
   const ids = (savedRows ?? []).map((r) => r.restaurant_id);
 
-  let saved: Restaurant[] = [];
+  // B4: read only the public columns (not select("*")) — this feeds a client map,
+  // so no owner/ops columns should be fetched or serialized in the first place.
+  let saved: PublicRestaurant[] = [];
   if (ids.length > 0) {
     const { data } = await supabase
       .from("restaurants")
-      .select("*")
+      .select(PUBLIC_VENUE_COLUMNS)
       .in("id", ids)
       .eq("status", "approved");
-    saved = (data ?? []) as Restaurant[];
+    saved = (data ?? []) as unknown as PublicRestaurant[];
   }
 
   return (

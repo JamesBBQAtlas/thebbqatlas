@@ -1,23 +1,24 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/server";
-import { PREMIUM } from "@/lib/stripe/config";
+import { PREMIUM, PREMIUM_PURCHASABLE } from "@/lib/stripe/config";
 
 /** Start a Stripe Checkout session for the premium subscription. */
 export async function POST(request: Request) {
-  if (!stripe || !PREMIUM.priceId) {
-    return NextResponse.json(
-      { error: "Billing isn't switched on yet." },
-      { status: 503 }
-    );
+  // B5 (H3): gate on the SAME predicate the /premium UI uses — the consumer premium
+  // tier is deliberately dormant (CONSUMER_PREMIUM_LIVE !== "1"). Without this, setting
+  // a price-id env var alone would let any signed-in user curl a real subscription for a
+  // product we aren't selling. 404 so the dormant endpoint isn't even advertised.
+  if (!PREMIUM_PURCHASABLE || !stripe) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // B8 — accept a Bearer token (native) OR cookie (web); web flow is unchanged.
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = auth.user;
+  const supabase = auth.db;
 
   const admin = process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createAdminClient()
@@ -58,9 +59,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ url: session.url });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Checkout failed" },
-      { status: 500 }
-    );
+    // M11: log detail server-side, return a generic message (no Stripe/DB internals).
+    console.error("[stripe.checkout] failed:", err);
+    return NextResponse.json({ error: "Checkout failed" }, { status: 500 });
   }
 }

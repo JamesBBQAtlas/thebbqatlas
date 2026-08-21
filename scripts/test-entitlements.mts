@@ -62,7 +62,9 @@ console.log("\n[getPremiumStatus — status × period-end, over the real code pa
   ok("no row → status null", none.status === null);
 
   const noEnd = await getPremiumStatus(fakeDb({ status: "active", current_period_end: null, cancel_at_period_end: false, stripe_customer_id: "cus_6" }), "u");
-  ok("active with no period_end → premium (open-ended, not treated as expired)", noEnd.isPremium === true);
+  // M2 — fail CLOSED on a null period end: an active row with no end date is NOT entitled
+  // (a missed cancellation webhook must not leave it entitled forever with no backstop).
+  ok("active with no period_end → NOT premium (M2 failsafe)", noEnd.isPremium === false);
 }
 
 console.log("\n[isPremium — boolean convenience wrapper agrees with getPremiumStatus]");

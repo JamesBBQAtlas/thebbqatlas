@@ -38,6 +38,7 @@ export function ClaimForm({
   const [selected, setSelected] = useState<ClaimVenue | null>(preset ?? null);
   const [note, setNote] = useState("");
   const [email, setEmail] = useState(defaultEmail ?? "");
+  const [agreed, setAgreed] = useState(false);
   const [status, setStatus] = useState<"idle" | "sending" | "done" | "error">("idle");
 
   const matches = useMemo(() => {
@@ -52,7 +53,7 @@ export function ClaimForm({
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected) return;
+    if (!selected || !agreed) return;
     setStatus("sending");
     try {
       const res = await fetch("/api/claims", {
@@ -63,6 +64,7 @@ export function ClaimForm({
           roleRequested: role,
           note,
           email,
+          acceptedTerms: agreed,
         }),
       });
       if (res.ok) {
@@ -217,6 +219,28 @@ export function ClaimForm({
         className="w-full rounded-md border border-border-default bg-surface-1 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-border-strong focus:outline-none focus:ring-2 focus:ring-brand-gold/20"
       />
 
+      {/* B3 — versioned owner T&C acceptance, captured with the claim. */}
+      <label className="mt-6 flex items-start gap-2.5 text-sm text-text-secondary">
+        <input
+          type="checkbox"
+          checked={agreed}
+          onChange={(e) => setAgreed(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-border-default accent-brand-gold"
+        />
+        <span>
+          I represent this venue and agree to the{" "}
+          <a
+            href="/venue-terms"
+            target="_blank"
+            rel="noreferrer"
+            className="text-brand-gold hover:underline"
+          >
+            Venue Owner Terms
+          </a>
+          .
+        </span>
+      </label>
+
       {status === "error" && (
         <p className="mt-4 text-sm text-destructive">
           Something went wrong — please try again.
@@ -225,7 +249,7 @@ export function ClaimForm({
 
       <button
         type="submit"
-        disabled={!selected || status === "sending"}
+        disabled={!selected || !agreed || status === "sending"}
         className="mt-6 w-full rounded-md bg-brand-gold px-4 py-3 text-sm font-bold uppercase tracking-[0.06em] text-text-inverse transition-colors hover:bg-brand-gold/90 disabled:opacity-40"
       >
         {status === "sending" ? "Submitting…" : "Submit claim"}

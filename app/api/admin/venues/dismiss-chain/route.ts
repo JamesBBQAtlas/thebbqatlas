@@ -35,7 +35,7 @@ export async function POST(request: Request) {
     .from("restaurants")
     .update({ chain_candidate: false, flagship_unset: false, chain_rostered_at: null })
     .eq("id", restaurantId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
 
   revalidateVenues();
   return NextResponse.json({ ok: true, message: "Cleared — treated as a single venue." });

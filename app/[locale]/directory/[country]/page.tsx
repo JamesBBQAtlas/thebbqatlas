@@ -25,14 +25,13 @@ interface Props {
   searchParams?: { page?: string };
 }
 
-export const revalidate = 3600;
-
-// On-demand ISR: country pages render on first request and then cache (revalidate
-// below) rather than pre-building at deploy time. dynamicParams (default true) renders
-// any country at request time. SEO is unaffected — crawlers get full cached HTML.
-export async function generateStaticParams() {
-  return [];
-}
+// B9: these hubs paginate via ?page=, a dynamic (request-time) read. Under the previous
+// on-demand-ISR config (revalidate + generateStaticParams) that searchParams read tripped
+// Next's "static→dynamic at runtime" bailout and 500'd every ?page= URL (crawler-hit,
+// ~50 city URLs live). Rendering explicitly dynamic makes every page return 200. DB load
+// is unaffected: getRestaurants() is unstable_cache'd (tag "venues"), so there are no
+// full-table reads per request — only a cheap in-memory group/paginate. Resolves L2.
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const all = await getRestaurants();

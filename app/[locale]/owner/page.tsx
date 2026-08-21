@@ -6,7 +6,9 @@ import { Link } from "@/i18n/navigation";
 import { OwnerVenueEditor } from "@/components/account/OwnerVenueEditor";
 import { OwnerPinEditor } from "@/components/account/OwnerPinEditor";
 import { OwnerHeroPicker } from "@/components/account/OwnerHeroPicker";
+import { VenueCompleteness } from "@/components/account/VenueCompleteness";
 import { hasPageControl } from "@/lib/account/listing";
+import { Lock } from "lucide-react";
 
 export const metadata = { title: "My Venues" };
 export const dynamic = "force-dynamic";
@@ -19,7 +21,7 @@ export const dynamic = "force-dynamic";
  */
 
 const FIELDS =
-  "id, name, slug, status, description, phone, website, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, shop_url, tickets_url, gift_card_url, order_url, hours, lat, lng, listing_tier, listing_until";
+  "id, name, slug, status, description, phone, website, instagram_url, x_url, facebook_url, tiktok_url, youtube_url, shop_url, tickets_url, gift_card_url, order_url, hours, lat, lng, hero_image_url, listing_tier, listing_until";
 
 interface OwnedVenue {
   id: string;
@@ -41,6 +43,7 @@ interface OwnedVenue {
   hours: Record<string, string> | null;
   lat: number | null;
   lng: number | null;
+  hero_image_url: string | null;
   listing_tier: string | null;
   listing_until: string | null;
 }
@@ -85,6 +88,20 @@ export default async function OwnerDashboard() {
     }
   }
 
+  // Approved community-photo counts per venue — drives the Tier-3 completeness meter.
+  const photoCountByVenue = new Map<string, number>();
+  if (venues.length) {
+    const { data: mediaRows } = await db
+      .from("media")
+      .select("restaurant_id")
+      .eq("status", "approved")
+      .in("restaurant_id", venues.map((v) => v.id));
+    for (const m of mediaRows ?? []) {
+      if (!m.restaurant_id) continue;
+      photoCountByVenue.set(m.restaurant_id, (photoCountByVenue.get(m.restaurant_id) ?? 0) + 1);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-6 py-16 sm:px-10">
       <h1 className="mb-1 font-heading text-3xl font-bold text-text-primary">My Venues</h1>
@@ -106,6 +123,11 @@ export default async function OwnerDashboard() {
         <div className="space-y-8">
           {venues.map((v) => (
             <div key={v.id} className="rounded-xl border border-border-subtle bg-surface-0 p-5">
+              <VenueCompleteness
+                venue={v}
+                photoCount={photoCountByVenue.get(v.id) ?? 0}
+                hasControl={hasPageControl(v)}
+              />
               <OwnerVenueEditor
                 bare
                 venue={{
@@ -129,8 +151,25 @@ export default async function OwnerDashboard() {
                 hasControl={hasPageControl(v)}
                 hasPending={pendingByVenue.has(v.id)}
               />
-              {hasPageControl(v) && (
+              {/* Tier 3 — the Pro-only hero control is SHOWN to free owners, locked, with a
+                  calm upgrade prompt (never a silent hide); it unlocks in place on upgrade. */}
+              {hasPageControl(v) ? (
                 <OwnerHeroPicker venueId={v.id} hasPending={pendingHeroByVenue.has(v.id)} />
+              ) : (
+                <div className="mt-4 rounded-lg border border-brand-gold/25 bg-brand-gold/5 p-4">
+                  <div className="mb-1.5 flex items-center gap-1.5">
+                    <Lock className="h-4 w-4 text-brand-gold" />
+                    <span className="text-sm font-semibold text-text-primary">Hero image</span>
+                    <span className="ml-1 rounded-full bg-brand-gold/15 px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-[0.06em] text-brand-gold">
+                      Pro
+                    </span>
+                  </div>
+                  <p className="text-sm text-text-muted">
+                    Choose the photo that leads your page with the{" "}
+                    <span className="font-semibold text-brand-gold">Pro tier</span> — control your
+                    hero and make a strong first impression.
+                  </p>
+                </div>
               )}
               <OwnerPinEditor
                 venue={{ id: v.id, name: v.name, lat: v.lat, lng: v.lng }}

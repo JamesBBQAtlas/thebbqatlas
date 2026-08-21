@@ -191,7 +191,8 @@ export async function POST(request: Request) {
 
   const { error } = await db.from("submissions").insert(payload);
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[submissions] insert error:", error.message);
+    return NextResponse.json({ error: "Could not submit your venue." }, { status: 500 });
   }
   return NextResponse.json({ ok: true });
 }

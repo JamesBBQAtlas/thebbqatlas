@@ -36,6 +36,37 @@ async function logEmail(row: {
 }
 
 /**
+ * M3 — marketing opt-out enforced at the choke point. A `stream: "marketing"` send to
+ * someone who unsubscribed (email_subscribers.unsubscribed_at set) or explicitly opted
+ * out (profiles.marketing_opt_in === false) is refused HERE, so consent can never be
+ * bypassed by a caller that forgot to filter. Transactional mail is unaffected. Lookup
+ * errors never block a send (returns false).
+ */
+async function isMarketingSuppressed(to: string, userId?: string | null): Promise<boolean> {
+  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) return false;
+  try {
+    const admin = createAdminClient();
+    const { data: sub } = await admin
+      .from("email_subscribers")
+      .select("unsubscribed_at")
+      .eq("email", to)
+      .maybeSingle();
+    if (sub?.unsubscribed_at) return true;
+    if (userId) {
+      const { data: prof } = await admin
+        .from("profiles")
+        .select("marketing_opt_in")
+        .eq("id", userId)
+        .maybeSingle();
+      if (prof && prof.marketing_opt_in === false) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Send one email through Resend. Entirely gated: with no RESEND_API_KEY the
  * send is a logged no-op (status 'skipped'), never a crash. Always ships both
  * html + text. Never throws — returns a status the caller can ignore.
@@ -54,6 +85,21 @@ export async function sendEmail(p: SendParams): Promise<{
       stream: p.stream,
       status: "skipped",
       subject: p.subject,
+      user_id: p.userId ?? null,
+    });
+    return { status: "skipped" };
+  }
+
+  // M3 — refuse a marketing send to an opted-out recipient (choke-point enforcement).
+  if (p.stream === "marketing" && (await isMarketingSuppressed(p.to, p.userId))) {
+    console.log(`[email:suppressed] ${p.type} — recipient opted out of marketing`);
+    await logEmail({
+      to_email: p.to,
+      type: p.type,
+      stream: p.stream,
+      status: "skipped",
+      subject: p.subject,
+      error: "marketing opt-out",
       user_id: p.userId ?? null,
     });
     return { status: "skipped" };

@@ -164,11 +164,22 @@ export async function POST(request: Request) {
 
   const admin = createAdminClient();
 
-  // IDEMPOTENCY — a replayed / retried / duplicate event (same event.id) is skipped so
-  // it never double-applies a side-effect or double-writes an audit row. Recorded only
-  // AFTER the handler succeeds (below), so a mid-handler failure lets Stripe retry.
-  const { data: seen } = await admin.from("stripe_events").select("id").eq("id", event.id).maybeSingle();
-  if (seen) return NextResponse.json({ received: true, duplicate: true });
+  // IDEMPOTENCY (M1) — atomic INSERT-first. Claim the event id BEFORE any side effect;
+  // stripe_events.id is the PK, so a duplicate/concurrent delivery raises a unique
+  // violation (Postgres 23505) which we treat as "already handled" and short-circuit.
+  // This closes the concurrent-replay window where two deliveries both passed a SELECT
+  // and double-fired the receipt email + audit rows. On a genuine handler failure below
+  // we release the claim so Stripe's retry can re-process.
+  const claim = await admin.from("stripe_events").insert({ id: event.id, type: event.type });
+  if (claim.error) {
+    if (claim.error.code === "23505") {
+      return NextResponse.json({ received: true, duplicate: true });
+    }
+    // Any other insert error: do NOT proceed (proceeding risks double side-effects on the
+    // retry). Fail so Stripe retries the whole event.
+    console.error("[stripe/webhook] idempotency store unavailable:", claim.error.message);
+    return NextResponse.json({ error: "idempotency store unavailable" }, { status: 500 });
+  }
 
   try {
     switch (event.type) {
@@ -259,12 +270,15 @@ export async function POST(request: Request) {
       default:
         break;
     }
-  } catch {
+  } catch (e) {
+    // Handler failed AFTER we claimed the event id above. Release the claim so Stripe's
+    // retry re-processes it (INSERT-first would otherwise mark it handled and skip the
+    // retry, leaving entitlement unapplied).
+    await admin.from("stripe_events").delete().eq("id", event.id);
+    console.error("[stripe/webhook] handler error:", e);
     return NextResponse.json({ error: "handler error" }, { status: 500 });
   }
 
-  // Handler succeeded — record the event id for idempotency (best-effort; a duplicate
-  // insert just means a concurrent retry already recorded it).
-  await admin.from("stripe_events").insert({ id: event.id, type: event.type });
+  // Handler succeeded — the idempotency row was already recorded (INSERT-first) above.
   return NextResponse.json({ received: true });
 }

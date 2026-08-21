@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     .select("id, country")
     .not("country", "is", null)
     .neq("country", "");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   const rows = (data ?? []) as Row[];
 
   // A row needs mapping when its stored value isn't already the canonical name.

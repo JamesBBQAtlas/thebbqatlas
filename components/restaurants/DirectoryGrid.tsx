@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigation, Loader2 } from "lucide-react";
 import { RestaurantCard } from "./RestaurantCard";
-import type { Restaurant } from "@/lib/types/database";
+import type { PublicRestaurant } from "@/lib/types/public";
 import { distanceMeters, formatDistance } from "@/lib/utils/distance";
 
 const STEP = 24;
@@ -14,7 +14,7 @@ const STEP = 24;
  * snappy on a phone. When the visitor shares their location, the grid ranks
  * spots nearest-first and shows the distance to each.
  */
-export function DirectoryGrid({ restaurants }: { restaurants: Restaurant[] }) {
+export function DirectoryGrid({ restaurants }: { restaurants: PublicRestaurant[] }) {
   const [count, setCount] = useState(() => Math.min(STEP, restaurants.length));
   const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [locBusy, setLocBusy] = useState(false);

@@ -27,21 +27,17 @@ interface Props {
   searchParams?: { page?: string };
 }
 
-export const revalidate = 3600;
+// B9: render explicitly dynamic — the ?page= pagination is a request-time searchParams
+// read that 500'd under the old revalidate + generateStaticParams config (Next's
+// static→dynamic-at-runtime bailout). getRestaurants() stays unstable_cache'd (tag
+// "venues"), so there are still no full-table reads per request. Resolves L2.
+export const dynamic = "force-dynamic";
 
 // Part 6 (SEO triage) — a city hub with only ONE venue is thin: its content
 // barely differs from that single venue's page, which is what makes Google flag
 // it "Duplicate without user-selected canonical". Below this many venues the hub
 // is noindex'd (and dropped from the sitemap) so the venue page carries the SEO.
 const HUB_INDEX_MIN_VENUES = 2;
-
-// On-demand ISR: city pages render on first request and then cache (revalidate
-// below), instead of pre-building every city at deploy time (which was the bulk of a
-// slow, DB-hammering build). dynamicParams (default true) renders any city at request
-// time. SEO is unaffected — crawlers get full cached HTML.
-export async function generateStaticParams() {
-  return [];
-}
 
 export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const all = await getRestaurants();

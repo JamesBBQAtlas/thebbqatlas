@@ -28,9 +28,15 @@ export async function getPremiumStatus(
       .eq("user_id", userId)
       .maybeSingle();
 
-    const notExpired =
-      !data?.current_period_end ||
-      new Date(data.current_period_end).getTime() > Date.now();
+    // M2 — fail CLOSED on a missing period end. A null current_period_end used to be
+    // treated as "not expired" (entitled forever), so a MISSED cancellation webhook could
+    // leave a row entitled with no time backstop. Require a present, future period end;
+    // an active sub always carries one (the webhook writes it), so this only denies the
+    // anomalous null-until row, never a legitimate subscriber.
+    const periodEndMs = data?.current_period_end
+      ? new Date(data.current_period_end).getTime()
+      : null;
+    const notExpired = periodEndMs != null && periodEndMs > Date.now();
     const isPremium = !!data && ACTIVE.has(data.status) && notExpired;
 
     return {

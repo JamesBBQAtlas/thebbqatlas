@@ -155,6 +155,11 @@ export function OwnerVenueEditor({
             Pro
           </span>
         </div>
+        {/* Tier 3 — "you keep 100%" reassurance, stated where the owner adds outbound
+            commerce links. True in code (owner links never get an affiliate tag). */}
+        <p className="mb-3 text-xs text-text-muted">
+          Your links are yours — we never add our tag or take a cut of your sales. You keep 100%.
+        </p>
         {hasControl ? (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {PREMIUM_LINKS.map(([k, label]) => (

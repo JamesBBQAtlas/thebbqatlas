@@ -73,12 +73,16 @@ export async function getListingStatus(
   if (!owns && userId) owns = await ownsVenue(db, userId, restaurantId);
 
   // Featured prominence — the time-boxed weekly window (placement + badge).
-  const featuredLive = !r.premium_until || new Date(r.premium_until).getTime() > Date.now();
+  // M2 — fail closed on a null premium_until (no time backstop → don't grant); an active
+  // Featured window always has one, so this only denies the anomalous null-until row.
+  const featuredLive = r.premium_until != null && new Date(r.premium_until).getTime() > Date.now();
   const isFeatured = Boolean(r.is_premium) && featuredLive;
 
   // Page control — the $49 Pro tier (hero + all links). Independent of Featured.
   const tier = (r.listing_tier as string | null) ?? null;
-  const controlLive = !r.listing_until || new Date(r.listing_until).getTime() > Date.now();
+  // M2 — same failsafe: null listing_until is NOT permanent control. To comp a venue,
+  // set a far-future listing_until rather than leaving it null.
+  const controlLive = r.listing_until != null && new Date(r.listing_until).getTime() > Date.now();
   const hasControl = tier === "pro" && controlLive;
 
   return {
@@ -100,6 +104,7 @@ export function hasPageControl(row: {
   listing_tier?: string | null;
   listing_until?: string | null;
 }): boolean {
-  const live = !row.listing_until || new Date(row.listing_until).getTime() > Date.now();
+  // M2 — fail closed on null listing_until (see getListingStatus).
+  const live = row.listing_until != null && new Date(row.listing_until).getTime() > Date.now();
   return row.listing_tier === "pro" && live;
 }

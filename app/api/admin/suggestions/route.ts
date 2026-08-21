@@ -150,7 +150,7 @@ export async function PATCH(request: Request) {
       .from("restaurants")
       .update(update)
       .eq("id", s.restaurant_id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   }
   await ctx.db
     .from("suggestions")

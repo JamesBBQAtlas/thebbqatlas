@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   if (email) {
     const { data, error } = await db.rpc("admin_lookup_user", { p_email: email });
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
     }
     const row = Array.isArray(data) ? data[0] : data;
     if (!row) {

@@ -57,7 +57,7 @@ export async function POST(request: Request) {
         chain_candidate: false,
       })
       .eq("id", restaurantId);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
     await auditField(ctx.db, restaurantId, "chain", null, { chain_parent_id: hint }, {
       source: "roster",
       changedBy: ctx.userId,
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
       .from("restaurants")
       .update({ chain_parent_id: null, flagship_unset: false, chain_candidate: false })
       .eq("id", restaurantId);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
     await auditField(ctx.db, restaurantId, "chain", { chain_parent_id: "(previous)" }, null, {
       source: "roster",
       changedBy: ctx.userId,
@@ -134,7 +134,7 @@ export async function POST(request: Request) {
   if (adoptStyle) patch.style = parentStyle;
 
   const { error } = await ctx.db.from("restaurants").update(patch).eq("id", restaurantId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   await auditField(ctx.db, restaurantId, "chain", null, { chain_parent_id: parentId }, {
     source: "roster",
     changedBy: ctx.userId,

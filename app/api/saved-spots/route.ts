@@ -25,7 +25,8 @@ export async function POST(request: Request) {
     );
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("[saved-spots] error:", error.message);
+      return NextResponse.json({ error: "Could not update your saved spots." }, { status: 500 });
     }
     return NextResponse.json({ saved: true });
   }
@@ -37,7 +38,7 @@ export async function POST(request: Request) {
     .eq("restaurant_id", restaurantId);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   }
   return NextResponse.json({ saved: false });
 }

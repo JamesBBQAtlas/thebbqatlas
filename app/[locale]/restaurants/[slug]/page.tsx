@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { notFound, permanentRedirect } from "next/navigation";
 import { getTranslations, setRequestLocale } from "next-intl/server";
-import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Ticket, Gift, Clock, Star } from "lucide-react";
+import { MapPin, Globe, ChevronRight, UtensilsCrossed, Beer, Phone, Store, Ticket, Gift, Clock, Star, BadgeCheck } from "lucide-react";
+import Image from "next/image";
 import { Link } from "@/i18n/navigation";
+import { OWNER_BADGE_LABEL } from "@/lib/constants/owner";
 import {
   getRestaurantBySlug,
   getNearbyVenues,
@@ -102,6 +104,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     title: displayTitle,
     description,
     alternates: { canonical },
+    // L1 — permanently-closed venues are de-indexed (Google otherwise keeps them as open
+    // and ranks them as live). Still reachable by direct link; just not a live listing.
+    ...(restaurant.permanently_closed ? { robots: { index: false, follow: true } } : {}),
     openGraph: {
       title: displayTitle,
       description,
@@ -214,9 +219,12 @@ export default async function RestaurantPage({ params }: Props) {
   // hero_image_url, else an approved community photo — otherwise the atmospheric
   // style default. Instagram is NEVER the hero. Always an image; never photo-less.
   const communityHero = media.find((m) => m.kind === "image")?.url ?? null;
+  // L3 — route the venue's own hero through safeVenueImage so a stock/Unsplash URL stored
+  // in hero_image_url is never rendered as the venue's "own" photo (copyright-safe).
+  const safeOwnHero = safeVenueImage(restaurant.hero_image_url);
   const realHero =
-    restaurant.hero_image_url && restaurant.hero_image_url.trim()
-      ? { url: restaurant.hero_image_url, source: restaurant.hero_source ?? "atlas_licensed" }
+    safeOwnHero
+      ? { url: safeOwnHero, source: restaurant.hero_source ?? "atlas_licensed" }
       : communityHero
         ? { url: communityHero, source: "user_upload" as const }
         : null;
@@ -225,16 +233,17 @@ export default async function RestaurantPage({ params }: Props) {
     : { url: styleHeroUrl(restaurant.style), isReal: false };
 
   // FEATURED prominence (time-boxed weekly window) — drives the verified badge + placement.
+  // M2 — fail closed on a null window end (an active window always carries one).
   const isPaidFeatured =
     Boolean(restaurant.is_premium) &&
-    (!restaurant.premium_until ||
-      new Date(restaurant.premium_until).getTime() > Date.now());
+    restaurant.premium_until != null &&
+    new Date(restaurant.premium_until).getTime() > Date.now();
 
   // PRO page control ($49 tier) — what gates the owner links + hero. Independent of Featured.
   const hasPro =
     restaurant.listing_tier === "pro" &&
-    (!restaurant.listing_until ||
-      new Date(restaurant.listing_until).getTime() > Date.now());
+    restaurant.listing_until != null &&
+    new Date(restaurant.listing_until).getTime() > Date.now();
 
   // Nearby (by true distance). Miles for US/UK, kilometres elsewhere.
   const useMiles = code === "US" || code === "GB";
@@ -287,7 +296,11 @@ export default async function RestaurantPage({ params }: Props) {
         data={[
           isTimeBased(restaurant.category) && restaurant.event_starts_at
             ? eventJsonLd(restaurant)
-            : restaurantJsonLd(restaurant),
+            // L1 — a permanently-closed venue drops its opening-hours JSON-LD so it never
+            // advertises itself as open.
+            : restaurantJsonLd(
+                restaurant.permanently_closed ? { ...restaurant, hours: null } : restaurant
+              ),
           ...(venueFaqList.length ? [faqPageJsonLd(venueFaqList)] : []),
           breadcrumbJsonLd([
             { name: "Atlas", path: "/" },
@@ -307,14 +320,17 @@ export default async function RestaurantPage({ params }: Props) {
       {/* Hero — always a good-looking, legal image (real photo or style default),
           under a warm-dark gradient for legibility. Never an Instagram embed. */}
       <section className="relative h-[52vh] min-h-[360px] w-full overflow-hidden">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+        {/* L3 — next/image for the LCP hero (priority + responsive), via safeVenueImage above. */}
+        <Image
           src={hero.url}
           alt={
             hero.isReal
               ? `${restaurant.name} — ${STYLE_LABELS[restaurant.style]} barbecue in ${cityCountry}`
               : `${STYLE_LABELS[restaurant.style]} barbecue`
           }
+          fill
+          priority
+          sizes="100vw"
           className="absolute inset-0 h-full w-full object-cover"
         />
         <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/10 via-background/40 to-background" />
@@ -346,10 +362,18 @@ export default async function RestaurantPage({ params }: Props) {
             </h1>
 
             <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
+              {/* Tier 3 — "Owner-managed" verified badge: shows once a venue is claimed +
+                  approved (owner_id set). Free, on claim — NOT gated to Pro. */}
+              {restaurant.owner_id && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/50 bg-emerald-500/10 px-3.5 py-1 text-xs font-bold uppercase tracking-[0.06em] text-emerald-400">
+                  <BadgeCheck className="h-3.5 w-3.5" />
+                  {OWNER_BADGE_LABEL}
+                </span>
+              )}
               {isPaidFeatured && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-gold/60 bg-brand-gold/15 px-3.5 py-1 text-xs font-bold uppercase tracking-[0.06em] text-brand-gold">
                   <Star className="h-3.5 w-3.5 fill-brand-gold" />
-                  Featured · Verified owner
+                  Featured
                 </span>
               )}
               {restaurant.permanently_closed && (

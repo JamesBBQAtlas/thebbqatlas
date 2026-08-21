@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 import { MAX_PENDING_PER_VENUE_PER_DAY } from "@/lib/media/upload-limits";
+
+// M8 — version of the rights/attestation copy the uploader agreed to. Bump when the
+// wording changes so we can tell which attestation each stored row was made under.
+const RIGHTS_ATTESTED_VERSION = "rights-1.0-2026-08";
 
 /**
  * Register an uploaded file as a PENDING media row. The bytes are already in
@@ -9,11 +13,11 @@ import { MAX_PENDING_PER_VENUE_PER_DAY } from "@/lib/media/upload-limits";
  * insert rows owned by themselves.
  */
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // B8 — accept a Bearer token (native) OR cookie (web); web flow is unchanged.
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = auth.user;
+  const supabase = auth.db;
 
   const body = await request.json().catch(() => ({}));
   const restaurantId = String(body.restaurantId ?? "");
@@ -35,6 +39,18 @@ export async function POST(request: Request) {
       { error: "Please confirm you own this photo or have the right to post it." },
       { status: 400 }
     );
+  }
+
+  // M8 — validate the file reference is OUR OWN Supabase `media` bucket, under the
+  // uploader's own folder. The bytes are uploaded client-side, so without this the row's
+  // url/path are attacker-controlled — a user could register an external URL or someone
+  // else's path as pending media. RLS protects row ownership; this protects the pointers.
+  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
+  const publicPrefix = `${supabaseUrl}/storage/v1/object/public/media/`;
+  const ownFolder = storagePath.startsWith(`${user.id}/`) && !storagePath.includes("..");
+  const ownBucketUrl = url.startsWith(publicPrefix) && url.endsWith(storagePath);
+  if (!supabaseUrl || !ownFolder || !ownBucketUrl) {
+    return NextResponse.json({ error: "Invalid media reference" }, { status: 400 });
   }
 
   // Abuse rail (Part 5) — the client caps a single upload at 15, but that's
@@ -66,6 +82,7 @@ export async function POST(request: Request) {
     status: "pending",
     rights_attested: true,
     rights_attested_at: new Date().toISOString(),
+    rights_attested_version: RIGHTS_ATTESTED_VERSION,
     // safety_status defaults to 'unchecked'; screened by the admin queue / weekly cron.
   });
   if (error) {

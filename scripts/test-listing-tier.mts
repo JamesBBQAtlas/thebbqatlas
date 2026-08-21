@@ -23,7 +23,9 @@ const OWNER = "u1";
 
 console.log("\n[hasPageControl — pure: Pro tier active gates hero + links]");
 {
-  ok("pro + no end → control", hasPageControl({ listing_tier: "pro", listing_until: null }));
+  // M2 — fail CLOSED: a null listing_until is NOT permanent control (to comp a venue,
+  // set a far-future listing_until rather than leaving it null).
+  ok("pro + no end → NO control (M2 failsafe)", !hasPageControl({ listing_tier: "pro", listing_until: null }));
   ok("pro + future end → control", hasPageControl({ listing_tier: "pro", listing_until: FUTURE }));
   ok("pro + past end → NO control (lapsed)", !hasPageControl({ listing_tier: "pro", listing_until: PAST }));
   ok("lower tier → NO control (dormant, unlocks nothing yet)", !hasPageControl({ listing_tier: "lower", listing_until: FUTURE }));

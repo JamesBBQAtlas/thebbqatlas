@@ -105,7 +105,7 @@ export async function DELETE(request: Request) {
   const id = String(body.id ?? "").trim();
   if (!id) return NextResponse.json({ error: "Bad request." }, { status: 400 });
   const { error } = await ctx.db.from("media_picks").delete().eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   revalidatePath("/watch-read-listen");
   return NextResponse.json({ ok: true });
 }

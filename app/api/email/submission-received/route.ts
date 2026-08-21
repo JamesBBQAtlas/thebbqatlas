@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendSubmissionReceived } from "@/lib/email/senders";
 import { emailFirstName } from "@/lib/email/recipient";
+import { rateLimit, clientIp } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,14 @@ export const dynamic = "force-dynamic";
  * account email). Otherwise it's a no-op.
  */
 export async function POST(request: Request) {
+  // M7 — rate limit so this can't be looped into an email-spam primitive (an attacker who
+  // submits once could otherwise replay it to send repeated mails carrying attacker-chosen
+  // venue-name text, burning Resend reputation). Per-IP fixed window.
+  const ip = clientIp(request);
+  if (!(await rateLimit(`submission-received:${ip}`, 5, 600))) {
+    return NextResponse.json({ ok: false, error: "rate_limited" }, { status: 429 });
+  }
+
   const supabase = await createClient();
   const {
     data: { user },
@@ -50,6 +59,17 @@ export async function POST(request: Request) {
   }
 
   if (!target) return NextResponse.json({ ok: true, sent: false });
+
+  // M7 — one-send dedupe: don't re-send the receipt for the same target within the window
+  // even if the endpoint is called repeatedly for a genuine submission.
+  const { count: alreadySent } = await admin
+    .from("email_log")
+    .select("id", { count: "exact", head: true })
+    .eq("to_email", target)
+    .eq("type", "submission_received")
+    .gte("created_at", since)
+    .in("status", ["sent", "skipped"]);
+  if (alreadySent) return NextResponse.json({ ok: true, sent: false, deduped: true });
 
   const name = await emailFirstName(admin, { userId: user?.id ?? null, email: target });
   await sendSubmissionReceived({ to: target, venueName, name: name ?? undefined });

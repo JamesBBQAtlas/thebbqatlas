@@ -102,7 +102,7 @@ export async function POST(request: Request) {
       .select("id, name, address, city, country, status, lat, lng, geo_locked, geo_precision, geo_confidence, needs_attention, attention_reason")
       .order("id", { ascending: true })
       .range(from, from + PAGE - 1);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
     const batch = (data ?? []) as unknown as Row[];
     rows.push(...batch);
     if (batch.length < PAGE) break;

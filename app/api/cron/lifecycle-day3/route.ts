@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendDay3 } from "@/lib/email/senders";
+import { reportCronFailure } from "@/lib/ops/cron-alert";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -74,14 +75,24 @@ export async function GET(request: Request) {
   if (!cronOk) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  const result = await runDay3Sweep(parseLimit(request.url));
-  return NextResponse.json(result);
+  try {
+    const result = await runDay3Sweep(parseLimit(request.url));
+    return NextResponse.json(result);
+  } catch (e) {
+    await reportCronFailure("lifecycle-day3", e);
+    return NextResponse.json({ ok: false, error: "cron failed" }, { status: 500 });
+  }
 }
 
 /** Manual "run now" for an authenticated admin (same job). */
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
   if (!ctx) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  const result = await runDay3Sweep(parseLimit(request.url));
-  return NextResponse.json(result);
+  try {
+    const result = await runDay3Sweep(parseLimit(request.url));
+    return NextResponse.json(result);
+  } catch (e) {
+    await reportCronFailure("lifecycle-day3", e);
+    return NextResponse.json({ ok: false, error: "cron failed" }, { status: 500 });
+  }
 }

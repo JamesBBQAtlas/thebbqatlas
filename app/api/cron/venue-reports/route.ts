@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendVenueMonthlyReport } from "@/lib/email/senders";
+import { reportCronFailure } from "@/lib/ops/cron-alert";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -85,12 +86,22 @@ export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const ok = Boolean(process.env.CRON_SECRET) && auth === `Bearer ${process.env.CRON_SECRET}`;
   if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  return NextResponse.json(await runVenueReports(parseLimit(request.url)));
+  try {
+    return NextResponse.json(await runVenueReports(parseLimit(request.url)));
+  } catch (e) {
+    await reportCronFailure("venue-reports", e);
+    return NextResponse.json({ ok: false, error: "cron failed" }, { status: 500 });
+  }
 }
 
 /** Manual "run now" for an authenticated admin. */
 export async function POST(request: Request) {
   const ctx = await requireAdmin();
   if (!ctx) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  return NextResponse.json(await runVenueReports(parseLimit(request.url)));
+  try {
+    return NextResponse.json(await runVenueReports(parseLimit(request.url)));
+  } catch (e) {
+    await reportCronFailure("venue-reports", e);
+    return NextResponse.json({ ok: false, error: "cron failed" }, { status: 500 });
+  }
 }

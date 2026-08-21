@@ -26,6 +26,6 @@ export async function GET(request: Request) {
   }
 
   const { data, error } = await admin.rpc("venue_report", { p_restaurant_id: restaurantId });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) { console.error("[venues/report] error:", error.message); return NextResponse.json({ error: "Could not load the report." }, { status: 500 }); }
   return NextResponse.json({ ok: true, report: data });
 }

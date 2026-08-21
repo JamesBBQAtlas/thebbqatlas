@@ -1,7 +1,7 @@
 import Image from "next/image";
 import { MapPin } from "lucide-react";
 import { Link } from "@/i18n/navigation";
-import type { Restaurant } from "@/lib/types/database";
+import type { RestaurantCardData } from "@/lib/types/public";
 import { STYLE_LABELS, STYLE_PIN_COLORS } from "@/lib/constants/styles";
 import { StyleChip } from "@/components/restaurants/StyleChip";
 import {
@@ -18,7 +18,7 @@ import { safeVenueImage } from "@/lib/restaurants/image";
 import { REAL_HERO_SOURCES } from "@/lib/constants/hero";
 import type { HeroSource } from "@/lib/types/database";
 
-export function RestaurantCard({ restaurant: r }: { restaurant: Restaurant }) {
+export function RestaurantCard({ restaurant: r }: { restaurant: RestaurantCardData }) {
   const code = resolveCountryCode(r.country_code, r.country);
   // Lists/cards show a REAL photo only — never the style-default atmospheric
   // image (§09.5). Style defaults live on the venue page; here it's a branded card.

@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { checkLibraryLinks, type CheckSummary } from "@/lib/media/link-health";
 import { sendEmail } from "@/lib/email/send";
 import { EMAIL_FROM, EMAIL_REPLY_TO } from "@/lib/email/config";
+import { reportCronFailure } from "@/lib/ops/cron-alert";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -42,12 +43,22 @@ export async function GET(request: Request) {
   const auth = request.headers.get("authorization");
   const ok = Boolean(process.env.CRON_SECRET) && auth === `Bearer ${process.env.CRON_SECRET}`;
   if (!ok) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  return NextResponse.json(await runLinkHealth());
+  try {
+    return NextResponse.json(await runLinkHealth());
+  } catch (e) {
+    await reportCronFailure("link-health", e);
+    return NextResponse.json({ ok: false, error: "cron failed" }, { status: 500 });
+  }
 }
 
 /** Manual "run now" for an authenticated admin. */
 export async function POST() {
   const ctx = await requireAdmin();
   if (!ctx) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  return NextResponse.json(await runLinkHealth());
+  try {
+    return NextResponse.json(await runLinkHealth());
+  } catch (e) {
+    await reportCronFailure("link-health", e);
+    return NextResponse.json({ ok: false, error: "cron failed" }, { status: 500 });
+  }
 }

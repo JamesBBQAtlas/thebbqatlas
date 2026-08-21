@@ -3,6 +3,7 @@ import { Link } from "@/i18n/navigation";
 import { SearchImpressionBeacon } from "@/components/seo/SearchImpressionBeacon";
 import { DirectoryGrid } from "@/components/restaurants/DirectoryGrid";
 import { getRestaurants } from "@/lib/queries/restaurants";
+import { toPublicRestaurant } from "@/lib/types/public";
 import { DirectoryFilters } from "@/components/restaurants/DirectoryFilters";
 import { groupByCountry } from "@/lib/seo/hubs";
 import { FlagIcon } from "@/components/ui/FlagIcon";
@@ -124,7 +125,10 @@ export default async function DirectoryPage({ searchParams }: DirectoryPageProps
       </div>
 
       <DirectoryFilters />
-      <DirectoryGrid restaurants={restaurants} />
+      {/* B4: project to the public DTO before the client boundary — no owner/ops
+          columns (contact_email, outreach_status, enrichment_cost, claimed_by, …)
+          ever reach the browser payload. */}
+      <DirectoryGrid restaurants={restaurants.map(toPublicRestaurant)} />
     </div>
   );
 }

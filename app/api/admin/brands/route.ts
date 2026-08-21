@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     .select("id, slug")
     .single();
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ error: "Something went wrong." }, { status: 400 });
   }
   return NextResponse.json({ id: data.id, slug: data.slug, created: true });
 }

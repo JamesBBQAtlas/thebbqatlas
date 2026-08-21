@@ -5,6 +5,7 @@ import { sweepPhotoSafety, type SweepSummary } from "@/lib/admin/photo-safety";
 import { PHOTO_SAFETY_ENABLED } from "@/lib/ai/photo-safety";
 import { sendEmail } from "@/lib/email/send";
 import { EMAIL_FROM, EMAIL_REPLY_TO } from "@/lib/email/config";
+import { reportCronFailure } from "@/lib/ops/cron-alert";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -54,12 +55,22 @@ export async function GET(request: Request) {
   if (!PHOTO_SAFETY_ENABLED) {
     return NextResponse.json({ skipped: true, reason: "XAI_API_KEY not set" });
   }
-  return NextResponse.json(await runPhotoSafety());
+  try {
+    return NextResponse.json(await runPhotoSafety());
+  } catch (e) {
+    await reportCronFailure("photo-safety", e);
+    return NextResponse.json({ ok: false, error: "cron failed" }, { status: 500 });
+  }
 }
 
 /** Manual "run now" for an authenticated admin. */
 export async function POST() {
   const ctx = await requireAdmin();
   if (!ctx) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  return NextResponse.json(await runPhotoSafety());
+  try {
+    return NextResponse.json(await runPhotoSafety());
+  } catch (e) {
+    await reportCronFailure("photo-safety", e);
+    return NextResponse.json({ ok: false, error: "cron failed" }, { status: 500 });
+  }
 }

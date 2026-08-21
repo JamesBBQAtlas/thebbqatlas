@@ -187,7 +187,7 @@ export async function PUT(request: Request) {
     .update(update)
     .eq("id", restaurantId);
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   }
 
   // Audit trail — record exactly what changed. Best-effort.

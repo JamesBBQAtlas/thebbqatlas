@@ -27,6 +27,6 @@ export async function PATCH(request: Request) {
   }
 
   const { error } = await ctx.db.from("media").update({ status }).eq("id", mediaId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
   return NextResponse.json({ ok: true, status });
 }

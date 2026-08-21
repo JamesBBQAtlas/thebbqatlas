@@ -1,7 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { createAnonClient } from "@/lib/supabase/anon";
 import type { Restaurant, SignatureDish, Review } from "@/lib/types/database";
-import { FALLBACK_RESTAURANTS } from "@/lib/data/fallback-restaurants";
 import { LIST_COLUMNS } from "@/lib/queries/list-columns";
 import { isLiveVenue } from "@/lib/venues/live-count";
 import { readWithRetry, makeLkg } from "@/lib/queries/read-retry";
@@ -33,7 +32,10 @@ async function readApprovedOnce(): Promise<Restaurant[]> {
     .from("restaurants")
     .select(LIST_COLUMNS)
     .eq("status", "approved")
-    .order("avg_rating", { ascending: false });
+    // No-rankings product: order by Featured then name (avg_rating is vestigial and
+    // never shown as a score). Downstream surfaces re-sort as needed.
+    .order("is_featured", { ascending: false })
+    .order("name", { ascending: true });
 
   if (error) {
     throw new Error(`[queries.restaurants] approved read failed: ${error.message}`);
@@ -121,12 +123,13 @@ export async function getRestaurants(): Promise<Restaurant[]> {
     const lkg = approvedLkg.get();
     reportFallbackServed("approved-restaurants", e, {
       servedLastKnownGood: Boolean(lkg),
-      // Only the SEED case (no last-known-good yet) is an emergency worth an email —
-      // serving real last-known-good is the safety net working and is audit-logged only.
+      // The seed is retired (B1). With no last-known-good yet we serve an EMPTY list
+      // rather than fabricated venues — an empty public surface IS the emergency worth
+      // an email; serving real last-known-good is the safety net working (audit-only).
       servedSeed: !lkg,
-      count: lkg?.length ?? FALLBACK_RESTAURANTS.length,
+      count: lkg?.length ?? 0,
     });
-    return lkg ?? FALLBACK_RESTAURANTS;
+    return lkg ?? [];
   }
 }
 
@@ -218,20 +221,17 @@ const getRestaurantBySlugCached = unstable_cache(
 );
 
 export async function getRestaurantBySlug(slug: string): Promise<Restaurant | null> {
-  let data: Restaurant | null = null;
   try {
-    data = await getRestaurantBySlugCached(slug);
+    return await getRestaurantBySlugCached(slug);
   } catch (e) {
-    // Outage path — uncached, self-heals next request. Fall through to seed lookup.
+    // Outage path only. The seed is retired (B1): we NEVER fabricate a venue here.
+    // A clean not-found (no row, no error) already returns null from the cached fn
+    // above → the page 404s / 301-redirects. On a transient DB error we also return
+    // null; because the cached fn throws-don't-cache, the very next request retries
+    // the DB, so this is a self-healing blip rather than a cached 404.
     reportFallbackServed("restaurant-by-slug", e, { servedLastKnownGood: false, slug });
+    return null;
   }
-  if (data) return data;
-  // Fallback data: exact then prefix
-  return (
-    FALLBACK_RESTAURANTS.find((r) => r.slug === slug) ??
-    FALLBACK_RESTAURANTS.find((r) => r.slug.startsWith(`${slug}-`)) ??
-    null
-  );
 }
 
 /** If a requested slug is a retired one, the slug it now points to (for a 301). */

@@ -34,7 +34,7 @@ export async function POST(request: Request) {
         featured_video_thumb: null,
       })
       .eq("id", restaurantId);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
     revalidateVenues();
     return NextResponse.json({ ok: true, cleared: true });
   }
@@ -76,7 +76,7 @@ export async function POST(request: Request) {
       featured_video_thumb: meta.thumb,
     })
     .eq("id", restaurantId);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
 
   revalidateVenues();
   return NextResponse.json({

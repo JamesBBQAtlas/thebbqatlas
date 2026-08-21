@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { getRequestUser } from "@/lib/auth/request-user";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/server";
 
@@ -12,15 +12,14 @@ export async function POST(request: Request) {
     );
   }
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // B8 — accept a Bearer token (native) OR cookie (web); web flow is unchanged.
+  const auth = await getRequestUser(request);
+  if (!auth) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = auth.user;
 
   const admin = process.env.SUPABASE_SERVICE_ROLE_KEY
     ? createAdminClient()
-    : supabase;
+    : auth.db;
   const origin = new URL(request.url).origin;
 
   const { data: profile } = await admin
@@ -40,9 +39,7 @@ export async function POST(request: Request) {
     });
     return NextResponse.json({ url: session.url });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Could not open billing" },
-      { status: 500 }
-    );
+    console.error("[stripe.portal] failed:", err);
+    return NextResponse.json({ error: "Could not open billing" }, { status: 500 });
   }
 }

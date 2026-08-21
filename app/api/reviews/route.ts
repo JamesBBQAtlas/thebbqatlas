@@ -85,7 +85,7 @@ export async function POST(request: Request) {
       .from("reviews")
       .update({ body: text, rating: null, status: "pending" })
       .eq("id", existing.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) { console.error("[reviews] error:", error.message); return NextResponse.json({ error: "Could not save your review." }, { status: 500 }); }
   } else {
     const { error } = await admin.from("reviews").insert({
       restaurant_id: restaurantId,
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
       rating: null,
       status: "pending",
     });
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) { console.error("[reviews] error:", error.message); return NextResponse.json({ error: "Could not save your review." }, { status: 500 }); }
   }
 
   revalidateVenues();

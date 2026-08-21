@@ -34,7 +34,7 @@ export async function POST(request: Request) {
   if (!force) query = query.is("image_url", null);
 
   const { data: books, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Something went wrong." }, { status: 500 });
 
   const resolved: { name: string }[] = [];
   const unresolved: { name: string; url: string }[] = [];

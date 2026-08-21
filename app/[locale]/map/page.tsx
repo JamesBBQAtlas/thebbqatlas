@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { setRequestLocale } from "next-intl/server";
 import { Link } from "@/i18n/navigation";
 import { getRestaurants, getClosedRestaurants } from "@/lib/queries/restaurants";
+import { toPublicRestaurant } from "@/lib/types/public";
 import { STYLE_LABELS } from "@/lib/constants/styles";
 import { MapCanvas } from "@/components/map/MapCanvas";
 
@@ -36,9 +37,11 @@ export default async function MapPage({ params }: Props) {
 
   return (
     <div className="h-mapview">
+      {/* B4: project to the public DTO before the client boundary — the map payload
+          carries no owner/ops columns. */}
       <MapCanvas
-        restaurants={restaurants}
-        closedRestaurants={closedRestaurants}
+        restaurants={restaurants.map(toPublicRestaurant)}
+        closedRestaurants={closedRestaurants.map(toPublicRestaurant)}
         mapKey={process.env.NEXT_PUBLIC_MAPTILER_KEY}
       />
 

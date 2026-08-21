@@ -123,3 +123,29 @@ export function toPublicRestaurant(r: Restaurant): PublicRestaurant {
     created_at: r.created_at,
   };
 }
+
+/**
+ * The minimal venue fields a directory/list card (RestaurantCard) renders. Nullable
+ * fields are optional so BOTH the internal `Restaurant` (string | null | undefined
+ * columns) and the public `PublicRestaurant` (string | null) structurally satisfy it —
+ * a card renders on public reads and server/internal reads alike, and the public
+ * surfaces (DirectoryGrid/MapCanvas) still receive a projected PublicRestaurant so no
+ * ops column reaches the client.
+ */
+export type RestaurantCardData = {
+  id: string;
+  slug: string;
+  name: string;
+  style: BbqStyle;
+  description?: string | null;
+  city?: string | null;
+  country?: string | null;
+  country_code?: string | null;
+  hero_image_url?: string | null;
+  hero_source?: string | null;
+  is_featured?: boolean | null;
+  category?: MapItemCategory | null;
+  offerings?: string[] | null;
+  event_starts_at?: string | null;
+  event_ends_at?: string | null;
+};
